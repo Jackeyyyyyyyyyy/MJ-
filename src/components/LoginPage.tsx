@@ -9,36 +9,7 @@ interface LoginPageProps {
   onLogin: () => void;
 }
 
-const backgroundItems = [
-  '审批流',
-  '资金',
-  '客户',
-  '供应商',
-  '订单',
-  '风控',
-  'MJ 审批',
-  '待审批',
-  '已通过',
-  '驳回',
-  '流程追踪',
-  '业务数据',
-  '审批日志',
-  '权限申请',
-  '付款申请',
-  '班列',
-  '任务单',
-  '报销',
-  '预付',
-  '报价',
-  '询价',
-  '资质审查',
-  '利润审批',
-  '特价审批',
-  '用箱需求',
-  '账号管理',
-  '实时同步',
-  '审批中心',
-];
+const backgroundItems = Array.from({ length: 28 }, () => 'MJ 审批');
 
 export default function LoginPage({ onLogin }: LoginPageProps) {
   const [username, setUsername] = useState('');
