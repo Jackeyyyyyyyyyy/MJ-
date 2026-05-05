@@ -1,12 +1,15 @@
 import { ApprovalRecord, ApprovalStatus } from './types';
+import { auth } from './auth';
 
 type NewApprovalRecord = Omit<ApprovalRecord, 'id' | 'createdAt' | 'updatedAt' | 'logs' | 'status'>;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = auth.getToken();
   const response = await fetch(`/api${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers,
     },
   });

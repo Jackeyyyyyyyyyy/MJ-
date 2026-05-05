@@ -2,37 +2,53 @@ import { User, Role } from './types';
 
 const AUTH_KEY = 'mj_approval_auth';
 
-export const auth = {
-  login(username: string, password: string): User | null {
-    if (password !== '123456') return null;
+interface AuthSession {
+  user: User;
+  token: string;
+  expiresAt: number;
+}
 
-    let role: Role;
-    let name: string;
+function readSession(): AuthSession | null {
+  const data = localStorage.getItem(AUTH_KEY);
+  if (!data) return null;
 
-    switch (username) {
-      case 'applicant':
-        role = 'applicant';
-        name = '张申请';
-        break;
-      case 'approver':
-        role = 'approver';
-        name = '李审批';
-        break;
-      case 'boss':
-        role = 'boss';
-        name = '王老板';
-        break;
-      case 'developer':
-        role = 'developer';
-        name = '系统开发员';
-        break;
-      default:
-        return null;
+  try {
+    const session = JSON.parse(data) as Partial<AuthSession>;
+
+    if (!session.user || !session.token || !session.expiresAt) {
+      localStorage.removeItem(AUTH_KEY);
+      return null;
     }
 
-    const user: User = { username, role, name };
-    localStorage.setItem(AUTH_KEY, JSON.stringify(user));
-    return user;
+    if (Date.now() > session.expiresAt) {
+      localStorage.removeItem(AUTH_KEY);
+      localStorage.removeItem('mj_current_perspective');
+      return null;
+    }
+
+    return session as AuthSession;
+  } catch {
+    localStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem('mj_current_perspective');
+    return null;
+  }
+}
+
+export const auth = {
+  async login(username: string, password: string): Promise<User | null> {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username: username.trim(), password }),
+    });
+
+    if (!response.ok) return null;
+
+    const session = await response.json() as AuthSession;
+    localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+    return session.user;
   },
 
   logout() {
@@ -41,8 +57,11 @@ export const auth = {
   },
 
   getCurrentUser(): User | null {
-    const data = localStorage.getItem(AUTH_KEY);
-    return data ? JSON.parse(data) : null;
+    return readSession()?.user || null;
+  },
+
+  getToken(): string | null {
+    return readSession()?.token || null;
   },
 
   getPerspective(): Role | null {

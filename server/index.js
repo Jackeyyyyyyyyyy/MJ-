@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,8 +15,109 @@ const dataDir =
   path.resolve(process.cwd(), 'data');
 const recordsFile = path.join(dataDir, 'approval-records.json');
 const validStatuses = new Set(['草稿', '待审批', '已批准', '已拒绝']);
+const defaultPassword = process.env.APP_PASSWORD || '123456';
+const authSecret = process.env.AUTH_SECRET || crypto.randomBytes(32).toString('hex');
+const configuredTokenTtlMs = Number(process.env.AUTH_TOKEN_TTL_MS);
+const tokenTtlMs =
+  Number.isFinite(configuredTokenTtlMs) && configuredTokenTtlMs > 0
+    ? configuredTokenTtlMs
+    : 8 * 60 * 60 * 1000;
+const users = {
+  applicant: { username: 'applicant', role: 'applicant', name: '张申请', password: defaultPassword },
+  approver: { username: 'approver', role: 'approver', name: '李审批', password: defaultPassword },
+  boss: { username: 'boss', role: 'boss', name: '王老板', password: defaultPassword },
+  developer: { username: 'developer', role: 'developer', name: '系统开发员', password: defaultPassword },
+};
+
+if (!process.env.AUTH_SECRET) {
+  console.warn('AUTH_SECRET is not set. Sessions will be invalid after every server restart.');
+}
 
 app.use(express.json({ limit: '2mb' }));
+
+function toPublicUser(user) {
+  return {
+    username: user.username,
+    role: user.role,
+    name: user.name,
+  };
+}
+
+function sign(value) {
+  return crypto.createHmac('sha256', authSecret).update(value).digest('base64url');
+}
+
+function createToken(user) {
+  const expiresAt = Date.now() + tokenTtlMs;
+  const payload = Buffer.from(
+    JSON.stringify({
+      sub: user.username,
+      role: user.role,
+      name: user.name,
+      exp: expiresAt,
+    }),
+  ).toString('base64url');
+
+  return {
+    token: `${payload}.${sign(payload)}`,
+    expiresAt,
+  };
+}
+
+function verifyToken(token) {
+  const [payload, signature] = String(token || '').split('.');
+  if (!payload || !signature) return null;
+
+  const expected = sign(payload);
+  const expectedBuffer = Buffer.from(expected);
+  const signatureBuffer = Buffer.from(signature);
+
+  if (
+    expectedBuffer.length !== signatureBuffer.length ||
+    !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)
+  ) {
+    return null;
+  }
+
+  let session;
+  try {
+    session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+
+  if (!session?.sub || !session?.exp || Date.now() > session.exp) {
+    return null;
+  }
+
+  const user = users[session.sub];
+  if (!user) return null;
+
+  return toPublicUser(user);
+}
+
+function authenticate(req, res, next) {
+  const authorization = req.get('authorization') || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  const user = match ? verifyToken(match[1]) : null;
+
+  if (!user) {
+    return res.status(401).json({ error: 'authentication required' });
+  }
+
+  req.user = user;
+  next();
+}
+
+function requireRoles(...roles) {
+  return (req, res, next) => {
+    if (req.user?.role === 'developer' || roles.includes(req.user?.role)) {
+      return next();
+    }
+
+    return res.status(403).json({ error: 'permission denied' });
+  };
+}
 
 async function ensureDataFile() {
   await fs.mkdir(dataDir, { recursive: true });
@@ -78,20 +180,45 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-app.get('/api/records', async (_req, res, next) => {
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body || {};
+  const user = users[String(username || '').trim()];
+
+  if (!user || password !== user.password) {
+    return res.status(401).json({ error: 'invalid username or password' });
+  }
+
+  const session = createToken(user);
+  res.json({
+    user: toPublicUser(user),
+    ...session,
+  });
+});
+
+app.get('/api/records', authenticate, async (req, res, next) => {
   try {
-    res.json(await readRecords());
+    const records = await readRecords();
+
+    if (req.user.role === 'applicant') {
+      return res.json(records.filter((record) => record.applicant === req.user.name));
+    }
+
+    res.json(records);
   } catch (error) {
     next(error);
   }
 });
 
-app.post('/api/records', async (req, res, next) => {
+app.post('/api/records', authenticate, requireRoles('applicant'), async (req, res, next) => {
   try {
     const { moduleName, approvalTypeName, businessData, applicant } = req.body || {};
 
     if (!moduleName || !approvalTypeName || !businessData || !applicant) {
       return res.status(400).json({ error: 'missing required approval record fields' });
+    }
+
+    if (req.user.role !== 'developer' && applicant !== req.user.name) {
+      return res.status(403).json({ error: 'applicant does not match current user' });
     }
 
     const record = await updateRecords((records) => {
@@ -120,7 +247,7 @@ app.post('/api/records', async (req, res, next) => {
   }
 });
 
-app.patch('/api/records/:id/status', async (req, res, next) => {
+app.patch('/api/records/:id/status', authenticate, requireRoles('approver', 'boss'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const { status, approver, reason } = req.body || {};
@@ -131,6 +258,10 @@ app.patch('/api/records/:id/status', async (req, res, next) => {
 
     if (!approver) {
       return res.status(400).json({ error: 'missing approver' });
+    }
+
+    if (req.user.role !== 'developer' && approver !== req.user.name) {
+      return res.status(403).json({ error: 'approver does not match current user' });
     }
 
     if (status === '已拒绝' && !String(reason || '').trim()) {
@@ -182,8 +313,12 @@ app.patch('/api/records/:id/status', async (req, res, next) => {
   }
 });
 
-app.delete('/api/records', async (_req, res, next) => {
+app.delete('/api/records', authenticate, requireRoles('boss'), async (_req, res, next) => {
   try {
+    if (process.env.ENABLE_RECORD_DELETE !== 'true') {
+      return res.status(403).json({ error: 'record deletion is disabled' });
+    }
+
     await updateRecords((records) => {
       records.splice(0, records.length);
       return null;
