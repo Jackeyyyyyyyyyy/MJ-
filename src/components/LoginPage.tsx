@@ -111,8 +111,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         </motion.div>
 
         <footer className="mt-24 text-center">
-          <p className="text-[11px] font-bold text-light-silver tracking-[0.2em] uppercase">
-            Encrypted // Biometric Ready
+          <p className="text-[11px] font-bold text-light-gray">
+            Copyright (C) 2026 MJ 审批. All Rights Reserved
           </p>
         </footer>
       </div>

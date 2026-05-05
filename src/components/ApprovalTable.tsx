@@ -2,7 +2,7 @@ import React from 'react';
 import { ApprovalRecord, ApprovalStatus } from '../types';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
-import { Eye, Clock, CheckCircle, XCircle, FileText } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, FileText } from 'lucide-react';
 
 interface ApprovalTableProps {
   records: ApprovalRecord[];
@@ -23,8 +23,22 @@ export default function ApprovalTable({
 }: ApprovalTableProps) {
   
   const renderRow = (record: ApprovalRecord) => {
+    const handleRowKeyDown = (event: React.KeyboardEvent<HTMLTableRowElement>) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onViewDetail(record);
+      }
+    };
+
     return (
-      <tr key={record.id} className="hover:bg-canvas-white group transition-colors border-b border-border-silver last:border-0 grow-0 shrink-0">
+      <tr
+        key={record.id}
+        onClick={() => onViewDetail(record)}
+        onKeyDown={handleRowKeyDown}
+        tabIndex={0}
+        className="hover:bg-canvas-white focus-visible:bg-canvas-white focus-visible:outline-none group transition-colors border-b border-border-silver last:border-0 grow-0 shrink-0 cursor-pointer"
+        title="查看详情"
+      >
         <td className="px-8 py-6 whitespace-nowrap text-[12px] font-medium text-light-gray font-mono">
           {record.id.split('-')[1]}
         </td>
@@ -76,17 +90,17 @@ export default function ApprovalTable({
         </td>
 
         {showActions && (
-          <td className="px-8 py-6 whitespace-nowrap text-right">
+          <td
+            className="px-8 py-6 whitespace-nowrap text-right"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
             <div className="flex items-center justify-end gap-2">
               <button 
-                onClick={() => onViewDetail(record)}
-                className="w-9 h-9 flex items-center justify-center text-medium-gray hover:text-interactive-blue transition-colors rounded-full hover:bg-canvas-white"
-                title="查看详情"
-              >
-                <Eye size={18} strokeWidth={2} />
-              </button>
-              <button 
-                onClick={() => onViewProgress(record)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onViewProgress(record);
+                }}
                 className="w-9 h-9 flex items-center justify-center text-medium-gray hover:text-sky-blue-highlight transition-colors rounded-full hover:bg-canvas-white"
                 title="流程追踪"
               >
@@ -97,7 +111,10 @@ export default function ApprovalTable({
                 <>
                   <div className="w-px h-4 bg-border-silver mx-1" />
                   <button 
-                    onClick={() => onApprove(record)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onApprove(record);
+                    }}
                     className="h-9 px-3 flex items-center justify-center gap-1.5 text-[12px] font-bold text-[#2e7d32] bg-[#e8f5e9] hover:bg-[#d6edda] rounded-full transition-all"
                     title="批准"
                   >
@@ -105,7 +122,10 @@ export default function ApprovalTable({
                     <span>通过</span>
                   </button>
                   <button 
-                    onClick={() => onReject(record)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onReject(record);
+                    }}
                     className="h-9 px-3 flex items-center justify-center gap-1.5 text-[12px] font-bold text-[#c62828] bg-[#ffebee] hover:bg-[#ffd9de] rounded-full transition-all"
                     title="驳回"
                   >

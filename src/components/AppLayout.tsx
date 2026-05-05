@@ -34,12 +34,14 @@ export default function AppLayout({
 
   const getPerspectiveLabel = (p: Role) => {
     switch(p) {
-      case 'applicant': return '申请端';
-      case 'approver': return '审批端';
-      case 'boss': return '管理端';
+      case 'applicant': return '申请人';
+      case 'approver': return '审核员';
+      case 'boss': return '老板';
       default: return '开发者';
     }
   };
+
+  const displayRole = getPerspectiveLabel(perspective || user?.role || 'applicant');
 
   return (
     <div className="flex h-screen bg-canvas-white overflow-hidden relative">
@@ -103,11 +105,11 @@ export default function AppLayout({
           <div className="flex items-center gap-4 lg:gap-8">
             <div className="flex items-center gap-3 lg:gap-4 group cursor-pointer">
               <div className="hidden sm:flex flex-col items-end">
-                <p className="text-[14px] font-semibold text-midnight-graphite tracking-tight leading-none">{user?.name}</p>
+                <p className="text-[14px] font-semibold text-midnight-graphite tracking-tight leading-none">{displayRole}</p>
               </div>
               
               <div className="w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-lightest-gray-background text-midnight-graphite flex items-center justify-center font-semibold text-[14px] transition-transform group-hover:scale-95 duration-500">
-                {user?.name.charAt(0)}
+                {displayRole.charAt(0)}
               </div>
             </div>
 
@@ -136,6 +138,11 @@ export default function AppLayout({
                 {children}
               </motion.div>
             </AnimatePresence>
+            <footer className="pt-12 text-center">
+              <p className="text-[11px] font-bold text-light-gray">
+                Copyright (C) 2026 MJ 审批. All Rights Reserved
+              </p>
+            </footer>
           </div>
         </main>
       </div>
