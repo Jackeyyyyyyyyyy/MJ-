@@ -49,6 +49,11 @@ export default function Sidebar({ currentPerspective, selectedModule, selectedTy
     )}>
       <div className="h-16 lg:h-20 flex items-center justify-between px-8">
         <div className="flex items-center gap-3">
+          <img
+            src="/mj-logo.png"
+            alt="MJ 审批"
+            className="h-7 w-7 object-contain"
+          />
           <span className="text-[18px] font-bold text-midnight-graphite tracking-tight">MJ 审批</span>
         </div>
         <button 

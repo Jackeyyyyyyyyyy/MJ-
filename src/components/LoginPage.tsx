@@ -40,6 +40,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           transition={{ duration: 0.8 }}
           className="flex flex-col items-center mb-16"
         >
+          <img
+            src="/mj-logo.png"
+            alt="MJ 审批"
+            className="mb-5 h-20 w-20 object-contain"
+          />
           <h1 className="text-[24px] font-bold tracking-tight">MJ 审批</h1>
         </motion.div>
 
