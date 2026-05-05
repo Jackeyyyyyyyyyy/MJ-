@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@theme {
+  /* Colors */
+  --color-midnight-graphite: #1d1d1f;
+  --color-deep-gray: #333333;
+  --color-charcoal-grey: #474747;
+  --color-medium-gray: #707070;
+  --color-light-gray: #858585;
+  --color-light-silver: #c7c7c7;
+  --color-border-silver: #d6d6d6;
+  --color-lightest-gray-background: #e2e2e5;
+  --color-canvas-white: #f5f5f7;
+  --color-pure-white: #ffffff;
+  --color-true-black: #000000;
+  --color-interactive-blue: #0071e3;
+  --color-action-blue: #0066cc;
+  --color-sky-blue-highlight: #2997ff;
+
+  /* Typography */
+  --font-sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-display: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  /* Radius */
+  --radius-apple-card: 0px;
+  --radius-apple-btn: 980px;
+  --radius-apple-img: 8px;
+
+  /* Shadow */
+  --shadow-apple-xl: rgba(0, 0, 0, 0.22) 3px 5px 30px 0px;
+}
+
+@layer base {
+  body {
+    @apply bg-canvas-white text-midnight-graphite font-sans antialiased;
+  }
+}
+
+@layer components {
+  /* Apple Primary Button */
+  .btn-primary {
+    @apply h-[44px] px-[21px] py-[11px] bg-interactive-blue text-white rounded-apple-btn text-[14px] font-semibold transition-all hover:bg-[#0077ed] active:scale-[0.98] flex items-center justify-center gap-2;
+  }
+
+  .btn-secondary {
+    @apply h-[44px] px-[21px] py-[11px] bg-white border border-action-blue text-action-blue rounded-apple-btn text-[14px] font-semibold transition-all hover:bg-canvas-white active:scale-[0.98] flex items-center justify-center gap-2;
+  }
+
+  /* Apple Card Style */
+  .card-apple {
+    @apply bg-pure-white border border-border-silver rounded-apple-card overflow-hidden;
+  }
+
+  /* Custom Input */
+  .input-field {
+    @apply w-full px-4 py-3 bg-lightest-gray-background border-none rounded-none text-[17px] focus:ring-2 focus:ring-sky-blue-highlight outline-none transition-all placeholder:text-light-gray;
+  }
+
+  /* Status Tags Matrix -> Apple */
+  .status-tag {
+    @apply px-3 py-1 rounded-apple-btn text-[12px] font-semibold inline-flex items-center;
+  }
+
+  .status-pending { @apply bg-lightest-gray-background text-medium-gray; }
+  .status-approved { @apply bg-[#e8f5e9] text-[#2e7d32]; }
+  .status-rejected { @apply bg-[#ffebee] text-[#c62828]; }
+
+  .glass {
+    @apply bg-pure-white/80 backdrop-blur-xl border-b border-border-silver;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+}
