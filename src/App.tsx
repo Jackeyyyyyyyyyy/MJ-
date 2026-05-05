@@ -83,9 +83,9 @@ export default function App() {
       return (
         <div className="space-y-6">
           <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2 text-xs text-slate-400 font-bold uppercase tracking-wider">
+            <div className="flex items-center gap-2 text-xs text-medium-gray font-bold uppercase tracking-wider">
               <span>审批模块</span>
-              <span className="text-slate-300">/</span>
+              <span className="text-light-gray">/</span>
               <span>{selectedModule}</span>
             </div>
             <h1 className="text-2xl font-bold text-slate-900">{selectedType}</h1>

@@ -1,7 +1,7 @@
 import React from 'react';
 import { ApprovalRecord, ApprovalStatus } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, FileText, User, Layout, ShieldCheck, AlertCircle, Info, History } from 'lucide-react';
+import { X, FileText, ShieldCheck, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 
@@ -37,10 +37,10 @@ export default function ApprovalDetailModal({ record, onClose }: ApprovalDetailM
                 </div>
                 <div>
                   <h2 className="text-[22px] font-black tracking-tight text-black uppercase">卷宗详情</h2>
-                  <p className="text-[9px] font-black text-slate-300 tracking-[0.2em] uppercase mt-1">流水识别码: {record.id.split('-')[1]}</p>
+                  <p className="text-[10px] font-black text-medium-gray tracking-[0.16em] uppercase mt-1">流水识别码: {record.id.split('-')[1]}</p>
                 </div>
               </div>
-              <button onClick={onClose} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-black/[0.05] transition-colors text-slate-300">
+              <button onClick={onClose} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-black/[0.05] transition-colors text-medium-gray">
                 <X size={20} strokeWidth={3} />
               </button>
             </div>
@@ -49,19 +49,19 @@ export default function ApprovalDetailModal({ record, onClose }: ApprovalDetailM
               {/* Context Grid */}
               <div className="grid grid-cols-2 gap-x-16 gap-y-10">
                 <div className="flex flex-col gap-2">
-                  <p className="text-[9px] font-black text-slate-200 uppercase tracking-[0.2em]">功能类型</p>
+                  <p className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em]">功能类型</p>
                   <p className="text-[17px] font-black text-black tracking-tight leading-none">{record.approvalTypeName}</p>
                 </div>
                 <div className="flex flex-col gap-2">
-                  <p className="text-[9px] font-black text-slate-200 uppercase tracking-[0.2em]">业务模块</p>
+                  <p className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em]">业务模块</p>
                   <p className="text-[17px] font-black text-black tracking-tight leading-none">{record.moduleName}</p>
                 </div>
                 <div className="flex flex-col gap-2">
-                  <p className="text-[9px] font-black text-slate-200 uppercase tracking-[0.2em]">发起主体</p>
+                  <p className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em]">发起主体</p>
                   <p className="text-[17px] font-black text-black tracking-tight leading-none">{record.applicant}</p>
                 </div>
                 <div className="flex flex-col gap-2">
-                  <p className="text-[9px] font-black text-slate-200 uppercase tracking-[0.2em]">时间戳</p>
+                  <p className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em]">时间戳</p>
                   <p className="text-[17px] font-black text-black tracking-tighter leading-none font-mono uppercase">{format(new Date(record.createdAt), 'yyyy.MM.dd // HH:mm')}</p>
                 </div>
               </div>
@@ -87,16 +87,16 @@ export default function ApprovalDetailModal({ record, onClose }: ApprovalDetailM
                         <p className={cn("text-[16px] font-black uppercase tracking-tight", record.status === ApprovalStatus.APPROVED ? "text-white" : "text-black")}>
                           {record.status === ApprovalStatus.APPROVED ? '核准通过' : '校验失败'}
                         </p>
-                        <p className={cn("text-[9px] font-black uppercase tracking-[0.2em]", record.status === ApprovalStatus.APPROVED ? "text-white/40" : "text-slate-300")}>裁定结果已存证</p>
+                        <p className={cn("text-[10px] font-black uppercase tracking-[0.16em]", record.status === ApprovalStatus.APPROVED ? "text-white/70" : "text-medium-gray")}>裁定结果已存证</p>
                       </div>
                     </div>
-                    <span className={cn("text-[10px] font-black font-mono uppercase tracking-widest", record.status === ApprovalStatus.APPROVED ? "text-white/30" : "text-slate-300")}>
+                    <span className={cn("text-[10px] font-black font-mono uppercase tracking-widest", record.status === ApprovalStatus.APPROVED ? "text-white/70" : "text-medium-gray")}>
                       {record.approvedAt || record.rejectedAt ? format(new Date(record.approvedAt || record.rejectedAt || ''), 'HH:mm:ss') : ''}
                     </span>
                   </div>
                   {record.rejectReason && (
                     <div className="mt-6 pt-6 border-t border-black/5">
-                      <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-2">异常日志追踪</p>
+                      <p className="text-[10px] font-black text-medium-gray uppercase tracking-widest mb-2">异常日志追踪</p>
                       <p className="text-[15px] font-bold text-rose-600 leading-tight italic">"{record.rejectReason}"</p>
                     </div>
                   )}
@@ -107,13 +107,13 @@ export default function ApprovalDetailModal({ record, onClose }: ApprovalDetailM
               <div className="space-y-8">
                 <div className="flex items-center gap-4">
                   <div className="h-px bg-black/[0.05] flex-1" />
-                  <h3 className="text-[10px] font-black text-slate-200 uppercase tracking-[0.3em] whitespace-nowrap">业务数据资产</h3>
+                  <h3 className="text-[10px] font-black text-medium-gray uppercase tracking-[0.22em] whitespace-nowrap">业务数据资产</h3>
                   <div className="h-px bg-black/[0.05] flex-1" />
                 </div>
                 <div className="grid grid-cols-1 gap-2">
                   {Object.entries(record.businessData).map(([key, value]) => (
                     <div key={key} className="flex items-center justify-between p-7 bg-[#fbfbfd] rounded-[24px] group border border-transparent hover:border-black/[0.02] hover:bg-white transition-all">
-                      <span className="text-[11px] font-black text-slate-300 uppercase tracking-[0.2em]">{key}</span>
+                      <span className="text-[11px] font-black text-medium-gray uppercase tracking-[0.16em]">{key}</span>
                       <span className="text-[17px] font-black text-black tracking-tight">{String(value)}</span>
                     </div>
                   ))}
@@ -124,7 +124,7 @@ export default function ApprovalDetailModal({ record, onClose }: ApprovalDetailM
               <div className="space-y-8">
                 <div className="flex items-center gap-4">
                   <div className="h-px bg-black/[0.05] flex-1" />
-                  <h3 className="text-[10px] font-black text-slate-200 uppercase tracking-[0.3em] whitespace-nowrap">流程审计链</h3>
+                  <h3 className="text-[10px] font-black text-medium-gray uppercase tracking-[0.22em] whitespace-nowrap">流程审计链</h3>
                   <div className="h-px bg-black/[0.05] flex-1" />
                 </div>
                 <div className="space-y-6 relative ml-4 border-l-[1.5px] border-black/[0.02] pl-10 py-2">
@@ -134,14 +134,14 @@ export default function ApprovalDetailModal({ record, onClose }: ApprovalDetailM
                       <div className="flex flex-col gap-1.5">
                         <div className="flex items-baseline justify-between gap-10">
                           <span className="text-[15px] font-black text-black uppercase tracking-tight leading-none">{log.action}</span>
-                          <span className="text-[10px] font-black text-slate-200 font-mono tracking-widest uppercase">{format(new Date(log.time), 'HH:mm:ss')}</span>
+                          <span className="text-[10px] font-black text-light-gray font-mono tracking-widest uppercase">{format(new Date(log.time), 'HH:mm:ss')}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest opacity-40">执行主体</span>
+                          <span className="text-[10px] font-black text-medium-gray uppercase tracking-widest">执行主体</span>
                           <span className="text-[13px] font-black text-black tracking-tight">{log.user}</span>
                         </div>
                         {log.details && (
-                          <div className="mt-1 p-3 bg-[#fbfbfd] rounded-xl text-[12px] font-bold text-slate-400 italic">
+                          <div className="mt-1 p-3 bg-[#fbfbfd] rounded-xl text-[12px] font-bold text-medium-gray italic">
                             {log.details}
                           </div>
                         )}
