@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { auth } from '../auth';
 import { cn } from '../lib/utils';
-import { ShieldCheck, User as UserIcon, Layout, CheckCircle2, ChevronRight } from 'lucide-react';
+import { ShieldCheck, User as UserIcon, Layout } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface LoginPageProps {
@@ -26,7 +26,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const accounts = [
     { id: 'applicant', label: '申请人', icon: UserIcon, desc: '提交及追踪单据' },
     { id: 'approver', label: '审核员', icon: ShieldCheck, desc: '流程审批与管控' },
-    { id: 'boss', label: '管理者', icon: Layout, desc: '全局监控与决策' },
+    { id: 'boss', label: '老板', icon: Layout, desc: '全局监控与决策' },
   ];
 
   return (
@@ -40,10 +40,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           transition={{ duration: 0.8 }}
           className="flex flex-col items-center mb-16"
         >
-          <div className="w-14 h-14 bg-black rounded-2xl flex items-center justify-center shadow-2xl mb-6">
-            <CheckCircle2 className="text-white w-7 h-7" strokeWidth={2.5} />
-          </div>
-          <h1 className="text-[21px] font-bold tracking-tighter uppercase">MJ System</h1>
+          <h1 className="text-[24px] font-bold tracking-tight">MJ 审批</h1>
         </motion.div>
 
         <motion.div 

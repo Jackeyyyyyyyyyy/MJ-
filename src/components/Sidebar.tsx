@@ -7,7 +7,6 @@ import {
   ChevronRight, 
   ChevronDown, 
   Layers, 
-  CheckCircle2, 
   Home,
   LayoutDashboard,
   X
@@ -50,10 +49,7 @@ export default function Sidebar({ currentPerspective, selectedModule, selectedTy
     )}>
       <div className="h-16 lg:h-20 flex items-center justify-between px-8">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-midnight-graphite rounded-lg flex items-center justify-center">
-            <CheckCircle2 className="text-white w-4 h-4" strokeWidth={3} />
-          </div>
-          <span className="text-[15px] font-bold text-midnight-graphite tracking-tight uppercase">MJ SYSTEM</span>
+          <span className="text-[18px] font-bold text-midnight-graphite tracking-tight">MJ 审批</span>
         </div>
         <button 
           onClick={onClose}
