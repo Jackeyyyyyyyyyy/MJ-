@@ -1,17 +1,21 @@
 import React from 'react';
 import { ApprovalRecord, ApprovalStatus } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, FileText, ShieldCheck, AlertCircle } from 'lucide-react';
+import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 
 interface ApprovalDetailModalProps {
   record: ApprovalRecord | null;
   onClose: () => void;
+  onApprove?: (record: ApprovalRecord) => void;
+  onReject?: (record: ApprovalRecord) => void;
 }
 
-export default function ApprovalDetailModal({ record, onClose }: ApprovalDetailModalProps) {
+export default function ApprovalDetailModal({ record, onClose, onApprove, onReject }: ApprovalDetailModalProps) {
   if (!record) return null;
+
+  const canReview = record.status === ApprovalStatus.PENDING && !!onApprove && !!onReject;
 
   return (
     <AnimatePresence>
@@ -154,12 +158,37 @@ export default function ApprovalDetailModal({ record, onClose }: ApprovalDetailM
 
             {/* Footer */}
             <div className="px-10 py-8 bg-[#fbfbfd] border-t border-black/[0.02] shrink-0">
-              <button 
-                onClick={onClose} 
-                className="w-full h-14 bg-black text-white text-[12px] font-black uppercase tracking-[0.3em] rounded-2xl hover:bg-black/90 transition-all shadow-2xl shadow-black/20"
-              >
-                确认并退出
-              </button>
+              {canReview ? (
+                <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3">
+                  <button
+                    onClick={() => onApprove?.(record)}
+                    className="h-14 bg-[#2e7d32] text-white text-[13px] font-black rounded-2xl hover:bg-[#256629] transition-all shadow-xl shadow-[#2e7d32]/10 flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle2 size={18} strokeWidth={2.5} />
+                    通过审批
+                  </button>
+                  <button
+                    onClick={() => onReject?.(record)}
+                    className="h-14 bg-[#c62828] text-white text-[13px] font-black rounded-2xl hover:bg-[#a52121] transition-all shadow-xl shadow-[#c62828]/10 flex items-center justify-center gap-2"
+                  >
+                    <XCircle size={18} strokeWidth={2.5} />
+                    驳回申请
+                  </button>
+                  <button
+                    onClick={onClose}
+                    className="h-14 px-6 bg-white border border-black/[0.06] text-medium-gray text-[13px] font-black rounded-2xl hover:text-black hover:border-black/[0.12] transition-all"
+                  >
+                    关闭
+                  </button>
+                </div>
+              ) : (
+                <button 
+                  onClick={onClose} 
+                  className="w-full h-14 bg-black text-white text-[12px] font-black uppercase tracking-[0.3em] rounded-2xl hover:bg-black/90 transition-all shadow-2xl shadow-black/20"
+                >
+                  确认并退出
+                </button>
+              )}
             </div>
         </motion.div>
       </div>

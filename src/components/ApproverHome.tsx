@@ -45,6 +45,18 @@ export default function ApproverHome() {
     }
   };
 
+  const openApproveConfirm = (record: ApprovalRecord) => {
+    setSelectedRecord(record);
+    setShowDetail(false);
+    setIsApproving(true);
+  };
+
+  const openRejectConfirm = (record: ApprovalRecord) => {
+    setSelectedRecord(record);
+    setShowDetail(false);
+    setIsRejecting(true);
+  };
+
   const handleRejectSubmit = async () => {
     if (selectedRecord && user && rejectReason.trim()) {
       await storage.updateStatus(selectedRecord.id, ApprovalStatus.REJECTED, user.name, rejectReason);
@@ -93,8 +105,6 @@ export default function ApproverHome() {
           records={activeTab === 'pending' ? pendingRecords : processedRecords}
           onViewDetail={(r) => { setSelectedRecord(r); setShowDetail(true); }}
           onViewProgress={(r) => { setSelectedRecord(r); setShowProgress(true); }}
-          onApprove={activeTab === 'pending' ? (r) => { setSelectedRecord(r); setIsApproving(true); } : undefined}
-          onReject={activeTab === 'pending' ? (r) => { setSelectedRecord(r); setIsRejecting(true); } : undefined}
           showActions={true}
         />
       </div>
@@ -104,6 +114,8 @@ export default function ApproverHome() {
         <ApprovalDetailModal 
           record={selectedRecord}
           onClose={() => { if(!isRejecting && !isApproving) setSelectedRecord(null); setShowDetail(false); }}
+          onApprove={activeTab === 'pending' ? openApproveConfirm : undefined}
+          onReject={activeTab === 'pending' ? openRejectConfirm : undefined}
         />
       )}
 

@@ -50,6 +50,18 @@ export default function BossDashboard() {
     }
   };
 
+  const openApproveConfirm = (record: ApprovalRecord) => {
+    setSelectedRecord(record);
+    setShowDetail(false);
+    setIsApproving(true);
+  };
+
+  const openRejectConfirm = (record: ApprovalRecord) => {
+    setSelectedRecord(record);
+    setShowDetail(false);
+    setIsRejecting(true);
+  };
+
   const handleRejectSubmit = async () => {
     if (selectedRecord && user && rejectReason.trim()) {
       await storage.updateStatus(selectedRecord.id, ApprovalStatus.REJECTED, user.name, rejectReason);
@@ -146,8 +158,6 @@ export default function BossDashboard() {
             records={filteredRecords}
             onViewDetail={(r) => { setSelectedRecord(r); setShowDetail(true); }}
             onViewProgress={(r) => { setSelectedRecord(r); setShowProgress(true); }}
-            onApprove={(r) => { setSelectedRecord(r); setIsApproving(true); }}
-            onReject={(r) => { setSelectedRecord(r); setIsRejecting(true); }}
             showActions={true}
           />
         </div>
@@ -158,6 +168,8 @@ export default function BossDashboard() {
         <ApprovalDetailModal 
           record={selectedRecord}
           onClose={() => { if(!isRejecting && !isApproving) setSelectedRecord(null); setShowDetail(false); }}
+          onApprove={openApproveConfirm}
+          onReject={openRejectConfirm}
         />
       )}
 

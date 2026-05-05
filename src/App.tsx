@@ -95,12 +95,15 @@ export default function App() {
             records={dynamicRecords}
             onViewDetail={(r) => { setSelectedOne(r); setShowD(true); }}
             onViewProgress={(r) => { setSelectedOne(r); setShowP(true); }}
-            onApprove={canReview ? handleDynamicApprove : undefined}
-            onReject={canReview ? handleDynamicReject : undefined}
             showActions={true}
           />
 
-          <ApprovalDetailModal record={selectedOne} onClose={() => { setSelectedOne(null); setShowD(false); }} />
+          <ApprovalDetailModal
+            record={selectedOne}
+            onClose={() => { setSelectedOne(null); setShowD(false); }}
+            onApprove={canReview ? (record) => { setShowD(false); void handleDynamicApprove(record); } : undefined}
+            onReject={canReview ? (record) => { setShowD(false); void handleDynamicReject(record); } : undefined}
+          />
           <ApprovalProgressModal record={selectedOne} onClose={() => { setSelectedOne(null); setShowP(false); }} />
         </div>
       );
