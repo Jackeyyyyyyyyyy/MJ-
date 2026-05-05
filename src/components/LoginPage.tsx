@@ -3,13 +3,10 @@ import { auth } from '../auth';
 import { cn } from '../lib/utils';
 import { ShieldCheck, User as UserIcon, Layout } from 'lucide-react';
 import { motion } from 'motion/react';
-import GridMotion from './GridMotion';
 
 interface LoginPageProps {
   onLogin: () => void;
 }
-
-const backgroundItems = Array.from({ length: 28 }, () => 'MJ 审批');
 
 export default function LoginPage({ onLogin }: LoginPageProps) {
   const [username, setUsername] = useState('');
@@ -33,12 +30,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   ];
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden bg-[#05070a] font-sans antialiased text-midnight-graphite px-6 py-10">
-      <div className="absolute inset-0 z-0">
-        <GridMotion items={backgroundItems} gradientColor="#172033" />
-      </div>
-
-      <div className="relative z-10 w-full max-w-[380px] rounded-[28px] border border-white/70 bg-white/90 px-7 py-12 shadow-2xl shadow-black/30 backdrop-blur-2xl">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-[#fafafa] font-sans antialiased text-midnight-graphite px-6 py-10">
+      <div className="w-full max-w-[360px]">
         
         {/* Logo 极其简约 */}
         <motion.div 
