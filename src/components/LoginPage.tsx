@@ -3,10 +3,42 @@ import { auth } from '../auth';
 import { cn } from '../lib/utils';
 import { ShieldCheck, User as UserIcon, Layout } from 'lucide-react';
 import { motion } from 'motion/react';
+import GridMotion from './GridMotion';
 
 interface LoginPageProps {
   onLogin: () => void;
 }
+
+const backgroundItems = [
+  '审批流',
+  '资金',
+  '客户',
+  '供应商',
+  '订单',
+  '风控',
+  'MJ 审批',
+  '待审批',
+  '已通过',
+  '驳回',
+  '流程追踪',
+  '业务数据',
+  '审批日志',
+  '权限申请',
+  '付款申请',
+  '班列',
+  '任务单',
+  '报销',
+  '预付',
+  '报价',
+  '询价',
+  '资质审查',
+  '利润审批',
+  '特价审批',
+  '用箱需求',
+  '账号管理',
+  '实时同步',
+  '审批中心',
+];
 
 export default function LoginPage({ onLogin }: LoginPageProps) {
   const [username, setUsername] = useState('');
@@ -30,8 +62,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-[#fafafa] font-sans antialiased text-midnight-graphite">
-      <div className="w-full max-w-[360px] px-6">
+    <div className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden bg-[#05070a] font-sans antialiased text-midnight-graphite px-6 py-10">
+      <div className="absolute inset-0 z-0">
+        <GridMotion items={backgroundItems} gradientColor="#172033" />
+      </div>
+
+      <div className="relative z-10 w-full max-w-[380px] rounded-[28px] border border-white/70 bg-white/90 px-7 py-12 shadow-2xl shadow-black/30 backdrop-blur-2xl">
         
         {/* Logo 极其简约 */}
         <motion.div 
