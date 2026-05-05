@@ -24,8 +24,8 @@ export default function ApproverHome() {
 
   const user = auth.getCurrentUser();
 
-  const loadData = () => {
-    const all = storage.getRecords();
+  const loadData = async () => {
+    const all = await storage.getRecords();
     setPendingRecords(all.filter(r => r.status === ApprovalStatus.PENDING));
     setProcessedRecords(all.filter(r => r.status !== ApprovalStatus.PENDING));
   };
@@ -36,22 +36,22 @@ export default function ApproverHome() {
     return () => clearInterval(timer);
   }, []);
 
-  const confirmApprove = () => {
+  const confirmApprove = async () => {
     if (selectedRecord && user) {
-      storage.updateStatus(selectedRecord.id, ApprovalStatus.APPROVED, user.name);
+      await storage.updateStatus(selectedRecord.id, ApprovalStatus.APPROVED, user.name);
       setIsApproving(false);
       setSelectedRecord(null);
-      loadData();
+      await loadData();
     }
   };
 
-  const handleRejectSubmit = () => {
+  const handleRejectSubmit = async () => {
     if (selectedRecord && user && rejectReason.trim()) {
-      storage.updateStatus(selectedRecord.id, ApprovalStatus.REJECTED, user.name, rejectReason);
+      await storage.updateStatus(selectedRecord.id, ApprovalStatus.REJECTED, user.name, rejectReason);
       setIsRejecting(false);
       setRejectReason('');
       setSelectedRecord(null);
-      loadData();
+      await loadData();
     }
   };
 

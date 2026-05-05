@@ -1,65 +1,63 @@
-import { ApprovalRecord, ApprovalStatus, ApprovalLog } from './types';
+import { ApprovalRecord, ApprovalStatus } from './types';
 
-const STORAGE_KEY = 'mj_approval_records';
+type NewApprovalRecord = Omit<ApprovalRecord, 'id' | 'createdAt' | 'updatedAt' | 'logs' | 'status'>;
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`/api${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+  });
+
+  if (!response.ok) {
+    let message = `API request failed: ${response.status}`;
+
+    try {
+      const body = await response.json();
+      if (body?.error) message = body.error;
+    } catch {
+      // Ignore invalid error bodies and use the status-based message.
+    }
+
+    throw new Error(message);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json();
+}
 
 export const storage = {
-  getRecords(): ApprovalRecord[] {
-    const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
+  getRecords(): Promise<ApprovalRecord[]> {
+    return request<ApprovalRecord[]>('/records');
   },
 
-  saveRecords(records: ApprovalRecord[]) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+  addRecord(record: NewApprovalRecord): Promise<ApprovalRecord> {
+    return request<ApprovalRecord>('/records', {
+      method: 'POST',
+      body: JSON.stringify(record),
+    });
   },
 
-  addRecord(record: Omit<ApprovalRecord, 'id' | 'createdAt' | 'updatedAt' | 'logs' | 'status'>): ApprovalRecord {
-    const records = this.getRecords();
-    const now = new Date().toISOString();
-    const newRecord: ApprovalRecord = {
-      ...record,
-      id: `APP-${Date.now()}`,
-      status: ApprovalStatus.PENDING,
-      createdAt: now,
-      updatedAt: now,
-      logs: [
-        {
-          action: '发起申请',
-          user: record.applicant,
-          time: now,
-          details: '提交了审批单'
-        }
-      ]
-    };
-    records.unshift(newRecord);
-    this.saveRecords(records);
-    return newRecord;
+  updateStatus(
+    id: string,
+    status: ApprovalStatus,
+    approver: string,
+    reason?: string,
+  ): Promise<ApprovalRecord> {
+    return request<ApprovalRecord>(`/records/${encodeURIComponent(id)}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, approver, reason }),
+    });
   },
 
-  updateStatus(id: string, status: ApprovalStatus, approver: string, reason?: string) {
-    const records = this.getRecords();
-    const index = records.findIndex(r => r.id === id);
-    if (index !== -1) {
-      const now = new Date().toISOString();
-      const log: ApprovalLog = {
-        action: status === ApprovalStatus.APPROVED ? '批准' : '拒绝',
-        user: approver,
-        time: now,
-        details: reason || (status === ApprovalStatus.APPROVED ? '审批通过' : '审批拒绝')
-      };
-      
-      records[index] = {
-        ...records[index],
-        status,
-        updatedAt: now,
-        approver,
-        ...(status === ApprovalStatus.APPROVED ? { approvedAt: now } : { rejectedAt: now, rejectReason: reason }),
-        logs: [...records[index].logs, log]
-      };
-      this.saveRecords(records);
-    }
+  clearAll(): Promise<void> {
+    return request<void>('/records', {
+      method: 'DELETE',
+    });
   },
-
-  clearAll() {
-    this.saveRecords([]);
-  }
 };

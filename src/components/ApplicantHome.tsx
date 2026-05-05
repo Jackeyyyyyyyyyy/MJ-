@@ -18,9 +18,9 @@ export default function ApplicantHome() {
 
   const user = auth.getCurrentUser();
 
-  const loadData = () => {
+  const loadData = async () => {
     if (user) {
-      const all = storage.getRecords();
+      const all = await storage.getRecords();
       setRecords(all.filter(r => r.applicant === user.name));
     }
   };

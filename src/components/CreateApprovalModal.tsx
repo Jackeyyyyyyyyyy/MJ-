@@ -10,7 +10,7 @@ import { Module, ApprovalType } from '../types';
 interface CreateApprovalModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: () => void | Promise<void>;
 }
 
 export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: CreateApprovalModalProps) {
@@ -44,7 +44,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedModule || !selectedType || !user) return;
 
@@ -60,14 +60,14 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       return;
     }
 
-    storage.addRecord({
+    await storage.addRecord({
       moduleName: selectedModule.name,
       approvalTypeName: selectedType.name,
       businessData: formData,
       applicant: user.name
     });
 
-    onSuccess();
+    await onSuccess();
     handleClose();
   };
 

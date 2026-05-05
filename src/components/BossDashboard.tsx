@@ -31,8 +31,8 @@ export default function BossDashboard() {
 
   const user = auth.getCurrentUser();
 
-  const loadData = () => {
-    setAllRecords(storage.getRecords());
+  const loadData = async () => {
+    setAllRecords(await storage.getRecords());
   };
 
   useEffect(() => {
@@ -41,22 +41,22 @@ export default function BossDashboard() {
     return () => clearInterval(timer);
   }, []);
 
-  const confirmApprove = () => {
+  const confirmApprove = async () => {
     if (selectedRecord && user) {
-      storage.updateStatus(selectedRecord.id, ApprovalStatus.APPROVED, user.name);
+      await storage.updateStatus(selectedRecord.id, ApprovalStatus.APPROVED, user.name);
       setIsApproving(false);
       setSelectedRecord(null);
-      loadData();
+      await loadData();
     }
   };
 
-  const handleRejectSubmit = () => {
+  const handleRejectSubmit = async () => {
     if (selectedRecord && user && rejectReason.trim()) {
-      storage.updateStatus(selectedRecord.id, ApprovalStatus.REJECTED, user.name, rejectReason);
+      await storage.updateStatus(selectedRecord.id, ApprovalStatus.REJECTED, user.name, rejectReason);
       setIsRejecting(false);
       setRejectReason('');
       setSelectedRecord(null);
-      loadData();
+      await loadData();
     }
   };
 

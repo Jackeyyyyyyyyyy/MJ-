@@ -9,7 +9,7 @@ import ApprovalDetailModal from './components/ApprovalDetailModal';
 import ApprovalProgressModal from './components/ApprovalProgressModal';
 import { auth } from './auth';
 import { storage } from './storage';
-import { Role, ApprovalRecord, Module, ApprovalType } from './types';
+import { Role, ApprovalRecord, ApprovalStatus } from './types';
 import { approvalSchema } from './approvalSchema';
 
 export default function App() {
@@ -42,11 +42,34 @@ export default function App() {
     setSelectedType(typeName);
   };
 
-  useEffect(() => {
+  const loadDynamicRecords = async () => {
     if (selectedType) {
-      const all = storage.getRecords();
+      const all = await storage.getRecords();
       setDynamicRecords(all.filter(r => r.moduleName === selectedModule && r.approvalTypeName === selectedType));
     }
+  };
+
+  const handleDynamicApprove = async (record: ApprovalRecord) => {
+    const user = auth.getCurrentUser();
+    if (!user || !window.confirm(`确认通过审批单 ${record.id}？`)) return;
+
+    await storage.updateStatus(record.id, ApprovalStatus.APPROVED, user.name);
+    await loadDynamicRecords();
+  };
+
+  const handleDynamicReject = async (record: ApprovalRecord) => {
+    const user = auth.getCurrentUser();
+    if (!user) return;
+
+    const reason = window.prompt(`请输入审批单 ${record.id} 的驳回原因`);
+    if (!reason?.trim()) return;
+
+    await storage.updateStatus(record.id, ApprovalStatus.REJECTED, user.name, reason.trim());
+    await loadDynamicRecords();
+  };
+
+  useEffect(() => {
+    loadDynamicRecords();
   }, [selectedModule, selectedType]);
 
   if (!isAuthenticated) {
@@ -55,6 +78,8 @@ export default function App() {
 
   const renderContent = () => {
     if (selectedType) {
+      const canReview = perspective === 'approver' || perspective === 'boss';
+
       return (
         <div className="space-y-6">
           <div className="flex flex-col gap-1">
@@ -70,6 +95,8 @@ export default function App() {
             records={dynamicRecords}
             onViewDetail={(r) => { setSelectedOne(r); setShowD(true); }}
             onViewProgress={(r) => { setSelectedOne(r); setShowP(true); }}
+            onApprove={canReview ? handleDynamicApprove : undefined}
+            onReject={canReview ? handleDynamicReject : undefined}
             showActions={true}
           />
 

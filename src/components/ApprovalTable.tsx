@@ -77,38 +77,40 @@ export default function ApprovalTable({
 
         {showActions && (
           <td className="px-8 py-6 whitespace-nowrap text-right">
-            <div className="flex items-center justify-end gap-3 opacity-0 group-hover:opacity-100 transition-all duration-300">
+            <div className="flex items-center justify-end gap-2">
               <button 
                 onClick={() => onViewDetail(record)}
-                className="w-10 h-10 flex items-center justify-center text-medium-gray hover:text-interactive-blue transition-colors rounded-full hover:bg-canvas-white"
+                className="w-9 h-9 flex items-center justify-center text-medium-gray hover:text-interactive-blue transition-colors rounded-full hover:bg-canvas-white"
                 title="查看详情"
               >
                 <Eye size={18} strokeWidth={2} />
               </button>
               <button 
                 onClick={() => onViewProgress(record)}
-                className="w-10 h-10 flex items-center justify-center text-medium-gray hover:text-sky-blue-highlight transition-colors rounded-full hover:bg-canvas-white"
+                className="w-9 h-9 flex items-center justify-center text-medium-gray hover:text-sky-blue-highlight transition-colors rounded-full hover:bg-canvas-white"
                 title="流程追踪"
               >
                 <Clock size={17} strokeWidth={2} />
               </button>
               
-              {onApprove && record.status === ApprovalStatus.PENDING && (
+              {onApprove && onReject && record.status === ApprovalStatus.PENDING && (
                 <>
                   <div className="w-px h-4 bg-border-silver mx-1" />
                   <button 
                     onClick={() => onApprove(record)}
-                    className="w-10 h-10 flex items-center justify-center text-[#2e7d32] hover:bg-[#e8f5e9] rounded-full transition-all"
+                    className="h-9 px-3 flex items-center justify-center gap-1.5 text-[12px] font-bold text-[#2e7d32] bg-[#e8f5e9] hover:bg-[#d6edda] rounded-full transition-all"
                     title="批准"
                   >
-                    <CheckCircle size={18} strokeWidth={2} />
+                    <CheckCircle size={15} strokeWidth={2.5} />
+                    <span>通过</span>
                   </button>
                   <button 
                     onClick={() => onReject(record)}
-                    className="w-10 h-10 flex items-center justify-center text-[#c62828] hover:bg-[#ffebee] rounded-full transition-all"
+                    className="h-9 px-3 flex items-center justify-center gap-1.5 text-[12px] font-bold text-[#c62828] bg-[#ffebee] hover:bg-[#ffd9de] rounded-full transition-all"
                     title="驳回"
                   >
-                    <XCircle size={18} strokeWidth={2} />
+                    <XCircle size={15} strokeWidth={2.5} />
+                    <span>驳回</span>
                   </button>
                 </>
               )}
