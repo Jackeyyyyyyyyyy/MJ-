@@ -37,13 +37,16 @@ http://localhost:3000
 
 ## 测试账号
 
-本地默认密码是：
+所有账号使用同一个登录密码，密码不写入代码库，必须通过环境变量 `APP_PASSWORD` 配置。
+同时必须配置 `AUTH_SECRET`，用于签发和校验登录令牌。
 
-```text
-123456
+本地 PowerShell 示例：
+
+```powershell
+$env:APP_PASSWORD="your-local-password"
+$env:AUTH_SECRET="your-long-random-session-secret"
+npm run api
 ```
-
-可以通过环境变量 `APP_PASSWORD` 覆盖默认密码。生产环境还应配置 `AUTH_SECRET`，用于签发和校验登录令牌。
 
 账号：
 

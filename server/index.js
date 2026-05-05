@@ -15,23 +15,29 @@ const dataDir =
   path.resolve(process.cwd(), 'data');
 const recordsFile = path.join(dataDir, 'approval-records.json');
 const validStatuses = new Set(['草稿', '待审批', '已批准', '已拒绝']);
-const defaultPassword = process.env.APP_PASSWORD || '123456';
-const authSecret = process.env.AUTH_SECRET || crypto.randomBytes(32).toString('hex');
+
+function requireEnv(name) {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    console.error(`${name} environment variable is required.`);
+    process.exit(1);
+  }
+  return value;
+}
+
+const appPassword = requireEnv('APP_PASSWORD');
+const authSecret = requireEnv('AUTH_SECRET');
 const configuredTokenTtlMs = Number(process.env.AUTH_TOKEN_TTL_MS);
 const tokenTtlMs =
   Number.isFinite(configuredTokenTtlMs) && configuredTokenTtlMs > 0
     ? configuredTokenTtlMs
     : 8 * 60 * 60 * 1000;
 const users = {
-  applicant: { username: 'applicant', role: 'applicant', name: '张申请', password: defaultPassword },
-  approver: { username: 'approver', role: 'approver', name: '李审批', password: defaultPassword },
-  boss: { username: 'boss', role: 'boss', name: '王老板', password: defaultPassword },
-  developer: { username: 'developer', role: 'developer', name: '系统开发员', password: defaultPassword },
+  applicant: { username: 'applicant', role: 'applicant', name: '张申请', password: appPassword },
+  approver: { username: 'approver', role: 'approver', name: '李审批', password: appPassword },
+  boss: { username: 'boss', role: 'boss', name: '王老板', password: appPassword },
+  developer: { username: 'developer', role: 'developer', name: '系统开发员', password: appPassword },
 };
-
-if (!process.env.AUTH_SECRET) {
-  console.warn('AUTH_SECRET is not set. Sessions will be invalid after every server restart.');
-}
 
 app.use(express.json({ limit: '2mb' }));
 
