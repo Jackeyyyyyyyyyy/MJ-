@@ -120,7 +120,6 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     const isDate = field.includes('日期') || field.includes('时间');
     const isMoney = field.includes('金额') || field.includes('价格') || field.includes('利润') || field.includes('汇率');
     const isFile = field.includes('附件');
-    const isSelect = field.includes('状态') || field.includes('类型') || field.includes('模式');
 
     if (isFile) {
       const attachments = Array.isArray(formData[field])
@@ -151,21 +150,6 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
             {fileValue || '未选择文件'}
           </span>
         </div>
-      );
-    }
-
-    if (isSelect) {
-      return (
-        <select 
-          className="input-field border-b border-border-silver focus:border-interactive-blue"
-          value={formData[field]}
-          onChange={(e) => handleInputChange(field, e.target.value)}
-        >
-          <option value="">选择{field}</option>
-          <option value="选项1">普通模式</option>
-          <option value="选项2">加急模式</option>
-          <option value="选项3">特殊申请</option>
-        </select>
       );
     }
 
