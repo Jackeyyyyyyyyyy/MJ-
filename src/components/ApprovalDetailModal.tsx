@@ -1,9 +1,10 @@
 import React from 'react';
-import { ApprovalRecord, ApprovalStatus } from '../types';
+import { ApprovalAttachment, ApprovalRecord, ApprovalStatus } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
+import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle, Download } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
+import { storage } from '../storage';
 
 interface ApprovalDetailModalProps {
   record: ApprovalRecord | null;
@@ -12,10 +13,32 @@ interface ApprovalDetailModalProps {
   onReject?: (record: ApprovalRecord) => void;
 }
 
+function isAttachmentList(value: unknown): value is ApprovalAttachment[] {
+  return Array.isArray(value) && value.every((item) => {
+    return !!item && typeof item === 'object' && 'name' in item && 'url' in item;
+  });
+}
+
 export default function ApprovalDetailModal({ record, onClose, onApprove, onReject }: ApprovalDetailModalProps) {
   if (!record) return null;
 
   const canReview = record.status === ApprovalStatus.PENDING && !!onApprove && !!onReject;
+
+  const handleAttachmentDownload = async (attachment: ApprovalAttachment) => {
+    try {
+      const blob = await storage.downloadAttachment(attachment);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = attachment.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      window.alert('文件下载失败，请稍后再试');
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -116,9 +139,25 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                 </div>
                 <div className="grid grid-cols-1 gap-2">
                   {Object.entries(record.businessData).map(([key, value]) => (
-                    <div key={key} className="flex items-center justify-between p-7 bg-[#fbfbfd] rounded-[24px] group border border-transparent hover:border-black/[0.02] hover:bg-white transition-all">
+                    <div key={key} className="flex items-center justify-between gap-6 p-7 bg-[#fbfbfd] rounded-[24px] group border border-transparent hover:border-black/[0.02] hover:bg-white transition-all">
                       <span className="text-[11px] font-black text-medium-gray uppercase tracking-[0.16em]">{key}</span>
-                      <span className="text-[17px] font-black text-black tracking-tight">{String(value)}</span>
+                      {isAttachmentList(value) ? (
+                        <div className="min-w-0 flex flex-col items-end gap-2">
+                          {value.map((attachment) => (
+                            <button
+                              key={attachment.id}
+                              type="button"
+                              onClick={() => void handleAttachmentDownload(attachment)}
+                              className="max-w-full h-9 px-3 rounded-full bg-white border border-black/[0.06] text-[13px] font-bold text-black hover:border-black/[0.16] hover:bg-canvas-white transition-all flex items-center gap-2"
+                            >
+                              <Download size={14} strokeWidth={2.5} className="shrink-0" />
+                              <span className="truncate">{attachment.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-[17px] font-black text-black tracking-tight text-right break-all">{String(value)}</span>
+                      )}
                     </div>
                   ))}
                 </div>

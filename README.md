@@ -35,6 +35,12 @@ http://localhost:3000
 ./data/approval-records.json
 ```
 
+上传附件默认保存到：
+
+```text
+./data/uploads/
+```
+
 ## 测试账号
 
 所有账号使用同一个登录密码，密码不写入代码库，必须通过环境变量 `APP_PASSWORD` 配置。
@@ -80,6 +86,12 @@ npm run preview  # 本地预览生产构建
 
 ```text
 /app/data/approval-records.json
+```
+
+上传附件会保存到：
+
+```text
+/app/data/uploads/
 ```
 
 后端会优先读取 Railway 自动注入的环境变量：

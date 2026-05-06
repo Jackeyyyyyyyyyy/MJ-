@@ -9,11 +9,11 @@ import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, 
-  TrendingUp, 
-  RefreshCw,
-  Activity,
+  FileText,
+  Clock,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  XCircle
 } from 'lucide-react';
 
 export default function BossDashboard() {
@@ -82,20 +82,19 @@ export default function BossDashboard() {
   }, [allRecords, searchTerm, filterStatus]);
 
   const stats = useMemo(() => {
-    const today = new Date().toLocaleDateString();
     return {
       total: allRecords.length,
       pending: allRecords.filter(r => r.status === ApprovalStatus.PENDING).length,
       approved: allRecords.filter(r => r.status === ApprovalStatus.APPROVED).length,
-      today: allRecords.filter(r => new Date(r.createdAt).toLocaleDateString() === today).length
+      rejected: allRecords.filter(r => r.status === ApprovalStatus.REJECTED).length
     };
   }, [allRecords]);
 
   const cards = [
-    { label: '系统吞吐总量', value: stats.total, color: 'text-midnight-graphite', trend: '+12.5% 从上月' },
-    { label: '待处理队列', value: stats.pending, color: 'text-interactive-blue', trend: '正在扫描' },
-    { label: '决策成功率', value: `${Math.round((stats.approved / (stats.total || 1)) * 100)}%`, color: 'text-[#2e7d32]', trend: '标杆水平' },
-    { label: '今日流量', value: stats.today, color: 'text-sky-blue-highlight', trend: '实时更新' },
+    { label: '总申请', value: stats.total, icon: FileText },
+    { label: '待审批', value: stats.pending, icon: Clock },
+    { label: '已通过', value: stats.approved, icon: CheckCircle2 },
+    { label: '被驳回', value: stats.rejected, icon: XCircle },
   ];
 
   return (
@@ -108,14 +107,11 @@ export default function BossDashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {cards.map((card, idx) => (
           <div key={idx} className="bg-white border border-border-silver p-8 flex flex-col gap-6 group hover:shadow-xl hover:shadow-black/[0.02] transition-all rounded-2xl">
-            <div className="flex flex-col gap-1">
-              <span className="text-[11px] font-bold text-light-gray uppercase tracking-widest">{card.label}</span>
-              <span className={cn("text-[32px] font-bold tracking-tighter", card.color)}>{card.value}</span>
-            </div>
-            
             <div className="flex items-center justify-between">
-              <span className="text-[12px] font-medium text-light-silver">{card.trend}</span>
+              <span className="text-[11px] font-bold text-light-gray uppercase tracking-widest">{card.label}</span>
+              <card.icon size={18} className="text-light-silver" />
             </div>
+            <p className="text-[32px] font-bold text-midnight-graphite tracking-tighter">{card.value}</p>
           </div>
         ))}
       </div>

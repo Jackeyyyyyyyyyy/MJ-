@@ -5,12 +5,21 @@ import { approvalSchema } from '../approvalSchema';
 import { storage } from '../storage';
 import { auth } from '../auth';
 import { cn } from '../lib/utils';
-import { Module, ApprovalType } from '../types';
+import { ApprovalAttachment, Module, ApprovalType } from '../types';
 
 interface CreateApprovalModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void | Promise<void>;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error(`读取文件失败：${file.name}`));
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: CreateApprovalModalProps) {
@@ -19,6 +28,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const [selectedType, setSelectedType] = useState<ApprovalType | null>(null);
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [uploadingFields, setUploadingFields] = useState<Record<string, boolean>>({});
 
   const user = auth.getCurrentUser();
 
@@ -41,6 +51,32 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       const newErrors = { ...errors };
       delete newErrors[field];
       setErrors(newErrors);
+    }
+  };
+
+  const handleFileUpload = async (field: string, fileList: FileList | null) => {
+    const files = fileList ? Array.from<File>(fileList) : [];
+    if (files.length === 0) return;
+
+    setUploadingFields(prev => ({ ...prev, [field]: true }));
+    try {
+      const payload = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          type: file.type || 'application/octet-stream',
+          size: file.size,
+          data: await readFileAsDataUrl(file),
+        })),
+      );
+      const uploads = await storage.uploadFiles(payload);
+      handleInputChange(field, uploads);
+    } catch (error) {
+      setErrors(prev => ({
+        ...prev,
+        [field]: error instanceof Error ? error.message : '文件上传失败',
+      }));
+    } finally {
+      setUploadingFields(prev => ({ ...prev, [field]: false }));
     }
   };
 
@@ -87,12 +123,33 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     const isSelect = field.includes('状态') || field.includes('类型') || field.includes('模式');
 
     if (isFile) {
+      const attachments = Array.isArray(formData[field])
+        ? formData[field] as ApprovalAttachment[]
+        : [];
+      const fileValue = attachments.map(file => file.name).join('、');
+      const isUploading = !!uploadingFields[field];
+
       return (
         <div className="flex items-center gap-4 py-2">
-          <button type="button" className="btn-secondary h-[36px] px-4 py-0 text-[13px]">
-            <Upload size={14} /> 选择文件
-          </button>
-          <span className="text-[13px] text-light-gray font-sf-pro-text">未选择文件</span>
+          <label className={cn(
+            "btn-secondary h-[36px] px-4 py-0 text-[13px] cursor-pointer",
+            isUploading && "pointer-events-none opacity-60",
+          )}>
+            <Upload size={14} /> {isUploading ? '上传中' : '选择文件'}
+            <input
+              type="file"
+              className="sr-only"
+              multiple
+              onChange={(event) => {
+                const fileList = event.currentTarget.files;
+                void handleFileUpload(field, fileList);
+                event.currentTarget.value = '';
+              }}
+            />
+          </label>
+          <span className="min-w-0 truncate text-[13px] text-light-gray font-sf-pro-text">
+            {fileValue || '未选择文件'}
+          </span>
         </div>
       );
     }

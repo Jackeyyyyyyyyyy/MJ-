@@ -14,6 +14,8 @@ const dataDir =
   process.env.DATA_DIR ||
   path.resolve(process.cwd(), 'data');
 const recordsFile = path.join(dataDir, 'approval-records.json');
+const uploadsDir = path.join(dataDir, 'uploads');
+const uploadsIndexFile = path.join(dataDir, 'approval-uploads.json');
 const validStatuses = new Set(['草稿', '待审批', '已批准', '已拒绝']);
 
 function requireEnv(name) {
@@ -32,6 +34,16 @@ const tokenTtlMs =
   Number.isFinite(configuredTokenTtlMs) && configuredTokenTtlMs > 0
     ? configuredTokenTtlMs
     : 8 * 60 * 60 * 1000;
+const configuredMaxUploadFileBytes = Number(process.env.MAX_UPLOAD_FILE_BYTES);
+const maxUploadFileBytes =
+  Number.isFinite(configuredMaxUploadFileBytes) && configuredMaxUploadFileBytes > 0
+    ? configuredMaxUploadFileBytes
+    : 10 * 1024 * 1024;
+const configuredMaxUploadBatchBytes = Number(process.env.MAX_UPLOAD_BATCH_BYTES);
+const maxUploadBatchBytes =
+  Number.isFinite(configuredMaxUploadBatchBytes) && configuredMaxUploadBatchBytes > 0
+    ? configuredMaxUploadBatchBytes
+    : 20 * 1024 * 1024;
 const users = {
   applicant: { username: 'applicant', role: 'applicant', name: '张申请', password: appPassword },
   approver: { username: 'approver', role: 'approver', name: '李审批', password: appPassword },
@@ -39,7 +51,7 @@ const users = {
   developer: { username: 'developer', role: 'developer', name: '系统开发员', password: appPassword },
 };
 
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '30mb' }));
 
 function toPublicUser(user) {
   return {
@@ -135,6 +147,37 @@ async function ensureDataFile() {
   }
 }
 
+async function ensureUploadsIndexFile() {
+  await fs.mkdir(uploadsDir, { recursive: true });
+
+  try {
+    await fs.access(uploadsIndexFile);
+  } catch {
+    await fs.writeFile(uploadsIndexFile, '[]\n', 'utf8');
+  }
+}
+
+async function readUploads() {
+  await ensureUploadsIndexFile();
+  const content = await fs.readFile(uploadsIndexFile, 'utf8');
+
+  if (!content.trim()) return [];
+
+  const uploads = JSON.parse(content);
+  if (!Array.isArray(uploads)) {
+    throw new Error('approval uploads file must contain an array');
+  }
+
+  return uploads;
+}
+
+async function writeUploads(uploads) {
+  await ensureUploadsIndexFile();
+  const tempFile = `${uploadsIndexFile}.tmp`;
+  await fs.writeFile(tempFile, `${JSON.stringify(uploads, null, 2)}\n`, 'utf8');
+  await fs.rename(tempFile, uploadsIndexFile);
+}
+
 async function readRecords() {
   await ensureDataFile();
   const content = await fs.readFile(recordsFile, 'utf8');
@@ -157,6 +200,7 @@ async function writeRecords(records) {
 }
 
 let writeQueue = Promise.resolve();
+let uploadWriteQueue = Promise.resolve();
 
 function updateRecords(mutator) {
   const operation = writeQueue.catch(() => undefined).then(async () => {
@@ -168,6 +212,29 @@ function updateRecords(mutator) {
 
   writeQueue = operation.catch(() => undefined);
   return operation;
+}
+
+function updateUploads(mutator) {
+  const operation = uploadWriteQueue.catch(() => undefined).then(async () => {
+    const uploads = await readUploads();
+    const result = await mutator(uploads);
+    await writeUploads(uploads);
+    return result;
+  });
+
+  uploadWriteQueue = operation.catch(() => undefined);
+  return operation;
+}
+
+function sanitizeUploadName(name) {
+  const baseName = path.basename(String(name || 'attachment'));
+  return baseName.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_').slice(0, 180) || 'attachment';
+}
+
+function getUploadBase64(data) {
+  const value = String(data || '');
+  const commaIndex = value.indexOf(',');
+  return commaIndex >= 0 ? value.slice(commaIndex + 1) : value;
 }
 
 function createLog(action, user, details) {
@@ -199,6 +266,99 @@ app.post('/api/auth/login', (req, res) => {
     user: toPublicUser(user),
     ...session,
   });
+});
+
+app.post('/api/uploads', authenticate, requireRoles('applicant'), async (req, res, next) => {
+  try {
+    const { files } = req.body || {};
+
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: 'missing upload files' });
+    }
+
+    let totalBytes = 0;
+    const savedUploads = [];
+
+    await fs.mkdir(uploadsDir, { recursive: true });
+
+    for (const file of files) {
+      const originalName = sanitizeUploadName(file?.name);
+      const base64 = getUploadBase64(file?.data);
+      const buffer = Buffer.from(base64, 'base64');
+      const declaredSize = Number(file?.size || buffer.length);
+
+      if (!base64 || buffer.length === 0) {
+        return res.status(400).json({ error: `empty upload file: ${originalName}` });
+      }
+
+      if (buffer.length > maxUploadFileBytes) {
+        return res.status(413).json({ error: `file is too large: ${originalName}` });
+      }
+
+      totalBytes += buffer.length;
+      if (totalBytes > maxUploadBatchBytes) {
+        return res.status(413).json({ error: 'upload batch is too large' });
+      }
+
+      if (Number.isFinite(declaredSize) && Math.abs(declaredSize - buffer.length) > 2) {
+        return res.status(400).json({ error: `invalid upload file size: ${originalName}` });
+      }
+
+      const id = crypto.randomUUID();
+      const extension = path.extname(originalName).slice(0, 24);
+      const storedName = `${id}${extension}`;
+      await fs.writeFile(path.join(uploadsDir, storedName), buffer);
+
+      savedUploads.push({
+        id,
+        name: originalName,
+        type: String(file?.type || 'application/octet-stream'),
+        size: buffer.length,
+        storedName,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: req.user.name,
+        url: `/api/uploads/${id}`,
+      });
+    }
+
+    const publicUploads = await updateUploads((uploads) => {
+      uploads.unshift(...savedUploads);
+      return savedUploads.map(({ storedName, uploadedBy, ...upload }) => upload);
+    });
+
+    res.status(201).json(publicUploads);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/uploads/:id', authenticate, async (req, res, next) => {
+  try {
+    const uploads = await readUploads();
+    const upload = uploads.find((item) => item.id === req.params.id);
+
+    if (!upload) {
+      return res.status(404).json({ error: 'upload file not found' });
+    }
+
+    const uploadRoot = path.resolve(uploadsDir);
+    const filePath = path.resolve(uploadRoot, upload.storedName);
+    if (!filePath.startsWith(`${uploadRoot}${path.sep}`)) {
+      return res.status(400).json({ error: 'invalid upload file path' });
+    }
+
+    const asciiName = String(upload.name || 'attachment').replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+    res.setHeader('Content-Type', upload.type || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(upload.name || 'attachment')}`,
+    );
+    res.sendFile(filePath, (error) => {
+      if (error) next(error);
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/records', authenticate, async (req, res, next) => {

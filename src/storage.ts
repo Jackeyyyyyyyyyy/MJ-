@@ -1,7 +1,10 @@
-import { ApprovalRecord, ApprovalStatus } from './types';
+import { ApprovalAttachment, ApprovalRecord, ApprovalStatus } from './types';
 import { auth } from './auth';
 
 type NewApprovalRecord = Omit<ApprovalRecord, 'id' | 'createdAt' | 'updatedAt' | 'logs' | 'status'>;
+type UploadInput = Pick<ApprovalAttachment, 'name' | 'type' | 'size'> & {
+  data: string;
+};
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = auth.getToken();
@@ -34,6 +37,21 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json();
 }
 
+async function download(url: string): Promise<Blob> {
+  const token = auth.getToken();
+  const response = await fetch(url, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`File download failed: ${response.status}`);
+  }
+
+  return response.blob();
+}
+
 export const storage = {
   getRecords(): Promise<ApprovalRecord[]> {
     return request<ApprovalRecord[]>('/records');
@@ -62,5 +80,16 @@ export const storage = {
     return request<void>('/records', {
       method: 'DELETE',
     });
+  },
+
+  uploadFiles(files: UploadInput[]): Promise<ApprovalAttachment[]> {
+    return request<ApprovalAttachment[]>('/uploads', {
+      method: 'POST',
+      body: JSON.stringify({ files }),
+    });
+  },
+
+  downloadAttachment(attachment: ApprovalAttachment): Promise<Blob> {
+    return download(attachment.url);
   },
 };

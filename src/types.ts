@@ -49,6 +49,15 @@ export interface ApprovalLog {
   details?: string;
 }
 
+export interface ApprovalAttachment {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  url: string;
+  uploadedAt: string;
+}
+
 export interface ApprovalRecord {
   id: string;
   moduleName: string;

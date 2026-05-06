@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { storage } from '../storage';
 import { auth } from '../auth';
 import { ApprovalRecord, ApprovalStatus } from '../types';
@@ -7,7 +7,7 @@ import ApprovalTable from './ApprovalTable';
 import ApprovalDetailModal from './ApprovalDetailModal';
 import ApprovalProgressModal from './ApprovalProgressModal';
 import { motion, AnimatePresence } from 'motion/react';
-import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock, FileText, XCircle } from 'lucide-react';
 
 export default function ApproverHome() {
   const [pendingRecords, setPendingRecords] = useState<ApprovalRecord[]>([]);
@@ -23,6 +23,16 @@ export default function ApproverHome() {
   const [activeTab, setActiveTab] = useState<'pending' | 'processed'>('pending');
 
   const user = auth.getCurrentUser();
+  const records = useMemo(
+    () => [...pendingRecords, ...processedRecords],
+    [pendingRecords, processedRecords],
+  );
+  const stats = [
+    { label: '总申请', value: records.length, icon: FileText },
+    { label: '待审批', value: pendingRecords.length, icon: Clock },
+    { label: '已通过', value: records.filter(r => r.status === ApprovalStatus.APPROVED).length, icon: CheckCircle2 },
+    { label: '被驳回', value: records.filter(r => r.status === ApprovalStatus.REJECTED).length, icon: XCircle },
+  ];
 
   const loadData = async () => {
     const all = await storage.getRecords();
@@ -73,6 +83,18 @@ export default function ApproverHome() {
         <h1 className="text-[32px] font-bold tracking-tight">审批</h1>
         <p className="text-[14px] text-light-gray font-medium">待办事宜与处理记录</p>
       </header>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        {stats.map((item, idx) => (
+          <div key={idx} className="bg-white border border-border-silver p-8 flex flex-col gap-6 rounded-2xl group hover:shadow-xl hover:shadow-black/[0.02] transition-all">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-light-gray uppercase tracking-widest">{item.label}</span>
+              <item.icon size={18} className="text-light-silver" />
+            </div>
+            <p className="text-[32px] font-bold text-midnight-graphite tracking-tighter">{item.value}</p>
+          </div>
+        ))}
+      </div>
 
       <div className="flex p-1 bg-lightest-gray-background rounded-xl w-full lg:w-fit overflow-x-auto no-scrollbar">
         <button 
