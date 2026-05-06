@@ -1,7 +1,7 @@
 import React from 'react';
 import { ApprovalAttachment, ApprovalRecord, ApprovalStatus } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle, Download } from 'lucide-react';
+import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle, Download, Eye } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { storage } from '../storage';
@@ -19,7 +19,28 @@ function isAttachmentList(value: unknown): value is ApprovalAttachment[] {
   });
 }
 
+function canPreviewAttachment(attachment: ApprovalAttachment) {
+  const type = attachment.type || '';
+  return type.startsWith('image/') || type === 'application/pdf' || type.startsWith('text/');
+}
+
+interface PreviewState {
+  attachment: ApprovalAttachment;
+  url: string;
+  kind: 'image' | 'pdf' | 'text';
+  text?: string;
+}
+
 export default function ApprovalDetailModal({ record, onClose, onApprove, onReject }: ApprovalDetailModalProps) {
+  const [preview, setPreview] = React.useState<PreviewState | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    return () => {
+      if (preview?.url) URL.revokeObjectURL(preview.url);
+    };
+  }, [preview?.url]);
+
   if (!record) return null;
 
   const canReview = record.status === ApprovalStatus.PENDING && !!onApprove && !!onReject;
@@ -37,6 +58,38 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
       URL.revokeObjectURL(url);
     } catch {
       window.alert('文件下载失败，请稍后再试');
+    }
+  };
+
+  const closePreview = () => {
+    setPreview((current) => {
+      if (current?.url) URL.revokeObjectURL(current.url);
+      return null;
+    });
+  };
+
+  const handleAttachmentPreview = async (attachment: ApprovalAttachment) => {
+    if (!canPreviewAttachment(attachment)) {
+      await handleAttachmentDownload(attachment);
+      return;
+    }
+
+    setIsPreviewLoading(true);
+    try {
+      const blob = await storage.downloadAttachment(attachment);
+      const url = URL.createObjectURL(blob);
+      const type = attachment.type || blob.type || '';
+      const kind = type.startsWith('image/') ? 'image' : (type === 'application/pdf' ? 'pdf' : 'text');
+      const text = kind === 'text' ? await blob.text() : undefined;
+
+      setPreview((current) => {
+        if (current?.url) URL.revokeObjectURL(current.url);
+        return { attachment, url, kind, text };
+      });
+    } catch {
+      window.alert('文件预览失败，请稍后再试');
+    } finally {
+      setIsPreviewLoading(false);
     }
   };
 
@@ -144,15 +197,24 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                       {isAttachmentList(value) ? (
                         <div className="min-w-0 flex flex-col items-end gap-2">
                           {value.map((attachment) => (
-                            <button
-                              key={attachment.id}
-                              type="button"
-                              onClick={() => void handleAttachmentDownload(attachment)}
-                              className="max-w-full h-9 px-3 rounded-full bg-white border border-black/[0.06] text-[13px] font-bold text-black hover:border-black/[0.16] hover:bg-canvas-white transition-all flex items-center gap-2"
-                            >
-                              <Download size={14} strokeWidth={2.5} className="shrink-0" />
-                              <span className="truncate">{attachment.name}</span>
-                            </button>
+                            <div key={attachment.id} className="max-w-full flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void handleAttachmentPreview(attachment)}
+                                className="min-w-0 h-9 px-3 rounded-full bg-white border border-black/[0.06] text-[13px] font-bold text-black hover:border-black/[0.16] hover:bg-canvas-white transition-all flex items-center gap-2"
+                              >
+                                <Eye size={14} strokeWidth={2.5} className="shrink-0" />
+                                <span className="truncate">{attachment.name}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleAttachmentDownload(attachment)}
+                                className="w-9 h-9 rounded-full bg-white border border-black/[0.06] text-medium-gray hover:text-black hover:border-black/[0.16] hover:bg-canvas-white transition-all flex items-center justify-center"
+                                title="下载附件"
+                              >
+                                <Download size={14} strokeWidth={2.5} />
+                              </button>
+                            </div>
                           ))}
                         </div>
                       ) : (
@@ -230,6 +292,52 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
               )}
             </div>
         </motion.div>
+
+        <AnimatePresence>
+          {(preview || isPreviewLoading) && (
+            <div className="fixed inset-0 z-[140] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={closePreview}
+                className="absolute inset-0 bg-black/60 backdrop-blur-xl"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 20 }}
+                className="relative w-full max-w-5xl h-[86vh] bg-white rounded-[32px] shadow-2xl overflow-hidden flex flex-col"
+              >
+                <div className="h-16 px-6 border-b border-black/[0.06] flex items-center justify-between shrink-0">
+                  <div className="min-w-0 flex flex-col">
+                    <span className="text-[14px] font-black text-black truncate">{preview?.attachment.name || '附件预览'}</span>
+                    <span className="text-[10px] font-black text-medium-gray uppercase tracking-widest">附件预览</span>
+                  </div>
+                  <button onClick={closePreview} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-black/[0.05] text-medium-gray hover:text-black transition-colors">
+                    <X size={20} strokeWidth={3} />
+                  </button>
+                </div>
+
+                <div className="flex-1 bg-[#f5f5f7] overflow-hidden">
+                  {isPreviewLoading && !preview ? (
+                    <div className="h-full flex items-center justify-center text-[14px] font-bold text-medium-gray">加载中...</div>
+                  ) : preview?.kind === 'image' ? (
+                    <div className="h-full w-full flex items-center justify-center p-6">
+                      <img src={preview.url} alt={preview.attachment.name} className="max-h-full max-w-full object-contain rounded-2xl shadow-xl shadow-black/10" />
+                    </div>
+                  ) : preview?.kind === 'pdf' ? (
+                    <iframe src={preview.url} title={preview.attachment.name} className="h-full w-full bg-white" />
+                  ) : preview?.kind === 'text' ? (
+                    <pre className="h-full w-full overflow-auto bg-white p-8 text-[13px] leading-6 text-black whitespace-pre-wrap">{preview.text}</pre>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-[14px] font-bold text-medium-gray">该文件类型不支持预览</div>
+                  )}
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </div>
     </AnimatePresence>
   );

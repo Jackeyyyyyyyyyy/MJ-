@@ -347,11 +347,12 @@ app.get('/api/uploads/:id', authenticate, async (req, res, next) => {
       return res.status(400).json({ error: 'invalid upload file path' });
     }
 
+    const disposition = req.query.disposition === 'inline' ? 'inline' : 'attachment';
     const asciiName = String(upload.name || 'attachment').replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
     res.setHeader('Content-Type', upload.type || 'application/octet-stream');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(upload.name || 'attachment')}`,
+      `${disposition}; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(upload.name || 'attachment')}`,
     );
     res.sendFile(filePath, (error) => {
       if (error) next(error);
