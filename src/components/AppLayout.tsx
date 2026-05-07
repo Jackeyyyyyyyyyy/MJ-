@@ -126,7 +126,7 @@ export default function AppLayout({
         </header>
 
         <main className="flex-1 overflow-y-auto no-scrollbar pt-12 lg:pt-16 px-6 lg:px-20 pb-40">
-          <div className="max-w-[1400px] mx-auto">
+          <div className="max-w-[1400px] mx-auto min-h-full flex flex-col">
             <AnimatePresence mode="wait">
               <motion.div
                 key={perspective}
@@ -134,13 +134,14 @@ export default function AppLayout({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+                className="flex-1"
               >
                 {children}
               </motion.div>
             </AnimatePresence>
             <footer className="pt-12 text-center">
               <p className="text-[11px] font-bold text-light-gray">
-                Copyright (C) 2026 MJ 审批. All Rights Reserved
+                © 2026 MJ审批. All rights reserved.
               </p>
             </footer>
           </div>

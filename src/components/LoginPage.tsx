@@ -32,8 +32,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-[#fafafa] font-sans antialiased text-midnight-graphite px-6 py-10">
-      <div className="w-full max-w-[360px]">
+    <div className="min-h-screen flex flex-col items-center bg-[#fafafa] font-sans antialiased text-midnight-graphite px-6 py-10">
+      <div className="w-full max-w-[360px] flex-1 flex flex-col justify-center">
         
         {/* Logo 极其简约 */}
         <motion.div 
@@ -94,12 +94,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           </form>
         </motion.div>
 
-        <footer className="mt-24 text-center">
-          <p className="text-[11px] font-bold text-light-gray">
-            Copyright (C) 2026 MJ 审批. All Rights Reserved
-          </p>
-        </footer>
       </div>
+      <footer className="w-full text-center">
+        <p className="text-[11px] font-bold text-light-gray">
+          © 2026 MJ审批. All rights reserved.
+        </p>
+      </footer>
     </div>
   );
 
