@@ -110,7 +110,7 @@ export default function ApprovalTable({
                 <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">ID</th>
                 <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">单据类型</th>
                 <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">业务摘要</th>
-                <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">申请主体</th>
+                <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">发起人</th>
                 <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">状态</th>
                 <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">时间戳</th>
               </tr>
