@@ -5,6 +5,7 @@ import { ApprovalRecord, ApprovalStatus } from '../types';
 import ApprovalTable from './ApprovalTable';
 import ApprovalDetailModal from './ApprovalDetailModal';
 import ApprovalProgressModal from './ApprovalProgressModal';
+import StatsOverview from './StatsOverview';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -103,28 +104,11 @@ export default function BossDashboard() {
 
   return (
     <div className="space-y-8 pb-40 animate-in fade-in duration-700">
-      <section className="bg-white border border-border-silver rounded-lg overflow-hidden">
-        <div className="flex flex-col lg:flex-row lg:items-stretch">
-          <header className="px-5 py-4 lg:w-[240px] border-b lg:border-b-0 lg:border-r border-border-silver flex flex-col justify-center">
-            <h1 className="text-[22px] font-bold tracking-tight">概览</h1>
-            <p className="text-[12px] text-light-gray font-semibold mt-1">实时运营状态</p>
-          </header>
-
-          <div className="grid grid-cols-2 lg:grid-cols-4 flex-1 divide-x-0 lg:divide-x divide-y lg:divide-y-0 divide-border-silver">
-            {summaryItems.map((item) => (
-              <div key={item.label} className="min-h-[72px] px-4 py-3 flex items-center justify-between gap-3">
-                <div className="min-w-0 flex flex-col gap-1">
-                  <span className="text-[11px] font-bold text-light-gray tracking-widest">{item.label}</span>
-                  <span className="text-[24px] leading-none font-bold text-midnight-graphite tracking-tight">{item.value}</span>
-                </div>
-                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0", item.bg, item.tone)}>
-                  <item.icon size={16} strokeWidth={2.5} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      <StatsOverview
+        title="概览"
+        subtitle="实时运营状态"
+        items={summaryItems}
+      />
 
       <div className="space-y-5">
         <div className="flex flex-col lg:flex-row gap-6 lg:items-center justify-between">

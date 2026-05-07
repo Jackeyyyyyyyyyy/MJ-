@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { storage } from '../storage';
 import { auth } from '../auth';
-import { cn } from '../lib/utils';
 import { ApprovalRecord, ApprovalStatus } from '../types';
 import ApprovalTable from './ApprovalTable';
 import CreateApprovalModal from './CreateApprovalModal';
 import ApprovalDetailModal from './ApprovalDetailModal';
 import ApprovalProgressModal from './ApprovalProgressModal';
+import StatsOverview from './StatsOverview';
 import { Plus, FileText, CheckCircle2, Clock, XCircle } from 'lucide-react';
 
 export default function ApplicantHome() {
@@ -31,42 +31,42 @@ export default function ApplicantHome() {
     return () => clearInterval(timer);
   }, []);
 
-  const stats = [
-    { label: '总申请', value: records.length, icon: FileText },
-    { label: '待审批', value: records.filter(r => r.status === ApprovalStatus.PENDING).length, icon: Clock },
-    { label: '已通过', value: records.filter(r => r.status === ApprovalStatus.APPROVED).length, icon: CheckCircle2 },
-    { label: '被驳回', value: records.filter(r => r.status === ApprovalStatus.REJECTED).length, icon: XCircle },
+  const stats = useMemo(() => records.reduce(
+    (summary, record) => {
+      summary.total += 1;
+      if (record.status === ApprovalStatus.PENDING) summary.pending += 1;
+      if (record.status === ApprovalStatus.APPROVED) summary.approved += 1;
+      if (record.status === ApprovalStatus.REJECTED) summary.rejected += 1;
+      return summary;
+    },
+    { total: 0, pending: 0, approved: 0, rejected: 0 },
+  ), [records]);
+
+  const summaryItems = [
+    { label: '总申请', value: stats.total, icon: FileText, tone: 'text-midnight-graphite', bg: 'bg-lightest-gray-background' },
+    { label: '待审批', value: stats.pending, icon: Clock, tone: 'text-medium-gray', bg: 'bg-lightest-gray-background' },
+    { label: '已通过', value: stats.approved, icon: CheckCircle2, tone: 'text-[#2e7d32]', bg: 'bg-[#e8f5e9]' },
+    { label: '被驳回', value: stats.rejected, icon: XCircle, tone: 'text-[#c62828]', bg: 'bg-[#ffebee]' },
   ];
 
   return (
-    <div className="space-y-16 pb-40 animate-in fade-in duration-700">
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-8">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-[32px] font-bold tracking-tight">我的申请</h1>
-          <p className="text-[14px] text-light-gray font-medium">管理与追踪</p>
-        </div>
-        <button 
-          onClick={() => setIsCreateModalOpen(true)}
-          className="h-11 px-6 bg-black text-white rounded-xl text-[14px] font-bold hover:bg-zinc-800 transition-all flex items-center gap-2"
-        >
-          <Plus size={16} strokeWidth={3} />
-          <span>新建申请</span>
-        </button>
-      </div>
+    <div className="space-y-8 pb-40 animate-in fade-in duration-700">
+      <StatsOverview
+        title="我的申请"
+        subtitle="管理与追踪"
+        items={summaryItems}
+        action={(
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="h-9 px-4 bg-black text-white rounded-lg text-[13px] font-bold hover:bg-zinc-800 transition-all flex items-center justify-center gap-2"
+          >
+            <Plus size={15} strokeWidth={3} />
+            <span>新建申请</span>
+          </button>
+        )}
+      />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((item, idx) => (
-          <div key={idx} className="bg-white border border-border-silver p-8 flex flex-col gap-6 rounded-2xl group hover:shadow-xl hover:shadow-black/[0.02] transition-all">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-light-gray uppercase tracking-widest">{item.label}</span>
-              <item.icon size={18} className="text-light-silver" />
-            </div>
-            <p className="text-[32px] font-bold text-midnight-graphite tracking-tighter">{item.value}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="space-y-8">
+      <div className="space-y-5">
         <h2 className="text-[20px] font-bold tracking-tight">历史记录</h2>
         <div className="bg-white border border-border-silver rounded-2xl overflow-hidden shadow-sm">
           <ApprovalTable 
