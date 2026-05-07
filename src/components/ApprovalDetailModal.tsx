@@ -1,7 +1,7 @@
 import React from 'react';
 import { ApprovalAttachment, ApprovalRecord, ApprovalStatus } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle, Download, Eye } from 'lucide-react';
+import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle, Download, Eye, Check, Clock } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { storage } from '../storage';
@@ -44,6 +44,31 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
   if (!record) return null;
 
   const canReview = record.status === ApprovalStatus.PENDING && !!onApprove && !!onReject;
+  const finishedAt = record.approvedAt || record.rejectedAt;
+  const approvalTimeline = [
+    {
+      title: '发起申请',
+      desc: `发起人：${record.applicant}`,
+      time: record.createdAt,
+      state: 'done',
+    },
+    {
+      title: '审批人处理',
+      desc: record.status === ApprovalStatus.PENDING ? '待审批人处理' : `审批人：${record.approver || '系统审批员'}`,
+      time: finishedAt,
+      state: record.status === ApprovalStatus.PENDING ? 'active' : 'done',
+    },
+    {
+      title: record.status === ApprovalStatus.REJECTED ? '审批驳回' : '审批通过',
+      desc: record.status === ApprovalStatus.APPROVED
+        ? '审批流程已通过'
+        : (record.status === ApprovalStatus.REJECTED ? '审批流程已被拒绝' : '等待最终审批结果'),
+      time: finishedAt,
+      state: record.status === ApprovalStatus.APPROVED
+        ? 'done'
+        : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending'),
+    },
+  ];
 
   const handleAttachmentDownload = async (attachment: ApprovalAttachment) => {
     try {
@@ -226,33 +251,58 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
               </div>
 
               {/* Audit Log */}
-              <div className="space-y-8">
-                <div className="flex items-center gap-4">
-                  <div className="h-px bg-black/[0.05] flex-1" />
-                  <h3 className="text-[10px] font-black text-medium-gray uppercase tracking-[0.22em] whitespace-nowrap">流程审计链</h3>
-                  <div className="h-px bg-black/[0.05] flex-1" />
-                </div>
-                <div className="space-y-6 relative ml-4 border-l-[1.5px] border-black/[0.02] pl-10 py-2">
-                  {record.logs.map((log, idx) => (
-                    <div key={idx} className="relative group">
-                      <div className="absolute -left-[49px] top-1 w-4.5 h-4.5 rounded-2xl border-[1.5px] border-white bg-slate-100 group-hover:bg-black group-hover:border-black transition-all duration-500" />
-                      <div className="flex flex-col gap-1.5">
-                        <div className="flex items-baseline justify-between gap-10">
-                          <span className="text-[15px] font-black text-black uppercase tracking-tight leading-none">{log.action}</span>
-                          <span className="text-[10px] font-black text-light-gray font-mono tracking-widest uppercase">{format(new Date(log.time), 'HH:mm:ss')}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-black text-medium-gray uppercase tracking-widest">执行主体</span>
-                          <span className="text-[13px] font-black text-black tracking-tight">{log.user}</span>
-                        </div>
-                        {log.details && (
-                          <div className="mt-1 p-3 bg-[#fbfbfd] rounded-xl text-[12px] font-bold text-medium-gray italic">
-                            {log.details}
-                          </div>
-                        )}
-                      </div>
+              <div className="overflow-hidden rounded-[40px] bg-white border border-black/[0.03] shadow-xl shadow-black/[0.04]">
+                <div className="px-10 py-8 border-b border-black/[0.02] flex items-center justify-between bg-[#fbfbfd]">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-black rounded-2xl flex items-center justify-center">
+                      <CheckCircle2 className="text-white w-5 h-5" strokeWidth={3} />
                     </div>
-                  ))}
+                    <h3 className="text-[20px] font-black text-black tracking-tight uppercase">审批流进度汇总</h3>
+                  </div>
+                </div>
+                <div className="p-12">
+                  <div className="space-y-0 relative">
+                    {approvalTimeline.map((step, idx) => (
+                      <div key={idx} className="relative flex gap-8 pb-16 last:pb-0">
+                        {idx !== approvalTimeline.length - 1 && (
+                          <div className={cn(
+                            "absolute top-10 left-5 w-[1.5px] h-full transition-all duration-700",
+                            step.state === 'done' ? "bg-black" : "bg-slate-100"
+                          )} />
+                        )}
+
+                        <div className="shrink-0 z-10">
+                          <div className={cn(
+                            "w-10 h-10 rounded-2xl flex items-center justify-center border-2 transition-all duration-500",
+                            step.state === 'done' ? "bg-black border-black text-white" :
+                            (step.state === 'active' ? "bg-white border-black text-black shadow-xl shadow-black/10" :
+                            (step.state === 'failed' ? "bg-rose-500 border-rose-500 text-white" : "bg-white border-border-silver text-light-gray"))
+                          )}>
+                            {step.state === 'done' && <Check size={18} strokeWidth={3} />}
+                            {step.state === 'active' && <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 4, ease: 'linear' }}><Clock size={18} strokeWidth={3} /></motion.div>}
+                            {step.state === 'failed' && <X size={18} strokeWidth={3} />}
+                            {step.state === 'pending' && <div className="w-2 h-2 rounded-full bg-slate-100" />}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-1.5 pt-1.5">
+                          <h4 className={cn(
+                            "text-[15px] font-black uppercase tracking-tight",
+                            step.state === 'pending' ? "text-medium-gray" : "text-black"
+                          )}>{step.title}</h4>
+                          <p className="text-[12px] font-bold text-medium-gray">{step.desc}</p>
+                          {step.time && (
+                            <p className="text-[10px] font-black text-light-gray font-mono mt-2 uppercase tracking-widest">
+                              {format(new Date(step.time), 'yyyy.MM.dd // HH:mm:ss')}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="p-8 bg-[#fbfbfd] border-t border-black/[0.02] flex items-center justify-center">
+                  <span className="text-[9px] font-black text-medium-gray uppercase tracking-[0.24em]">由 Matrix Core 驱动解析</span>
                 </div>
               </div>
             </div>

@@ -2,7 +2,7 @@ import React from 'react';
 import { ApprovalRecord, ApprovalStatus } from '../types';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
-import { Clock, CheckCircle, XCircle, FileText } from 'lucide-react';
+import { FileText } from 'lucide-react';
 
 interface ApprovalTableProps {
   records: ApprovalRecord[];
@@ -15,11 +15,7 @@ interface ApprovalTableProps {
 
 export default function ApprovalTable({ 
   records, 
-  onViewDetail, 
-  onViewProgress,
-  onApprove,
-  onReject,
-  showActions = true
+  onViewDetail
 }: ApprovalTableProps) {
   
   const renderRow = (record: ApprovalRecord) => {
@@ -88,55 +84,6 @@ export default function ApprovalTable({
           {format(new Date(record.createdAt), 'MM/dd')}
           <span className="text-[12px] opacity-60 ml-2 font-normal">{format(new Date(record.createdAt), 'HH:mm')}</span>
         </td>
-
-        {showActions && (
-          <td
-            className="px-8 py-6 whitespace-nowrap text-right"
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-end gap-2">
-              <button 
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onViewProgress(record);
-                }}
-                className="w-9 h-9 flex items-center justify-center text-medium-gray hover:text-sky-blue-highlight transition-colors rounded-full hover:bg-canvas-white"
-                title="流程追踪"
-              >
-                <Clock size={17} strokeWidth={2} />
-              </button>
-              
-              {onApprove && onReject && record.status === ApprovalStatus.PENDING && (
-                <>
-                  <div className="w-px h-4 bg-border-silver mx-1" />
-                  <button 
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onApprove(record);
-                    }}
-                    className="h-9 px-3 flex items-center justify-center gap-1.5 text-[12px] font-bold text-[#2e7d32] bg-[#e8f5e9] hover:bg-[#d6edda] rounded-full transition-all"
-                    title="批准"
-                  >
-                    <CheckCircle size={15} strokeWidth={2.5} />
-                    <span>通过</span>
-                  </button>
-                  <button 
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onReject(record);
-                    }}
-                    className="h-9 px-3 flex items-center justify-center gap-1.5 text-[12px] font-bold text-[#c62828] bg-[#ffebee] hover:bg-[#ffd9de] rounded-full transition-all"
-                    title="驳回"
-                  >
-                    <XCircle size={15} strokeWidth={2.5} />
-                    <span>驳回</span>
-                  </button>
-                </>
-              )}
-            </div>
-          </td>
-        )}
       </tr>
     );
   };
@@ -166,7 +113,6 @@ export default function ApprovalTable({
                 <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">申请主体</th>
                 <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">状态</th>
                 <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">时间戳</th>
-                {showActions && <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest text-right">管控</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border-silver">
