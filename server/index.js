@@ -14,9 +14,11 @@ const dataDir =
   process.env.DATA_DIR ||
   path.resolve(process.cwd(), 'data');
 const recordsFile = path.join(dataDir, 'approval-records.json');
+const accountsFile = path.join(dataDir, 'approval-accounts.json');
 const uploadsDir = path.join(dataDir, 'uploads');
 const uploadsIndexFile = path.join(dataDir, 'approval-uploads.json');
 const validStatuses = new Set(['草稿', '待审批', '已批准', '已拒绝']);
+const managedRoles = new Set(['applicant', 'approver', 'boss']);
 
 function requireEnv(name) {
   const value = process.env[name]?.trim();
@@ -27,7 +29,9 @@ function requireEnv(name) {
   return value;
 }
 
-const appPassword = requireEnv('APP_PASSWORD');
+const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD?.trim() || requireEnv('APP_PASSWORD');
+const superAdminUsername = process.env.SUPER_ADMIN_USERNAME?.trim() || 'developer';
+const superAdminName = process.env.SUPER_ADMIN_NAME?.trim() || '超级管理员';
 const authSecret = requireEnv('AUTH_SECRET');
 const configuredTokenTtlMs = Number(process.env.AUTH_TOKEN_TTL_MS);
 const tokenTtlMs =
@@ -44,11 +48,12 @@ const maxUploadBatchBytes =
   Number.isFinite(configuredMaxUploadBatchBytes) && configuredMaxUploadBatchBytes > 0
     ? configuredMaxUploadBatchBytes
     : 20 * 1024 * 1024;
-const users = {
-  applicant: { username: 'applicant', role: 'applicant', name: '张申请', password: appPassword },
-  approver: { username: 'approver', role: 'approver', name: '李审批', password: appPassword },
-  boss: { username: 'boss', role: 'boss', name: '王老板', password: appPassword },
-  developer: { username: 'developer', role: 'developer', name: '超级管理员', password: appPassword },
+const superAdmin = {
+  id: 'super-admin',
+  username: superAdminUsername,
+  role: 'developer',
+  name: superAdminName,
+  isSuperAdmin: true,
 };
 
 const roleLabels = {
@@ -89,6 +94,38 @@ function toPublicUser(user) {
   };
 }
 
+function hashPassword(password, salt = crypto.randomBytes(16).toString('base64url')) {
+  const hash = crypto.scryptSync(String(password), salt, 64).toString('base64url');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, passwordHash) {
+  const [salt, expected] = String(passwordHash || '').split(':');
+  if (!salt || !expected) return false;
+
+  const actual = crypto.scryptSync(String(password), salt, 64).toString('base64url');
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+
+  return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function toPublicAccount(account) {
+  return {
+    id: account.id,
+    username: account.username,
+    role: account.role,
+    name: account.name,
+    roleLabel: roleLabels[account.role] || account.role,
+    permissions: rolePermissions[account.role] || [],
+    canSwitchPerspective: account.role === 'developer',
+    isSuperAdmin: account.role === 'developer',
+    enabled: account.enabled !== false,
+    createdAt: account.createdAt,
+    updatedAt: account.updatedAt,
+  };
+}
+
 function sign(value) {
   return crypto.createHmac('sha256', authSecret).update(value).digest('base64url');
 }
@@ -110,7 +147,7 @@ function createToken(user) {
   };
 }
 
-function verifyToken(token) {
+async function verifyToken(token) {
   const [payload, signature] = String(token || '').split('.');
   if (!payload || !signature) return null;
 
@@ -136,16 +173,22 @@ function verifyToken(token) {
     return null;
   }
 
-  const user = users[session.sub];
+  const user = await findAccount(session.sub);
   if (!user) return null;
 
   return toPublicUser(user);
 }
 
-function authenticate(req, res, next) {
-  const authorization = req.get('authorization') || '';
-  const match = authorization.match(/^Bearer\s+(.+)$/i);
-  const user = match ? verifyToken(match[1]) : null;
+async function authenticate(req, res, next) {
+  let user = null;
+
+  try {
+    const authorization = req.get('authorization') || '';
+    const match = authorization.match(/^Bearer\s+(.+)$/i);
+    user = match ? await verifyToken(match[1]) : null;
+  } catch (error) {
+    return next(error);
+  }
 
   if (!user) {
     return res.status(401).json({ error: 'authentication required' });
@@ -227,8 +270,59 @@ async function writeRecords(records) {
   await fs.rename(tempFile, recordsFile);
 }
 
+function createSeedAccount(username, role, name) {
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    username,
+    role,
+    name,
+    passwordHash: hashPassword('123456'),
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+async function ensureAccountsFile() {
+  await fs.mkdir(dataDir, { recursive: true });
+
+  try {
+    await fs.access(accountsFile);
+  } catch {
+    const seedAccounts = [
+      createSeedAccount('applicant', 'applicant', '张申请'),
+      createSeedAccount('approver', 'approver', '李审批'),
+      createSeedAccount('boss', 'boss', '王老板'),
+    ];
+    await fs.writeFile(accountsFile, `${JSON.stringify(seedAccounts, null, 2)}\n`, 'utf8');
+  }
+}
+
+async function readAccounts() {
+  await ensureAccountsFile();
+  const content = await fs.readFile(accountsFile, 'utf8');
+
+  if (!content.trim()) return [];
+
+  const accounts = JSON.parse(content);
+  if (!Array.isArray(accounts)) {
+    throw new Error('approval accounts file must contain an array');
+  }
+
+  return accounts;
+}
+
+async function writeAccounts(accounts) {
+  await ensureAccountsFile();
+  const tempFile = `${accountsFile}.tmp`;
+  await fs.writeFile(tempFile, `${JSON.stringify(accounts, null, 2)}\n`, 'utf8');
+  await fs.rename(tempFile, accountsFile);
+}
+
 let writeQueue = Promise.resolve();
 let uploadWriteQueue = Promise.resolve();
+let accountWriteQueue = Promise.resolve();
 
 function updateRecords(mutator) {
   const operation = writeQueue.catch(() => undefined).then(async () => {
@@ -252,6 +346,25 @@ function updateUploads(mutator) {
 
   uploadWriteQueue = operation.catch(() => undefined);
   return operation;
+}
+
+function updateAccounts(mutator) {
+  const operation = accountWriteQueue.catch(() => undefined).then(async () => {
+    const accounts = await readAccounts();
+    const result = await mutator(accounts);
+    await writeAccounts(accounts);
+    return result;
+  });
+
+  accountWriteQueue = operation.catch(() => undefined);
+  return operation;
+}
+
+async function findAccount(username) {
+  if (username === superAdmin.username) return superAdmin;
+
+  const accounts = await readAccounts();
+  return accounts.find((account) => account.username === username && account.enabled !== false) || null;
 }
 
 function sanitizeUploadName(name) {
@@ -281,28 +394,150 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-app.get('/api/accounts', authenticate, requireRoles('developer'), (_req, res) => {
-  res.json(Object.values(users).map(({ password, ...user }) => ({
-    ...user,
-    roleLabel: roleLabels[user.role] || user.role,
-    permissions: rolePermissions[user.role] || [],
-    canSwitchPerspective: user.role === 'developer',
-  })));
+app.get('/api/accounts', authenticate, requireRoles('developer'), async (_req, res, next) => {
+  try {
+    const accounts = await readAccounts();
+    res.json([
+      toPublicAccount(superAdmin),
+      ...accounts.map(toPublicAccount),
+    ]);
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.post('/api/auth/login', (req, res) => {
-  const { username, password } = req.body || {};
-  const user = users[String(username || '').trim()];
+app.post('/api/accounts', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const username = String(req.body?.username || '').trim();
+    const name = String(req.body?.name || '').trim();
+    const role = String(req.body?.role || '').trim();
+    const password = String(req.body?.password || '123456');
 
-  if (!user || password !== user.password) {
-    return res.status(401).json({ error: 'invalid username or password' });
+    if (!username || !name || !managedRoles.has(role)) {
+      return res.status(400).json({ error: 'missing or invalid account fields' });
+    }
+
+    if (username === superAdmin.username) {
+      return res.status(409).json({ error: 'username already exists' });
+    }
+
+    const account = await updateAccounts((accounts) => {
+      if (accounts.some((item) => item.username === username)) {
+        const error = new Error('username already exists');
+        error.statusCode = 409;
+        throw error;
+      }
+
+      const now = new Date().toISOString();
+      const newAccount = {
+        id: crypto.randomUUID(),
+        username,
+        name,
+        role,
+        passwordHash: hashPassword(password || '123456'),
+        enabled: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      accounts.unshift(newAccount);
+      return newAccount;
+    });
+
+    res.status(201).json(toPublicAccount(account));
+  } catch (error) {
+    next(error);
   }
+});
 
-  const session = createToken(user);
-  res.json({
-    user: toPublicUser(user),
-    ...session,
-  });
+app.patch('/api/accounts/:id', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (id === superAdmin.id) {
+      return res.status(400).json({ error: 'super admin is managed by environment variables' });
+    }
+
+    const updatedAccount = await updateAccounts((accounts) => {
+      const account = accounts.find((item) => item.id === id);
+      if (!account) {
+        const error = new Error('account not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const nextUsername = req.body?.username === undefined ? account.username : String(req.body.username || '').trim();
+      const nextName = req.body?.name === undefined ? account.name : String(req.body.name || '').trim();
+      const nextRole = req.body?.role === undefined ? account.role : String(req.body.role || '').trim();
+
+      if (!nextUsername || !nextName || !managedRoles.has(nextRole)) {
+        const error = new Error('missing or invalid account fields');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      if (
+        nextUsername === superAdmin.username ||
+        accounts.some((item) => item.id !== id && item.username === nextUsername)
+      ) {
+        const error = new Error('username already exists');
+        error.statusCode = 409;
+        throw error;
+      }
+
+      account.username = nextUsername;
+      account.name = nextName;
+      account.role = nextRole;
+      account.enabled = req.body?.enabled === undefined ? account.enabled !== false : Boolean(req.body.enabled);
+
+      if (req.body?.password !== undefined) {
+        const password = String(req.body.password || '');
+        if (password.length < 1) {
+          const error = new Error('password is required');
+          error.statusCode = 400;
+          throw error;
+        }
+        account.passwordHash = hashPassword(password);
+      }
+
+      account.updatedAt = new Date().toISOString();
+      return account;
+    });
+
+    res.json(toPublicAccount(updatedAccount));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/auth/login', async (req, res, next) => {
+  try {
+    const { username, password } = req.body || {};
+    const loginName = String(username || '').trim();
+    let user = null;
+
+    if (loginName === superAdmin.username && password === superAdminPassword) {
+      user = superAdmin;
+    } else {
+      const accounts = await readAccounts();
+      const account = accounts.find((item) => item.username === loginName && item.enabled !== false);
+      if (account && verifyPassword(password, account.passwordHash)) {
+        user = account;
+      }
+    }
+
+    if (!user) {
+      return res.status(401).json({ error: 'invalid username or password' });
+    }
+
+    const session = createToken(user);
+    res.json({
+      user: toPublicUser(user),
+      ...session,
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post('/api/uploads', authenticate, requireRoles('applicant'), async (req, res, next) => {

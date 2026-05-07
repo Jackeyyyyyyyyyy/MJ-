@@ -1,4 +1,4 @@
-import { ApprovalAttachment, ApprovalRecord, ApprovalStatus, SystemAccount } from './types';
+import { AccountInput, ApprovalAttachment, ApprovalRecord, ApprovalStatus, SystemAccount } from './types';
 import { auth } from './auth';
 
 type NewApprovalRecord = Omit<ApprovalRecord, 'id' | 'createdAt' | 'updatedAt' | 'logs' | 'status'>;
@@ -59,6 +59,20 @@ export const storage = {
 
   getAccounts(): Promise<SystemAccount[]> {
     return request<SystemAccount[]>('/accounts');
+  },
+
+  createAccount(account: AccountInput): Promise<SystemAccount> {
+    return request<SystemAccount>('/accounts', {
+      method: 'POST',
+      body: JSON.stringify(account),
+    });
+  },
+
+  updateAccount(id: string, account: Partial<AccountInput>): Promise<SystemAccount> {
+    return request<SystemAccount>(`/accounts/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(account),
+    });
   },
 
   addRecord(record: NewApprovalRecord): Promise<ApprovalRecord> {

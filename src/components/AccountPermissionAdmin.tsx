@@ -1,9 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ShieldCheck, Users, UserCog, KeyRound, Layers } from 'lucide-react';
+import { Check, KeyRound, Layers, Plus, RefreshCw, ShieldCheck, UserCog, Users } from 'lucide-react';
 import { storage } from '../storage';
-import { SystemAccount } from '../types';
+import { AccountInput, Role, SystemAccount } from '../types';
 import StatsOverview from './StatsOverview';
 import { cn } from '../lib/utils';
+
+type ManagedRole = Exclude<Role, 'developer'>;
+
+interface AccountDraft {
+  username: string;
+  name: string;
+  role: ManagedRole;
+  enabled: boolean;
+  password: string;
+}
 
 const roleTone: Record<string, string> = {
   applicant: 'bg-[#eef6ff] text-[#0066cc]',
@@ -12,15 +22,45 @@ const roleTone: Record<string, string> = {
   developer: 'bg-black text-white',
 };
 
+const roleOptions: Array<{ value: ManagedRole; label: string }> = [
+  { value: 'applicant', label: '申请人' },
+  { value: 'approver', label: '审批人' },
+  { value: 'boss', label: '管理员' },
+];
+
+const defaultAccount: AccountInput = {
+  username: '',
+  name: '',
+  role: 'applicant',
+  password: '123456',
+  enabled: true,
+};
+
+function toDraft(account: SystemAccount): AccountDraft {
+  return {
+    username: account.username,
+    name: account.name,
+    role: account.role === 'developer' ? 'boss' : account.role,
+    enabled: account.enabled,
+    password: '',
+  };
+}
+
 export default function AccountPermissionAdmin() {
   const [accounts, setAccounts] = useState<SystemAccount[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, AccountDraft>>({});
+  const [newAccount, setNewAccount] = useState<AccountInput>(defaultAccount);
   const [isLoading, setIsLoading] = useState(true);
+  const [savingId, setSavingId] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
   const loadAccounts = async () => {
     setError('');
     try {
-      setAccounts(await storage.getAccounts());
+      const nextAccounts = await storage.getAccounts();
+      setAccounts(nextAccounts);
+      setDrafts(Object.fromEntries(nextAccounts.map((account) => [account.id, toDraft(account)])));
     } catch (err) {
       setError(err instanceof Error ? err.message : '账号权限加载失败');
     } finally {
@@ -33,11 +73,12 @@ export default function AccountPermissionAdmin() {
   }, []);
 
   const stats = useMemo(() => {
+    const normalAccounts = accounts.filter((account) => !account.isSuperAdmin);
     const permissionCount = new Set(accounts.flatMap(account => account.permissions.map(permission => permission.key))).size;
 
     return {
       total: accounts.length,
-      superAdmins: accounts.filter(account => account.role === 'developer').length,
+      normal: normalAccounts.length,
       roles: new Set(accounts.map(account => account.role)).size,
       permissions: permissionCount,
     };
@@ -45,24 +86,130 @@ export default function AccountPermissionAdmin() {
 
   const summaryItems = [
     { label: '账号总数', value: stats.total, icon: Users, tone: 'text-midnight-graphite', bg: 'bg-lightest-gray-background' },
-    { label: '超级管理员', value: stats.superAdmins, icon: ShieldCheck, tone: 'text-white', bg: 'bg-black' },
-    { label: '角色类型', value: stats.roles, icon: UserCog, tone: 'text-[#0066cc]', bg: 'bg-[#eef6ff]' },
+    { label: '普通账号', value: stats.normal, icon: UserCog, tone: 'text-[#0066cc]', bg: 'bg-[#eef6ff]' },
+    { label: '角色类型', value: stats.roles, icon: ShieldCheck, tone: 'text-white', bg: 'bg-black' },
     { label: '权限项', value: stats.permissions, icon: KeyRound, tone: 'text-[#2e7d32]', bg: 'bg-[#e8f5e9]' },
   ];
+
+  const handleCreate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    setNotice('');
+    setSavingId('new');
+
+    try {
+      await storage.createAccount({
+        ...newAccount,
+        username: newAccount.username.trim(),
+        name: newAccount.name.trim(),
+        password: newAccount.password?.trim() || '123456',
+      });
+      setNewAccount(defaultAccount);
+      setNotice('账号已创建，默认密码为 123456');
+      await loadAccounts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '账号创建失败');
+    } finally {
+      setSavingId('');
+    }
+  };
+
+  const updateDraft = (id: string, patch: Partial<AccountDraft>) => {
+    setDrafts((current) => ({
+      ...current,
+      [id]: {
+        ...current[id],
+        ...patch,
+      },
+    }));
+  };
+
+  const handleSave = async (account: SystemAccount) => {
+    const draft = drafts[account.id];
+    if (!draft) return;
+
+    setError('');
+    setNotice('');
+    setSavingId(account.id);
+
+    try {
+      const payload: Partial<AccountInput> = {
+        username: draft.username.trim(),
+        name: draft.name.trim(),
+        role: draft.role,
+        enabled: draft.enabled,
+      };
+
+      if (draft.password.trim()) {
+        payload.password = draft.password.trim();
+      }
+
+      await storage.updateAccount(account.id, payload);
+      setNotice(draft.password.trim() ? '账号资料和密码已更新' : '账号资料已更新');
+      await loadAccounts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '账号保存失败');
+    } finally {
+      setSavingId('');
+    }
+  };
 
   return (
     <div className="space-y-8 pb-40 animate-in fade-in duration-700">
       <StatsOverview
         title="账号权限管理"
-        subtitle="系统账号与访问范围"
+        subtitle="账号、角色与访问范围"
         items={summaryItems}
       />
 
       <section className="bg-white border border-border-silver rounded-lg overflow-hidden">
         <div className="px-5 py-4 border-b border-border-silver flex items-center justify-between gap-4">
           <div>
+            <h2 className="text-[20px] font-bold tracking-tight">新建账号</h2>
+            <p className="text-[12px] text-light-gray font-semibold mt-1">普通账号默认密码为 123456，创建后可在下方修改</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleCreate} className="p-5 grid grid-cols-1 md:grid-cols-[1fr_1fr_160px_150px] gap-3">
+          <input
+            value={newAccount.username}
+            onChange={(event) => setNewAccount((current) => ({ ...current, username: event.target.value }))}
+            className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black"
+            placeholder="登录账号"
+            required
+          />
+          <input
+            value={newAccount.name}
+            onChange={(event) => setNewAccount((current) => ({ ...current, name: event.target.value }))}
+            className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black"
+            placeholder="显示名称"
+            required
+          />
+          <select
+            value={newAccount.role}
+            onChange={(event) => setNewAccount((current) => ({ ...current, role: event.target.value as ManagedRole }))}
+            className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black"
+          >
+            {roleOptions.map((role) => (
+              <option key={role.value} value={role.value}>{role.label}</option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            disabled={savingId === 'new'}
+            className="h-11 px-4 bg-black text-white rounded-lg text-[13px] font-bold hover:bg-zinc-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            <Plus size={15} strokeWidth={3} />
+            新建账号
+          </button>
+        </form>
+      </section>
+
+      <section className="bg-white border border-border-silver rounded-lg overflow-hidden">
+        <div className="px-5 py-4 border-b border-border-silver flex items-center justify-between gap-4">
+          <div>
             <h2 className="text-[20px] font-bold tracking-tight">系统账号</h2>
-            <p className="text-[12px] text-light-gray font-semibold mt-1">超级管理员可查看全部账号的角色和权限范围</p>
+            <p className="text-[12px] text-light-gray font-semibold mt-1">超级管理员由环境变量控制，普通账号由这里维护</p>
           </div>
           <button
             type="button"
@@ -70,15 +217,19 @@ export default function AccountPermissionAdmin() {
               setIsLoading(true);
               void loadAccounts();
             }}
-            className="h-9 px-4 bg-black text-white rounded-lg text-[13px] font-bold hover:bg-zinc-800 transition-all"
+            className="h-9 px-4 bg-black text-white rounded-lg text-[13px] font-bold hover:bg-zinc-800 transition-all flex items-center gap-2"
           >
+            <RefreshCw size={14} strokeWidth={2.5} />
             刷新
           </button>
         </div>
 
-        {error && (
-          <div className="px-5 py-4 text-[13px] font-semibold text-[#c62828] bg-[#ffebee]">
-            {error}
+        {(error || notice) && (
+          <div className={cn(
+            "px-5 py-4 text-[13px] font-semibold",
+            error ? "text-[#c62828] bg-[#ffebee]" : "text-[#2e7d32] bg-[#e8f5e9]",
+          )}>
+            {error || notice}
           </div>
         )}
 
@@ -88,42 +239,109 @@ export default function AccountPermissionAdmin() {
           </div>
         ) : (
           <div className="divide-y divide-border-silver">
-            {accounts.map((account) => (
-              <article key={account.username} className="px-5 py-5 grid grid-cols-1 xl:grid-cols-[260px_1fr] gap-5">
-                <div className="flex items-start gap-4 min-w-0">
-                  <div className="w-11 h-11 rounded-lg bg-lightest-gray-background flex items-center justify-center shrink-0">
-                    <UserCog size={19} strokeWidth={2.2} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-[16px] font-bold tracking-tight">{account.name}</h3>
-                      <span className={cn(
-                        'px-2.5 py-1 rounded-apple-btn text-[11px] font-bold',
-                        roleTone[account.role] || 'bg-lightest-gray-background text-medium-gray',
-                      )}>
-                        {account.roleLabel}
-                      </span>
+            {accounts.map((account) => {
+              const draft = drafts[account.id] || toDraft(account);
+
+              return (
+                <article key={account.id} className="px-5 py-5 space-y-4">
+                  <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                    <div className="flex items-start gap-4 min-w-0">
+                      <div className="w-11 h-11 rounded-lg bg-lightest-gray-background flex items-center justify-center shrink-0">
+                        <UserCog size={19} strokeWidth={2.2} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-[16px] font-bold tracking-tight">{account.name}</h3>
+                          <span className={cn(
+                            'px-2.5 py-1 rounded-apple-btn text-[11px] font-bold',
+                            roleTone[account.role] || 'bg-lightest-gray-background text-medium-gray',
+                          )}>
+                            {account.roleLabel}
+                          </span>
+                          {account.isSuperAdmin && (
+                            <span className="px-2.5 py-1 rounded-apple-btn text-[11px] font-bold bg-lightest-gray-background text-medium-gray">
+                              环境变量
+                            </span>
+                          )}
+                          {!account.enabled && (
+                            <span className="px-2.5 py-1 rounded-apple-btn text-[11px] font-bold bg-[#ffebee] text-[#c62828]">
+                              已停用
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[12px] text-light-gray font-semibold mt-1">{account.username}</p>
+                      </div>
                     </div>
-                    <p className="text-[12px] text-light-gray font-semibold mt-1">{account.username}</p>
-                    {account.canSwitchPerspective && (
-                      <p className="text-[12px] text-action-blue font-semibold mt-3">可切换申请人、审批人、管理员视角</p>
+
+                    {!account.isSuperAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => void handleSave(account)}
+                        disabled={savingId === account.id}
+                        className="h-10 px-4 bg-black text-white rounded-lg text-[13px] font-bold hover:bg-zinc-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        <Check size={15} strokeWidth={3} />
+                        保存修改
+                      </button>
                     )}
                   </div>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {account.permissions.map((permission) => (
-                    <div
-                      key={permission.key}
-                      className="min-h-[42px] px-3 py-2 bg-canvas-white border border-border-silver rounded-lg flex items-center gap-3"
-                    >
-                      <Layers size={15} strokeWidth={2.2} className="text-medium-gray shrink-0" />
-                      <span className="text-[13px] font-semibold text-midnight-graphite">{permission.label}</span>
+                  {account.isSuperAdmin ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {account.permissions.map((permission) => (
+                        <div
+                          key={permission.key}
+                          className="min-h-[42px] px-3 py-2 bg-canvas-white border border-border-silver rounded-lg flex items-center gap-3"
+                        >
+                          <Layers size={15} strokeWidth={2.2} className="text-medium-gray shrink-0" />
+                          <span className="text-[13px] font-semibold text-midnight-graphite">{permission.label}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </article>
-            ))}
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[1fr_1fr_160px_160px_120px] gap-3">
+                      <input
+                        value={draft.username}
+                        onChange={(event) => updateDraft(account.id, { username: event.target.value })}
+                        className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black"
+                        placeholder="登录账号"
+                      />
+                      <input
+                        value={draft.name}
+                        onChange={(event) => updateDraft(account.id, { name: event.target.value })}
+                        className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black"
+                        placeholder="显示名称"
+                      />
+                      <select
+                        value={draft.role}
+                        onChange={(event) => updateDraft(account.id, { role: event.target.value as ManagedRole })}
+                        className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black"
+                      >
+                        {roleOptions.map((role) => (
+                          <option key={role.value} value={role.value}>{role.label}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="password"
+                        value={draft.password}
+                        onChange={(event) => updateDraft(account.id, { password: event.target.value })}
+                        className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black"
+                        placeholder="新密码"
+                      />
+                      <label className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[13px] font-bold flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={draft.enabled}
+                          onChange={(event) => updateDraft(account.id, { enabled: event.target.checked })}
+                          className="accent-black"
+                        />
+                        启用
+                      </label>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
           </div>
         )}
       </section>

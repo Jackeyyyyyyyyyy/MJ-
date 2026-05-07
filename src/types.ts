@@ -26,9 +26,22 @@ export interface AccountPermission {
 }
 
 export interface SystemAccount extends User {
+  id: string;
   roleLabel: string;
   permissions: AccountPermission[];
   canSwitchPerspective: boolean;
+  isSuperAdmin: boolean;
+  enabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AccountInput {
+  username: string;
+  name: string;
+  role: Exclude<Role, 'developer'>;
+  password?: string;
+  enabled?: boolean;
 }
 
 export interface BusinessField {
