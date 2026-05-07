@@ -42,10 +42,25 @@ const batchModifyDetailColumns = [
   { key: 'updatedSupplier', label: '修改后供应商' },
 ];
 
-function isBatchModifyDetailRows(value: unknown) {
-  return Array.isArray(value) && value.every((row) => {
-    return !!row && typeof row === 'object' && batchModifyDetailColumns.every((column) => column.key in row);
+const fundsReductionDetailColumns = [
+  { key: 'order', label: '订单' },
+  { key: 'containerNo', label: '箱号' },
+  { key: 'feeItem', label: '费用项' },
+  { key: 'originalAmount', label: '原始金额' },
+  { key: 'reductionAmount', label: '申请减免金额' },
+  { key: 'reducedAmount', label: '减免后金额' },
+];
+
+function getStructuredDetailColumns(value: unknown) {
+  if (!Array.isArray(value) || value.length === 0) return [];
+
+  const matchesColumns = (columns: typeof batchModifyDetailColumns) => value.every((row) => {
+    return !!row && typeof row === 'object' && columns.every((column) => column.key in row);
   });
+
+  if (matchesColumns(batchModifyDetailColumns)) return batchModifyDetailColumns;
+  if (matchesColumns(fundsReductionDetailColumns)) return fundsReductionDetailColumns;
+  return [];
 }
 
 function getAiSuggestionDisplay(record: ApprovalRecord) {
@@ -292,24 +307,38 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                 </div>
                 <div className="grid grid-cols-1 gap-2">
                   {Object.entries(record.businessData).map(([key, value]) => (
-                    <div key={key} className={cn(
-                      "gap-6 p-7 bg-[#fbfbfd] rounded-[24px] group border border-transparent hover:border-black/[0.02] hover:bg-white transition-all",
-                      isBatchModifyDetailRows(value) ? "flex flex-col items-stretch" : "flex items-center justify-between",
-                    )}>
+                    <div
+                      key={key}
+                      className={cn(
+                        "gap-6 p-7 bg-[#fbfbfd] rounded-[24px] group border border-transparent hover:border-black/[0.02] hover:bg-white transition-all",
+                        getStructuredDetailColumns(value).length > 0 ? "flex flex-col items-stretch" : "flex items-center justify-between",
+                      )}
+                    >
                       <span className="text-[11px] font-black text-medium-gray uppercase tracking-[0.16em]">{key}</span>
-                      {isBatchModifyDetailRows(value) ? (
+                      {getStructuredDetailColumns(value).length > 0 ? (
                         <div className="overflow-x-auto no-scrollbar">
-                          <div className="min-w-[920px] overflow-hidden rounded-2xl border border-border-silver bg-white">
-                            <div className="grid grid-cols-7 border-b border-border-silver bg-canvas-white">
-                              {batchModifyDetailColumns.map((column) => (
+                          <div className="min-w-[840px] overflow-hidden rounded-2xl border border-border-silver bg-white">
+                            <div
+                              className={cn(
+                                "grid border-b border-border-silver bg-canvas-white",
+                                getStructuredDetailColumns(value).length === 7 ? "grid-cols-7" : "grid-cols-6",
+                              )}
+                            >
+                              {getStructuredDetailColumns(value).map((column) => (
                                 <div key={column.key} className="px-3 py-3 text-[11px] font-black text-medium-gray">
                                   {column.label}
                                 </div>
                               ))}
                             </div>
                             {value.map((row, rowIndex) => (
-                              <div key={rowIndex} className="grid grid-cols-7 border-b border-border-silver last:border-b-0">
-                                {batchModifyDetailColumns.map((column) => (
+                              <div
+                                key={rowIndex}
+                                className={cn(
+                                  "grid border-b border-border-silver last:border-b-0",
+                                  getStructuredDetailColumns(value).length === 7 ? "grid-cols-7" : "grid-cols-6",
+                                )}
+                              >
+                                {getStructuredDetailColumns(value).map((column) => (
                                   <div key={column.key} className="px-3 py-4 text-[13px] font-bold text-black break-all">
                                     {String((row as Record<string, unknown>)[column.key] || '-')}
                                   </div>

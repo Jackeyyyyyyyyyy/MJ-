@@ -259,7 +259,6 @@ export const approvalSchema: Schema = {
         {
           "name": "特价审批",
           "businessFields": [
-            "钉钉审批单编号",
             "始发地（站点/国家区域）",
             "口岸",
             "目的地（站点/国家区域）",
@@ -277,7 +276,6 @@ export const approvalSchema: Schema = {
         {
           "name": "利润审批",
           "businessFields": [
-            "钉钉审批单编号",
             "订单号",
             "客户",
             "箱号"

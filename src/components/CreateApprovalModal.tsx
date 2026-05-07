@@ -8,6 +8,7 @@ import { cn } from '../lib/utils';
 import { ApprovalAttachment, Module, ApprovalType } from '../types';
 
 interface BatchModifyDetailRow {
+  [key: string]: string;
   order: string;
   containerNo: string;
   feeName: string;
@@ -15,6 +16,16 @@ interface BatchModifyDetailRow {
   originalSupplier: string;
   updatedAmount: string;
   updatedSupplier: string;
+}
+
+interface FundsReductionDetailRow {
+  [key: string]: string;
+  order: string;
+  containerNo: string;
+  feeItem: string;
+  originalAmount: string;
+  reductionAmount: string;
+  reducedAmount: string;
 }
 
 interface CreateApprovalModalProps {
@@ -33,6 +44,15 @@ const batchModifyDetailColumns: Array<{ key: keyof BatchModifyDetailRow; label: 
   { key: 'updatedSupplier', label: '修改后供应商', placeholder: '修改后供应商' },
 ];
 
+const fundsReductionDetailColumns: Array<{ key: keyof FundsReductionDetailRow; label: string; placeholder: string; type?: string }> = [
+  { key: 'order', label: '订单', placeholder: '输入订单' },
+  { key: 'containerNo', label: '箱号', placeholder: '输入箱号' },
+  { key: 'feeItem', label: '费用项', placeholder: '输入费用项' },
+  { key: 'originalAmount', label: '原始金额', placeholder: '原始金额', type: 'number' },
+  { key: 'reductionAmount', label: '申请减免金额', placeholder: '申请减免金额', type: 'number' },
+  { key: 'reducedAmount', label: '减免后金额', placeholder: '减免后金额', type: 'number' },
+];
+
 function createEmptyBatchModifyDetail(): BatchModifyDetailRow {
   return {
     order: '',
@@ -42,6 +62,17 @@ function createEmptyBatchModifyDetail(): BatchModifyDetailRow {
     originalSupplier: '',
     updatedAmount: '',
     updatedSupplier: '',
+  };
+}
+
+function createEmptyFundsReductionDetail(): FundsReductionDetailRow {
+  return {
+    order: '',
+    containerNo: '',
+    feeItem: '',
+    originalAmount: '',
+    reductionAmount: '',
+    reducedAmount: '',
   };
 }
 
@@ -73,9 +104,13 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     setSelectedType(type);
     const initialData: Record<string, any> = {};
     type.businessFields.forEach(field => {
-      initialData[field] = selectedModule?.name === '资金' && type.name === '批量修改' && field === '明细'
-        ? [createEmptyBatchModifyDetail()]
-        : '';
+      if (selectedModule?.name === '资金' && type.name === '批量修改' && field === '明细') {
+        initialData[field] = [createEmptyBatchModifyDetail()];
+      } else if (selectedModule?.name === '资金' && type.name === '资金减免' && field === '明细') {
+        initialData[field] = [createEmptyFundsReductionDetail()];
+      } else {
+        initialData[field] = '';
+      }
     });
     setFormData(initialData);
     setStep(3);
@@ -124,9 +159,10 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     selectedType.businessFields.forEach(field => {
       const value = formData[field];
       if (Array.isArray(value)) {
-        const hasEmptyCell = value.length === 0 || value.some((row) => {
-          return batchModifyDetailColumns.some((column) => !String(row?.[column.key] || '').trim());
-        });
+        const columns = getStructuredDetailColumns(field);
+        const hasEmptyCell = columns.length > 0
+          ? value.length === 0 || value.some((row) => columns.some((column) => !String(row?.[column.key] || '').trim()))
+          : value.length === 0;
 
         if (hasEmptyCell) {
           newErrors[field] = '请完整填写明细';
@@ -169,38 +205,55 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     onClose();
   };
 
-  const isBatchModifyDetailField = (field: string) => {
-    return selectedModule?.name === '资金' && selectedType?.name === '批量修改' && field === '明细';
+  const getStructuredDetailColumns = (field: string) => {
+    if (selectedModule?.name !== '资金' || field !== '明细') return [];
+    if (selectedType?.name === '批量修改') return batchModifyDetailColumns;
+    if (selectedType?.name === '资金减免') return fundsReductionDetailColumns;
+    return [];
   };
 
-  const getBatchModifyDetails = (field: string): BatchModifyDetailRow[] => {
+  const createEmptyStructuredDetail = () => {
+    if (selectedType?.name === '资金减免') return createEmptyFundsReductionDetail();
+    return createEmptyBatchModifyDetail();
+  };
+
+  const isStructuredDetailField = (field: string) => {
+    return getStructuredDetailColumns(field).length > 0;
+  };
+
+  const getStructuredDetails = (field: string): Array<Record<string, string>> => {
     const value = formData[field];
-    return Array.isArray(value) && value.length > 0 ? value : [createEmptyBatchModifyDetail()];
+    return Array.isArray(value) && value.length > 0 ? value : [createEmptyStructuredDetail()];
   };
 
-  const updateBatchModifyDetail = (
+  const updateStructuredDetail = (
     field: string,
     rowIndex: number,
-    key: keyof BatchModifyDetailRow,
+    key: string,
     value: string,
   ) => {
-    const rows = getBatchModifyDetails(field).map((row, index) => (
+    const rows = getStructuredDetails(field).map((row, index) => (
       index === rowIndex ? { ...row, [key]: value } : row
     ));
     handleInputChange(field, rows);
   };
 
-  const addBatchModifyDetail = (field: string) => {
-    handleInputChange(field, [...getBatchModifyDetails(field), createEmptyBatchModifyDetail()]);
+  const addStructuredDetail = (field: string) => {
+    handleInputChange(field, [...getStructuredDetails(field), createEmptyStructuredDetail()]);
   };
 
-  const removeBatchModifyDetail = (field: string, rowIndex: number) => {
-    const rows = getBatchModifyDetails(field).filter((_, index) => index !== rowIndex);
-    handleInputChange(field, rows.length > 0 ? rows : [createEmptyBatchModifyDetail()]);
+  const removeStructuredDetail = (field: string, rowIndex: number) => {
+    const rows = getStructuredDetails(field).filter((_, index) => index !== rowIndex);
+    handleInputChange(field, rows.length > 0 ? rows : [createEmptyStructuredDetail()]);
   };
 
-  const renderBatchModifyDetailInput = (field: string) => {
-    const rows = getBatchModifyDetails(field);
+  const renderStructuredDetailInput = (field: string) => {
+    const columns = getStructuredDetailColumns(field);
+    const rows = getStructuredDetails(field);
+    const gridTemplate = selectedType?.name === '资金减免'
+      ? "grid-cols-[1.05fr_1fr_1fr_0.95fr_1fr_0.95fr_52px]"
+      : "grid-cols-[1.05fr_1fr_1fr_0.9fr_1fr_0.95fr_1fr_52px]";
+    const minWidth = selectedType?.name === '资金减免' ? "min-w-[840px]" : "min-w-[980px]";
 
     return (
       <div className={cn(
@@ -208,9 +261,9 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         errors[field] && "border-rose-500",
       )}>
         <div className="overflow-x-auto no-scrollbar">
-          <div className="min-w-[980px]">
-            <div className="grid grid-cols-[1.05fr_1fr_1fr_0.9fr_1fr_0.95fr_1fr_52px] border-b border-border-silver bg-pure-white">
-              {batchModifyDetailColumns.map((column) => (
+          <div className={minWidth}>
+            <div className={cn("grid border-b border-border-silver bg-pure-white", gridTemplate)}>
+              {columns.map((column) => (
                 <div key={column.key} className="px-3 py-3 text-[12px] font-bold text-medium-gray">
                   {column.label}
                 </div>
@@ -219,13 +272,13 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
             </div>
 
             {rows.map((row, rowIndex) => (
-              <div key={rowIndex} className="grid grid-cols-[1.05fr_1fr_1fr_0.9fr_1fr_0.95fr_1fr_52px] border-b border-border-silver last:border-b-0 bg-white">
-                {batchModifyDetailColumns.map((column) => (
+              <div key={rowIndex} className={cn("grid border-b border-border-silver last:border-b-0 bg-white", gridTemplate)}>
+                {columns.map((column) => (
                   <div key={column.key} className="p-2">
                     <input
                       type={column.type || 'text'}
                       value={row[column.key]}
-                      onChange={(event) => updateBatchModifyDetail(field, rowIndex, column.key, event.target.value)}
+                      onChange={(event) => updateStructuredDetail(field, rowIndex, String(column.key), event.target.value)}
                       className="w-full h-10 px-2 bg-canvas-white border border-transparent focus:border-interactive-blue outline-none text-[13px] font-semibold"
                       placeholder={column.placeholder}
                     />
@@ -234,7 +287,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
                 <div className="p-2 flex items-center justify-center">
                   <button
                     type="button"
-                    onClick={() => removeBatchModifyDetail(field, rowIndex)}
+                    onClick={() => removeStructuredDetail(field, rowIndex)}
                     className="w-9 h-9 flex items-center justify-center rounded-full text-light-gray hover:text-rose-500 hover:bg-[#ffebee] transition-colors"
                     title="删除明细"
                   >
@@ -248,19 +301,19 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
 
         <button
           type="button"
-          onClick={() => addBatchModifyDetail(field)}
+          onClick={() => addStructuredDetail(field)}
           className="w-full h-12 bg-pure-white text-action-blue text-[13px] font-bold hover:bg-lightest-gray-background transition-colors flex items-center justify-center gap-2"
         >
           <Plus size={15} strokeWidth={3} />
-          添加资金明细
+          添加明细
         </button>
       </div>
     );
   };
 
   const renderFieldInput = (field: string) => {
-    if (isBatchModifyDetailField(field)) {
-      return renderBatchModifyDetailInput(field);
+    if (isStructuredDetailField(field)) {
+      return renderStructuredDetailInput(field);
     }
 
     const isDate = field.includes('日期') || field.includes('时间');
