@@ -301,9 +301,6 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                     ))}
                   </div>
                 </div>
-                <div className="p-8 bg-[#fbfbfd] border-t border-black/[0.02] flex items-center justify-center">
-                  <span className="text-[9px] font-black text-medium-gray uppercase tracking-[0.24em]">由 Matrix Core 驱动解析</span>
-                </div>
               </div>
             </div>
 
