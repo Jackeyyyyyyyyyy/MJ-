@@ -28,6 +28,30 @@ interface FundsReductionDetailRow {
   reducedAmount: string;
 }
 
+interface CustomerBankAccountRow {
+  [key: string]: string;
+  currencyAccount: string;
+  country: string;
+  bankName: string;
+  bankAccount: string;
+}
+
+interface CustomerInvoiceInfoRow {
+  [key: string]: string;
+  currencyAccount: string;
+  invoiceCompanyName: string;
+  taxNo: string;
+  addressPhone: string;
+  bankAndAccount: string;
+}
+
+interface CustomerInfoChangeValue {
+  businessLicense: ApprovalAttachment[];
+  bankAccounts: CustomerBankAccountRow[];
+  bankVoucher: ApprovalAttachment[];
+  invoiceInfos: CustomerInvoiceInfoRow[];
+}
+
 interface CreateApprovalModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -53,6 +77,21 @@ const fundsReductionDetailColumns: Array<{ key: keyof FundsReductionDetailRow; l
   { key: 'reducedAmount', label: '减免后金额', placeholder: '减免后金额', type: 'number' },
 ];
 
+const customerBankAccountColumns: Array<{ key: keyof CustomerBankAccountRow; label: string; placeholder: string }> = [
+  { key: 'currencyAccount', label: '币种账户', placeholder: '如 CNY / USD' },
+  { key: 'country', label: '所属国家', placeholder: '输入所属国家' },
+  { key: 'bankName', label: '开户行', placeholder: '输入开户行' },
+  { key: 'bankAccount', label: '银行账户', placeholder: '输入银行账户' },
+];
+
+const customerInvoiceInfoColumns: Array<{ key: keyof CustomerInvoiceInfoRow; label: string; placeholder: string }> = [
+  { key: 'currencyAccount', label: '币种账户', placeholder: '如 CNY / USD' },
+  { key: 'invoiceCompanyName', label: '开票公司名称', placeholder: '输入开票公司名称' },
+  { key: 'taxNo', label: '税号', placeholder: '输入税号' },
+  { key: 'addressPhone', label: '地址、电话', placeholder: '输入地址、电话' },
+  { key: 'bankAndAccount', label: '开户行及账户', placeholder: '输入开户行及账户' },
+];
+
 function createEmptyBatchModifyDetail(): BatchModifyDetailRow {
   return {
     order: '',
@@ -73,6 +112,34 @@ function createEmptyFundsReductionDetail(): FundsReductionDetailRow {
     originalAmount: '',
     reductionAmount: '',
     reducedAmount: '',
+  };
+}
+
+function createEmptyCustomerBankAccount(): CustomerBankAccountRow {
+  return {
+    currencyAccount: '',
+    country: '',
+    bankName: '',
+    bankAccount: '',
+  };
+}
+
+function createEmptyCustomerInvoiceInfo(): CustomerInvoiceInfoRow {
+  return {
+    currencyAccount: '',
+    invoiceCompanyName: '',
+    taxNo: '',
+    addressPhone: '',
+    bankAndAccount: '',
+  };
+}
+
+function createEmptyCustomerInfoChange(): CustomerInfoChangeValue {
+  return {
+    businessLicense: [],
+    bankAccounts: [createEmptyCustomerBankAccount()],
+    bankVoucher: [],
+    invoiceInfos: [createEmptyCustomerInvoiceInfo()],
   };
 }
 
@@ -108,6 +175,8 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         initialData[field] = [createEmptyBatchModifyDetail()];
       } else if (selectedModule?.name === '资金' && type.name === '资金减免' && field === '明细') {
         initialData[field] = [createEmptyFundsReductionDetail()];
+      } else if (selectedModule?.name === '客户' && type.name === '客户信息' && field === '修改后内容') {
+        initialData[field] = createEmptyCustomerInfoChange();
       } else {
         initialData[field] = '';
       }
@@ -151,6 +220,42 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
   };
 
+  const handleCustomerAttachmentUpload = async (
+    field: string,
+    section: 'businessLicense' | 'bankVoucher',
+    fileList: FileList | null,
+  ) => {
+    const files = fileList ? Array.from<File>(fileList) : [];
+    if (files.length === 0) return;
+
+    const uploadKey = `${field}.${section}`;
+    setUploadingFields(prev => ({ ...prev, [uploadKey]: true }));
+
+    try {
+      const payload = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          type: file.type || 'application/octet-stream',
+          size: file.size,
+          data: await readFileAsDataUrl(file),
+        })),
+      );
+      const uploads = await storage.uploadFiles(payload);
+      const currentValue = getCustomerInfoChangeValue(field);
+      handleInputChange(field, {
+        ...currentValue,
+        [section]: uploads,
+      });
+    } catch (error) {
+      setErrors(prev => ({
+        ...prev,
+        [field]: error instanceof Error ? error.message : '文件上传失败',
+      }));
+    } finally {
+      setUploadingFields(prev => ({ ...prev, [uploadKey]: false }));
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedModule || !selectedType || !user) return;
@@ -166,6 +271,20 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
 
         if (hasEmptyCell) {
           newErrors[field] = '请完整填写明细';
+        }
+        return;
+      }
+
+      if (isCustomerInfoChangeValue(value)) {
+        const hasEmptyBankCell = value.bankAccounts.length === 0 || value.bankAccounts.some((row) => (
+          customerBankAccountColumns.some((column) => !String(row[column.key] || '').trim())
+        ));
+        const hasEmptyInvoiceCell = value.invoiceInfos.length === 0 || value.invoiceInfos.some((row) => (
+          customerInvoiceInfoColumns.some((column) => !String(row[column.key] || '').trim())
+        ));
+
+        if (hasEmptyBankCell || hasEmptyInvoiceCell) {
+          newErrors[field] = '请完整填写修改后内容';
         }
         return;
       }
@@ -203,6 +322,183 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     setFormData({});
     setErrors({});
     onClose();
+  };
+
+  const isCustomerInfoChangeValue = (value: unknown): value is CustomerInfoChangeValue => {
+    return !!value
+      && typeof value === 'object'
+      && Array.isArray((value as CustomerInfoChangeValue).businessLicense)
+      && Array.isArray((value as CustomerInfoChangeValue).bankAccounts)
+      && Array.isArray((value as CustomerInfoChangeValue).bankVoucher)
+      && Array.isArray((value as CustomerInfoChangeValue).invoiceInfos);
+  };
+
+  const isCustomerInfoChangeField = (field: string) => {
+    return selectedModule?.name === '客户' && selectedType?.name === '客户信息' && field === '修改后内容';
+  };
+
+  const getCustomerInfoChangeValue = (field: string): CustomerInfoChangeValue => {
+    const value = formData[field];
+    return isCustomerInfoChangeValue(value) ? value : createEmptyCustomerInfoChange();
+  };
+
+  const updateCustomerRows = (
+    field: string,
+    section: 'bankAccounts' | 'invoiceInfos',
+    rows: Array<CustomerBankAccountRow | CustomerInvoiceInfoRow>,
+  ) => {
+    handleInputChange(field, {
+      ...getCustomerInfoChangeValue(field),
+      [section]: rows,
+    });
+  };
+
+  const updateCustomerRow = (
+    field: string,
+    section: 'bankAccounts' | 'invoiceInfos',
+    rowIndex: number,
+    key: string,
+    value: string,
+  ) => {
+    const rows = getCustomerInfoChangeValue(field)[section].map((row, index) => (
+      index === rowIndex ? { ...row, [key]: value } : row
+    ));
+    updateCustomerRows(field, section, rows);
+  };
+
+  const addCustomerRow = (field: string, section: 'bankAccounts' | 'invoiceInfos') => {
+    const nextRow = section === 'bankAccounts'
+      ? createEmptyCustomerBankAccount()
+      : createEmptyCustomerInvoiceInfo();
+    updateCustomerRows(field, section, [...getCustomerInfoChangeValue(field)[section], nextRow]);
+  };
+
+  const removeCustomerRow = (field: string, section: 'bankAccounts' | 'invoiceInfos', rowIndex: number) => {
+    const rows = getCustomerInfoChangeValue(field)[section].filter((_, index) => index !== rowIndex);
+    const fallbackRow = section === 'bankAccounts'
+      ? createEmptyCustomerBankAccount()
+      : createEmptyCustomerInvoiceInfo();
+    updateCustomerRows(field, section, rows.length > 0 ? rows : [fallbackRow]);
+  };
+
+  const renderCustomerAttachmentInput = (
+    field: string,
+    section: 'businessLicense' | 'bankVoucher',
+    label: string,
+  ) => {
+    const value = getCustomerInfoChangeValue(field);
+    const attachments = value[section];
+    const uploadKey = `${field}.${section}`;
+    const isUploading = !!uploadingFields[uploadKey];
+
+    return (
+      <div className="rounded-2xl border border-border-silver bg-white p-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <p className="text-[14px] font-bold text-midnight-graphite">{label}</p>
+            <p className="text-[12px] font-semibold text-light-gray mt-1">
+              {attachments.length > 0 ? attachments.map((file) => file.name).join('、') : '未上传附件'}
+            </p>
+          </div>
+          <label className={cn(
+            "h-10 px-4 rounded-lg bg-black text-white text-[13px] font-bold cursor-pointer hover:bg-zinc-800 transition-all flex items-center justify-center gap-2",
+            isUploading && "pointer-events-none opacity-60",
+          )}>
+            <Upload size={14} />
+            {isUploading ? '上传中' : '选择附件'}
+            <input
+              type="file"
+              className="sr-only"
+              multiple
+              onChange={(event) => {
+                const fileList = event.currentTarget.files;
+                void handleCustomerAttachmentUpload(field, section, fileList);
+                event.currentTarget.value = '';
+              }}
+            />
+          </label>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCustomerEditableTable = (
+    field: string,
+    section: 'bankAccounts' | 'invoiceInfos',
+    title: string,
+    columns: Array<{ key: string | number; label: string; placeholder: string }>,
+  ) => {
+    const rows = getCustomerInfoChangeValue(field)[section];
+    const gridTemplate = section === 'bankAccounts'
+      ? "grid-cols-[1fr_1fr_1.2fr_1.3fr_52px]"
+      : "grid-cols-[0.9fr_1.3fr_1fr_1.6fr_1.5fr_52px]";
+    const minWidth = section === 'bankAccounts' ? "min-w-[760px]" : "min-w-[1040px]";
+
+    return (
+      <div className="rounded-2xl border border-border-silver bg-white overflow-hidden">
+        <div className="px-4 py-3 border-b border-border-silver flex items-center justify-between bg-pure-white">
+          <p className="text-[14px] font-bold text-midnight-graphite">{title}</p>
+          <button
+            type="button"
+            onClick={() => addCustomerRow(field, section)}
+            className="h-8 px-3 rounded-lg bg-canvas-white text-action-blue text-[12px] font-bold hover:bg-lightest-gray-background flex items-center gap-1.5"
+          >
+            <Plus size={13} strokeWidth={3} />
+            添加
+          </button>
+        </div>
+        <div className="overflow-x-auto no-scrollbar">
+          <div className={minWidth}>
+            <div className={cn("grid border-b border-border-silver bg-canvas-white", gridTemplate)}>
+              {columns.map((column) => (
+                <div key={column.key} className="px-3 py-3 text-[12px] font-bold text-medium-gray">
+                  {column.label}
+                </div>
+              ))}
+              <div className="px-3 py-3 text-[12px] font-bold text-medium-gray text-center">操作</div>
+            </div>
+            {rows.map((row, rowIndex) => (
+              <div key={rowIndex} className={cn("grid border-b border-border-silver last:border-b-0", gridTemplate)}>
+                {columns.map((column) => (
+                  <div key={column.key} className="p-2">
+                    <input
+                      value={row[String(column.key)]}
+                      onChange={(event) => updateCustomerRow(field, section, rowIndex, String(column.key), event.target.value)}
+                      className="w-full h-10 px-2 bg-canvas-white border border-transparent focus:border-interactive-blue outline-none text-[13px] font-semibold"
+                      placeholder={column.placeholder}
+                    />
+                  </div>
+                ))}
+                <div className="p-2 flex items-center justify-center">
+                  <button
+                    type="button"
+                    onClick={() => removeCustomerRow(field, section, rowIndex)}
+                    className="w-9 h-9 flex items-center justify-center rounded-full text-light-gray hover:text-rose-500 hover:bg-[#ffebee] transition-colors"
+                    title="删除"
+                  >
+                    <X size={16} strokeWidth={2.5} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCustomerInfoChangeInput = (field: string) => {
+    return (
+      <div className={cn(
+        "space-y-4 rounded-[24px] border border-border-silver bg-canvas-white p-4",
+        errors[field] && "border-rose-500",
+      )}>
+        {renderCustomerAttachmentInput(field, 'businessLicense', '营业执照')}
+        {renderCustomerEditableTable(field, 'bankAccounts', '银行账户', customerBankAccountColumns)}
+        {renderCustomerAttachmentInput(field, 'bankVoucher', '银行凭证')}
+        {renderCustomerEditableTable(field, 'invoiceInfos', '开票信息', customerInvoiceInfoColumns)}
+      </div>
+    );
   };
 
   const getStructuredDetailColumns = (field: string) => {
@@ -312,6 +608,10 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   };
 
   const renderFieldInput = (field: string) => {
+    if (isCustomerInfoChangeField(field)) {
+      return renderCustomerInfoChangeInput(field);
+    }
+
     if (isStructuredDetailField(field)) {
       return renderStructuredDetailInput(field);
     }

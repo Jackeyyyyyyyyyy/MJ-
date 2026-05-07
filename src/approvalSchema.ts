@@ -338,11 +338,9 @@ export const approvalSchema: Schema = {
         {
           "name": "客户信息",
           "businessFields": [
-            "客户简称",
-            "客户全称",
             "客户编号",
-            "审批类型",
-            "内容"
+            "客户全称",
+            "修改后内容"
           ],
           "commonFields": [
             "状态",

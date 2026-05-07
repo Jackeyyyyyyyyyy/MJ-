@@ -51,6 +51,30 @@ const fundsReductionDetailColumns = [
   { key: 'reducedAmount', label: '减免后金额' },
 ];
 
+const customerBankAccountColumns = [
+  { key: 'currencyAccount', label: '币种账户' },
+  { key: 'country', label: '所属国家' },
+  { key: 'bankName', label: '开户行' },
+  { key: 'bankAccount', label: '银行账户' },
+];
+
+const customerInvoiceInfoColumns = [
+  { key: 'currencyAccount', label: '币种账户' },
+  { key: 'invoiceCompanyName', label: '开票公司名称' },
+  { key: 'taxNo', label: '税号' },
+  { key: 'addressPhone', label: '地址、电话' },
+  { key: 'bankAndAccount', label: '开户行及账户' },
+];
+
+function isCustomerInfoChangeValue(value: unknown) {
+  return !!value
+    && typeof value === 'object'
+    && Array.isArray((value as Record<string, unknown>).businessLicense)
+    && Array.isArray((value as Record<string, unknown>).bankAccounts)
+    && Array.isArray((value as Record<string, unknown>).bankVoucher)
+    && Array.isArray((value as Record<string, unknown>).invoiceInfos);
+}
+
 function getStructuredDetailColumns(value: unknown) {
   if (!Array.isArray(value) || value.length === 0) return [];
 
@@ -183,6 +207,96 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
     }
   };
 
+  const renderAttachmentList = (attachments: ApprovalAttachment[]) => {
+    if (attachments.length === 0) {
+      return <span className="text-[13px] font-bold text-light-gray">未上传</span>;
+    }
+
+    return (
+      <div className="flex flex-col items-start gap-2">
+        {attachments.map((attachment) => (
+          <div key={attachment.id} className="max-w-full flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleAttachmentPreview(attachment)}
+              className="min-w-0 h-9 px-3 rounded-full bg-white border border-black/[0.06] text-[13px] font-bold text-black hover:border-black/[0.16] hover:bg-canvas-white transition-all flex items-center gap-2"
+            >
+              <Eye size={14} strokeWidth={2.5} className="shrink-0" />
+              <span className="truncate">{attachment.name}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleAttachmentDownload(attachment)}
+              className="w-9 h-9 rounded-full bg-white border border-black/[0.06] text-medium-gray hover:text-black hover:border-black/[0.16] hover:bg-canvas-white transition-all flex items-center justify-center"
+              title="下载附件"
+            >
+              <Download size={14} strokeWidth={2.5} />
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderCustomerTable = (
+    rows: Array<Record<string, unknown>>,
+    columns: Array<{ key: string; label: string }>,
+  ) => (
+    <div className="overflow-x-auto no-scrollbar">
+      <div className={cn(
+        "overflow-hidden rounded-2xl border border-border-silver bg-white",
+        columns.length === 4 ? "min-w-[720px]" : "min-w-[960px]",
+      )}>
+        <div className={cn("grid border-b border-border-silver bg-canvas-white", columns.length === 4 ? "grid-cols-4" : "grid-cols-5")}>
+          {columns.map((column) => (
+            <div key={column.key} className="px-3 py-3 text-[11px] font-black text-medium-gray">
+              {column.label}
+            </div>
+          ))}
+        </div>
+        {rows.map((row, rowIndex) => (
+          <div key={rowIndex} className={cn("grid border-b border-border-silver last:border-b-0", columns.length === 4 ? "grid-cols-4" : "grid-cols-5")}>
+            {columns.map((column) => (
+              <div key={column.key} className="px-3 py-4 text-[13px] font-bold text-black break-all">
+                {String(row[column.key] || '-')}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderCustomerInfoChange = (value: unknown) => {
+    const data = value as {
+      businessLicense: ApprovalAttachment[];
+      bankAccounts: Array<Record<string, unknown>>;
+      bankVoucher: ApprovalAttachment[];
+      invoiceInfos: Array<Record<string, unknown>>;
+    };
+
+    return (
+      <div className="space-y-5">
+        <div className="rounded-2xl border border-border-silver bg-white p-4">
+          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">营业执照</p>
+          {renderAttachmentList(data.businessLicense)}
+        </div>
+        <div>
+          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">银行账户</p>
+          {renderCustomerTable(data.bankAccounts, customerBankAccountColumns)}
+        </div>
+        <div className="rounded-2xl border border-border-silver bg-white p-4">
+          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">银行凭证</p>
+          {renderAttachmentList(data.bankVoucher)}
+        </div>
+        <div>
+          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">开票信息</p>
+          {renderCustomerTable(data.invoiceInfos, customerInvoiceInfoColumns)}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <AnimatePresence>
       <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -311,11 +425,15 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                       key={key}
                       className={cn(
                         "gap-6 p-7 bg-[#fbfbfd] rounded-[24px] group border border-transparent hover:border-black/[0.02] hover:bg-white transition-all",
-                        getStructuredDetailColumns(value).length > 0 ? "flex flex-col items-stretch" : "flex items-center justify-between",
+                        isCustomerInfoChangeValue(value) || getStructuredDetailColumns(value).length > 0
+                          ? "flex flex-col items-stretch"
+                          : "flex items-center justify-between",
                       )}
                     >
                       <span className="text-[11px] font-black text-medium-gray uppercase tracking-[0.16em]">{key}</span>
-                      {getStructuredDetailColumns(value).length > 0 ? (
+                      {isCustomerInfoChangeValue(value) ? (
+                        renderCustomerInfoChange(value)
+                      ) : getStructuredDetailColumns(value).length > 0 ? (
                         <div className="overflow-x-auto no-scrollbar">
                           <div className="min-w-[840px] overflow-hidden rounded-2xl border border-border-silver bg-white">
                             <div
