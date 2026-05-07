@@ -1,4 +1,4 @@
-import { AccountInput, ApprovalAttachment, ApprovalRecord, ApprovalStatus, SystemAccount } from './types';
+import { AccountInput, AiPromptConfig, ApprovalAttachment, ApprovalRecord, ApprovalStatus, SystemAccount } from './types';
 import { auth } from './auth';
 
 type NewApprovalRecord = Omit<ApprovalRecord, 'id' | 'createdAt' | 'updatedAt' | 'logs' | 'status'>;
@@ -72,6 +72,22 @@ export const storage = {
     return request<SystemAccount>(`/accounts/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(account),
+    });
+  },
+
+  getAiPrompt(moduleName: string, approvalTypeName: string): Promise<AiPromptConfig> {
+    const params = new URLSearchParams({ moduleName, approvalTypeName });
+    return request<AiPromptConfig>(`/ai-prompts?${params.toString()}`);
+  },
+
+  updateAiPrompt(
+    moduleName: string,
+    approvalTypeName: string,
+    prompt: string,
+  ): Promise<AiPromptConfig> {
+    return request<AiPromptConfig>('/ai-prompts', {
+      method: 'PATCH',
+      body: JSON.stringify({ moduleName, approvalTypeName, prompt }),
     });
   },
 

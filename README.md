@@ -9,6 +9,7 @@ MJ 审批中心是一个基于 React、Vite、TypeScript、Tailwind CSS 和 Expr
 - 管理端：查看全局审批数据、按状态筛选、搜索单据
 - 开发者账号：可在申请人、审批人、管理端视角之间切换
 - 审批类型由 `src/approvalSchema.ts` 配置驱动
+- AI 审批建议：申请提交时按业务类型生成风险建议，超级管理员可维护每个业务类型的提示词
 
 ## 本地运行
 
@@ -88,6 +89,18 @@ npm run preview  # 本地预览生产构建
 /app/data/approval-records.json
 ```
 
+新提交的业务审批会按业务类型分别保存到：
+
+```text
+/app/data/business-records/
+```
+
+AI 提示词配置会保存到：
+
+```text
+/app/data/ai-prompt-configs.json
+```
+
 上传附件会保存到：
 
 ```text
@@ -107,6 +120,17 @@ Build Command: npm run build
 Start Command: npm start
 Volume Mount Path: /app/data
 ```
+
+AI 审批建议使用 OpenAI-compatible 接口，建议在本地或部署环境中配置：
+
+```text
+OPENAI_API_KEY="your-api-key"
+OPENAI_API_BASE="https://api.openai.com/v1"
+OPENAI_MODEL="your-model"
+AI_REQUEST_TIMEOUT_MS="12000"
+```
+
+如果未配置 AI 环境变量，申请仍会正常提交，审批详情会显示 AI 建议未启用。
 
 注意：Railway Volume 只在运行时挂载，不在 build 阶段挂载。不要在构建阶段写入持久化数据。
 

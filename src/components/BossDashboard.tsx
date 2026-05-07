@@ -158,6 +158,7 @@ export default function BossDashboard() {
         <ApprovalDetailModal 
           record={selectedRecord}
           onClose={() => { if(!isRejecting && !isApproving) setSelectedRecord(null); setShowDetail(false); }}
+          showAiSuggestion
           onApprove={openApproveConfirm}
           onReject={openRejectConfirm}
         />

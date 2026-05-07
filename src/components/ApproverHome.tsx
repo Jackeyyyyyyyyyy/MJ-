@@ -137,6 +137,7 @@ export default function ApproverHome() {
         <ApprovalDetailModal 
           record={selectedRecord}
           onClose={() => { if(!isRejecting && !isApproving) setSelectedRecord(null); setShowDetail(false); }}
+          showAiSuggestion
           onApprove={activeTab === 'pending' ? openApproveConfirm : undefined}
           onReject={activeTab === 'pending' ? openRejectConfirm : undefined}
         />

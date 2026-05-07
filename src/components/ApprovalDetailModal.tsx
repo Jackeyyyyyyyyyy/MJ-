@@ -1,7 +1,7 @@
 import React from 'react';
 import { ApprovalAttachment, ApprovalRecord, ApprovalStatus } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle, Download, Eye, Check, Clock } from 'lucide-react';
+import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle, Download, Eye, Check, Clock, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { storage } from '../storage';
@@ -11,6 +11,7 @@ interface ApprovalDetailModalProps {
   onClose: () => void;
   onApprove?: (record: ApprovalRecord) => void;
   onReject?: (record: ApprovalRecord) => void;
+  showAiSuggestion?: boolean;
 }
 
 function isAttachmentList(value: unknown): value is ApprovalAttachment[] {
@@ -31,7 +32,32 @@ interface PreviewState {
   text?: string;
 }
 
-export default function ApprovalDetailModal({ record, onClose, onApprove, onReject }: ApprovalDetailModalProps) {
+function getAiSuggestionDisplay(record: ApprovalRecord) {
+  if (!record.aiSuggestion) {
+    return {
+      text: '历史单据未生成 AI 建议',
+      tone: 'neutral',
+    };
+  }
+
+  if (record.aiSuggestion.status === 'generated') {
+    return {
+      text: record.aiSuggestion.displayText,
+      tone: record.aiSuggestion.riskLevel === '高风险'
+        ? 'danger'
+        : (record.aiSuggestion.riskLevel === '低风险' ? 'success' : 'warning'),
+    };
+  }
+
+  return {
+    text: record.aiSuggestion.status === 'skipped'
+      ? 'AI建议未启用'
+      : 'AI建议生成失败，不影响审批处理',
+    tone: 'neutral',
+  };
+}
+
+export default function ApprovalDetailModal({ record, onClose, onApprove, onReject, showAiSuggestion = false }: ApprovalDetailModalProps) {
   const [preview, setPreview] = React.useState<PreviewState | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = React.useState(false);
 
@@ -44,6 +70,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
   if (!record) return null;
 
   const canReview = record.status === ApprovalStatus.PENDING && !!onApprove && !!onReject;
+  const aiSuggestion = getAiSuggestionDisplay(record);
   const finishedAt = record.approvedAt || record.rejectedAt;
   const approvalTimeline = [
     {
@@ -170,6 +197,31 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                   <p className="text-[17px] font-black text-black tracking-tighter leading-none font-mono uppercase">{format(new Date(record.createdAt), 'yyyy.MM.dd // HH:mm')}</p>
                 </div>
               </div>
+
+              {showAiSuggestion && (
+                <div className={cn(
+                  "p-7 rounded-[24px] border relative overflow-hidden",
+                  aiSuggestion.tone === 'danger' && "bg-[#fff1f0]/60 border-rose-100",
+                  aiSuggestion.tone === 'warning' && "bg-[#fff7e6]/70 border-[#f5d7a1]",
+                  aiSuggestion.tone === 'success' && "bg-[#e8f5e9]/80 border-[#b9dfbd]",
+                  aiSuggestion.tone === 'neutral' && "bg-[#fbfbfd] border-black/[0.04]",
+                )}>
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 rounded-2xl bg-black text-white flex items-center justify-center shrink-0">
+                      <Sparkles size={18} strokeWidth={2.5} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-4 mb-2">
+                        <p className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em]">AI审批建议</p>
+                        <span className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em] whitespace-nowrap">仅供参考</span>
+                      </div>
+                      <p className="text-[16px] font-black text-black leading-snug tracking-tight">
+                        {aiSuggestion.text}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Approval Result if processed */}
               {(record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.REJECTED) && (

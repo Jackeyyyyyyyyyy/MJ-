@@ -8,6 +8,7 @@ import AccountPermissionAdmin from './components/AccountPermissionAdmin';
 import ApprovalTable from './components/ApprovalTable';
 import ApprovalDetailModal from './components/ApprovalDetailModal';
 import ApprovalProgressModal from './components/ApprovalProgressModal';
+import AiPromptEditor from './components/AiPromptEditor';
 import { auth } from './auth';
 import { storage } from './storage';
 import { Role, ApprovalRecord, ApprovalStatus } from './types';
@@ -93,6 +94,7 @@ export default function App() {
 
     if (selectedType) {
       const canReview = perspective === 'approver' || perspective === 'boss';
+      const canSeeAiSuggestion = canReview || auth.getCurrentUser()?.role === 'developer';
 
       return (
         <div className="space-y-6">
@@ -104,6 +106,13 @@ export default function App() {
             </div>
             <h1 className="text-2xl font-bold text-slate-900">{selectedType}</h1>
           </div>
+
+          {auth.getCurrentUser()?.role === 'developer' && (
+            <AiPromptEditor
+              moduleName={selectedModule}
+              approvalTypeName={selectedType}
+            />
+          )}
           
           <ApprovalTable 
             records={dynamicRecords}
@@ -115,6 +124,7 @@ export default function App() {
           <ApprovalDetailModal
             record={selectedOne}
             onClose={() => { setSelectedOne(null); setShowD(false); }}
+            showAiSuggestion={canSeeAiSuggestion}
             onApprove={canReview ? (record) => { setShowD(false); void handleDynamicApprove(record); } : undefined}
             onReject={canReview ? (record) => { setShowD(false); void handleDynamicReject(record); } : undefined}
           />

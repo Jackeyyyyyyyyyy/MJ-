@@ -17,8 +17,49 @@ const recordsFile = path.join(dataDir, 'approval-records.json');
 const accountsFile = path.join(dataDir, 'approval-accounts.json');
 const uploadsDir = path.join(dataDir, 'uploads');
 const uploadsIndexFile = path.join(dataDir, 'approval-uploads.json');
+const businessRecordsDir = path.join(dataDir, 'business-records');
+const aiPromptConfigsFile = path.join(dataDir, 'ai-prompt-configs.json');
 const validStatuses = new Set(['草稿', '待审批', '已批准', '已拒绝']);
 const managedRoles = new Set(['applicant', 'approver', 'boss']);
+const defaultAiPromptBase =
+  '你是 MJ 审批风控助手。请只根据申请字段判断资料完整性、业务合理性和明显风险，输出“低/中/高风险：建议……”，不超过 45 字，不编造未提供信息。';
+const defaultAiPromptFocus = {
+  '班列|班列供应商变更': '核对班列名称、发车日期、供应商与服务模式变更是否合理。',
+  '任务|线路询价': '核对班列信息是否完整、询价是否必要。',
+  '任务|任务单费用': '对比标准价与填写价、费用类型和附件。',
+  '资金|收入变更': '核对订单/箱号/客户与修改前后差异。',
+  '资金|成本变更': '核对供应商、费用类型和成本变化。',
+  '资金|批量删除': '核对收支类型与明细删除风险。',
+  '资金|汇率转换': '核对币别、汇率和资金明细一致性。',
+  '资金|付款申请': '核对付款对象、供应商/客户、业务明细和账单。',
+  '资金|付款申请（线下）': '核对收款单位、审批单号和金额。',
+  '资金|备用金申请（线下）': '核对用途合理性、收款单位和金额。',
+  '资金|报销（线下）': '核对审批单号、收款单位和报销金额。',
+  '资金|预付申请': '核对供应商、业务明细和预付账单。',
+  '资金|转风控': '核对客户与明细是否存在风控迹象。',
+  '资金|批量修改': '核对收支类型与明细变更范围。',
+  '资金|营销折扣': '核对客户、订单、箱号与折扣合理性。',
+  '资金|资金减免': '核对减免原因、收支类型和明细。',
+  '资金|特价审批': '核对线路、箱型、口岸和申请利润。',
+  '资金|利润审批': '核对钉钉单号、订单、客户、箱号与利润影响。',
+  '客户|客户授权': '核对客户、公司、期限和授权类型。',
+  '客户|资质授权': '核对公司名称与审批事项。',
+  '客户|全程指定供应商': '核对客户、公司和指定线路必要性。',
+  '客户|客户信息': '核对客户编号、审批类型和变更内容。',
+  '客户|无合同校验': '核对场景、对象和内容风险。',
+  '客户|资质审查': '核对客户资质、地域、投保说明和附件。',
+  '供应商|报价': '核对供应商、服务、生效日期和报价信息。',
+  '供应商|询价': '核对供应商与服务范围。',
+  '供应商|供应商信息': '核对编号、审批类型和变更内容。',
+  '供应商|无合同校验': '核对场景、对象和无合同风险。',
+  '供应商|供应商授权': '核对供应商身份和授权期限。',
+  '订单|项目货变更': '核对订单号与变更目标。',
+  '订单|订单改签': '核对订单、箱号、变更内容和运费申请。',
+  '订单|退运申请': '核对订单号、箱号和退运风险。',
+  '提柜|用箱需求': '核对提箱点、还箱点、日期和箱型箱量。',
+  '子账号|账号管理': '核对部门职位、角色、手机号和动作。',
+  '子账号|权限申请': '核对部门、职位、角色和申请权限是否匹配。',
+};
 
 function requireEnv(name) {
   const value = process.env[name]?.trim();
@@ -81,6 +122,7 @@ const rolePermissions = {
     { key: 'record:review:all', label: '管理审批结果' },
     { key: 'perspective:switch', label: '切换业务视角' },
     { key: 'account:permissions:read', label: '管理账号权限' },
+    { key: 'ai:prompts:write', label: '维护AI审批提示词' },
   ],
 };
 
@@ -208,13 +250,70 @@ function requireRoles(...roles) {
   };
 }
 
-async function ensureDataFile() {
-  await fs.mkdir(dataDir, { recursive: true });
+function getBusinessKey(moduleName, approvalTypeName) {
+  return crypto
+    .createHash('sha1')
+    .update(`${moduleName}\n${approvalTypeName}`)
+    .digest('hex')
+    .slice(0, 16);
+}
+
+function getPromptKey(moduleName, approvalTypeName) {
+  return getBusinessKey(moduleName, approvalTypeName);
+}
+
+function getBusinessRecordFile(moduleName, approvalTypeName) {
+  return path.join(businessRecordsDir, `${getBusinessKey(moduleName, approvalTypeName)}.json`);
+}
+
+async function ensureJsonArrayFile(file) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
 
   try {
-    await fs.access(recordsFile);
+    await fs.access(file);
   } catch {
-    await fs.writeFile(recordsFile, '[]\n', 'utf8');
+    await fs.writeFile(file, '[]\n', 'utf8');
+  }
+}
+
+async function readJsonArrayFile(file, label, options = {}) {
+  if (options.optional) {
+    try {
+      await fs.access(file);
+    } catch {
+      return [];
+    }
+  } else {
+    await ensureJsonArrayFile(file);
+  }
+
+  const content = await fs.readFile(file, 'utf8');
+  if (!content.trim()) return [];
+
+  const items = JSON.parse(content);
+  if (!Array.isArray(items)) {
+    throw new Error(`${label} file must contain an array`);
+  }
+
+  return items;
+}
+
+async function writeJsonArrayFile(file, items) {
+  await ensureJsonArrayFile(file);
+  const tempFile = `${file}.tmp`;
+  await fs.writeFile(tempFile, `${JSON.stringify(items, null, 2)}\n`, 'utf8');
+  await fs.rename(tempFile, file);
+}
+
+async function listBusinessRecordFiles() {
+  try {
+    const entries = await fs.readdir(businessRecordsDir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+      .map((entry) => path.join(businessRecordsDir, entry.name));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
   }
 }
 
@@ -250,24 +349,21 @@ async function writeUploads(uploads) {
 }
 
 async function readRecords() {
-  await ensureDataFile();
-  const content = await fs.readFile(recordsFile, 'utf8');
+  const legacyRecords = await readJsonArrayFile(recordsFile, 'approval records');
+  const businessFiles = await listBusinessRecordFiles();
+  const businessRecordGroups = await Promise.all(
+    businessFiles.map((file) => readJsonArrayFile(file, 'business approval records', { optional: true })),
+  );
 
-  if (!content.trim()) return [];
-
-  const records = JSON.parse(content);
-  if (!Array.isArray(records)) {
-    throw new Error('approval records file must contain an array');
-  }
-
-  return records;
+  return [...legacyRecords, ...businessRecordGroups.flat()].sort((a, b) => {
+    const left = Date.parse(b.createdAt || b.updatedAt || '') || 0;
+    const right = Date.parse(a.createdAt || a.updatedAt || '') || 0;
+    return left - right;
+  });
 }
 
 async function writeRecords(records) {
-  await ensureDataFile();
-  const tempFile = `${recordsFile}.tmp`;
-  await fs.writeFile(tempFile, `${JSON.stringify(records, null, 2)}\n`, 'utf8');
-  await fs.rename(tempFile, recordsFile);
+  await writeJsonArrayFile(recordsFile, records);
 }
 
 function createSeedAccount(username, role, name) {
@@ -323,13 +419,50 @@ async function writeAccounts(accounts) {
 let writeQueue = Promise.resolve();
 let uploadWriteQueue = Promise.resolve();
 let accountWriteQueue = Promise.resolve();
+let promptWriteQueue = Promise.resolve();
 
-function updateRecords(mutator) {
+function createBusinessRecord(record) {
   const operation = writeQueue.catch(() => undefined).then(async () => {
-    const records = await readRecords();
-    const result = await mutator(records);
-    await writeRecords(records);
-    return result;
+    const file = getBusinessRecordFile(record.moduleName, record.approvalTypeName);
+    const records = await readJsonArrayFile(file, 'business approval records');
+    records.unshift(record);
+    await writeJsonArrayFile(file, records);
+    return record;
+  });
+
+  writeQueue = operation.catch(() => undefined);
+  return operation;
+}
+
+function updateRecordById(id, mutator) {
+  const operation = writeQueue.catch(() => undefined).then(async () => {
+    const files = [recordsFile, ...(await listBusinessRecordFiles())];
+
+    for (const file of files) {
+      const records = await readJsonArrayFile(file, 'approval records', { optional: true });
+      const record = records.find((item) => item.id === id);
+
+      if (record) {
+        const result = await mutator(record, records);
+        await writeJsonArrayFile(file, records);
+        return result;
+      }
+    }
+
+    const error = new Error('approval record not found');
+    error.statusCode = 404;
+    throw error;
+  });
+
+  writeQueue = operation.catch(() => undefined);
+  return operation;
+}
+
+function clearRecordFiles() {
+  const operation = writeQueue.catch(() => undefined).then(async () => {
+    await writeRecords([]);
+    const files = await listBusinessRecordFiles();
+    await Promise.all(files.map((file) => writeJsonArrayFile(file, [])));
   });
 
   writeQueue = operation.catch(() => undefined);
@@ -360,6 +493,26 @@ function updateAccounts(mutator) {
   return operation;
 }
 
+async function readPromptConfigs() {
+  return readJsonArrayFile(aiPromptConfigsFile, 'AI prompt configs');
+}
+
+async function writePromptConfigs(configs) {
+  await writeJsonArrayFile(aiPromptConfigsFile, configs);
+}
+
+function updatePromptConfigs(mutator) {
+  const operation = promptWriteQueue.catch(() => undefined).then(async () => {
+    const configs = await readPromptConfigs();
+    const result = await mutator(configs);
+    await writePromptConfigs(configs);
+    return result;
+  });
+
+  promptWriteQueue = operation.catch(() => undefined);
+  return operation;
+}
+
 async function findAccount(username) {
   if (username === superAdmin.username) return superAdmin;
 
@@ -387,11 +540,244 @@ function createLog(action, user, details) {
   };
 }
 
+function getDefaultAiPrompt(moduleName, approvalTypeName) {
+  const focus =
+    defaultAiPromptFocus[`${moduleName}|${approvalTypeName}`] ||
+    `围绕“${moduleName}/${approvalTypeName}”核对字段完整性、业务合理性和明显风险。`;
+
+  return `${defaultAiPromptBase}\n业务关注点：${focus}\n输出要求：只输出一行，不要解释过程。`;
+}
+
+function toAiPromptConfig(moduleName, approvalTypeName, savedConfig) {
+  return {
+    key: getPromptKey(moduleName, approvalTypeName),
+    moduleName,
+    approvalTypeName,
+    prompt: savedConfig?.prompt || getDefaultAiPrompt(moduleName, approvalTypeName),
+    updatedAt: savedConfig?.updatedAt,
+    updatedBy: savedConfig?.updatedBy,
+    isDefault: !savedConfig,
+  };
+}
+
+async function getAiPromptConfig(moduleName, approvalTypeName) {
+  const configs = await readPromptConfigs();
+  const key = getPromptKey(moduleName, approvalTypeName);
+  const savedConfig = configs.find((config) => config.key === key);
+  return toAiPromptConfig(moduleName, approvalTypeName, savedConfig);
+}
+
+function isAttachmentList(value) {
+  return Array.isArray(value) && value.every((item) => {
+    return !!item && typeof item === 'object' && 'name' in item && 'type' in item;
+  });
+}
+
+function sanitizeForAi(value) {
+  if (isAttachmentList(value)) {
+    return {
+      附件数量: value.length,
+      附件: value.map((attachment) => ({
+        name: String(attachment.name || ''),
+        type: String(attachment.type || ''),
+      })),
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).map(sanitizeForAi);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !['data', 'url', 'storedName', 'uploadedBy'].includes(key))
+        .map(([key, item]) => [key, sanitizeForAi(item)]),
+    );
+  }
+
+  return value;
+}
+
+function limitText(value, maxLength = 5000) {
+  const text = String(value || '').trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function normalizeAiSuggestionText(rawText) {
+  let displayText = String(rawText || '')
+    .replace(/^[\s"'“”]+|[\s"'“”]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!displayText) {
+    throw new Error('empty AI suggestion');
+  }
+
+  if (!/(低|中|高)风险/.test(displayText)) {
+    displayText = `中风险：${displayText.replace(/^建议[:：]?/, '建议')}`;
+  }
+
+  if (displayText.length > 90) {
+    displayText = `${displayText.slice(0, 89)}…`;
+  }
+
+  return displayText;
+}
+
+function parseAiSuggestion(rawText) {
+  const displayText = normalizeAiSuggestionText(rawText);
+  const riskMatch = displayText.match(/(低|中|高)风险/);
+  const riskLevel = riskMatch ? `${riskMatch[1]}风险` : undefined;
+  const advice = displayText.replace(/^(低|中|高)风险[:：]?\s*/, '').trim();
+
+  return {
+    status: 'generated',
+    riskLevel,
+    advice,
+    displayText,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+async function generateAiSuggestion({ moduleName, approvalTypeName, applicant, businessData }) {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const apiBase = process.env.OPENAI_API_BASE?.trim();
+  const model = process.env.OPENAI_MODEL?.trim();
+
+  if (!apiKey || !apiBase || !model) {
+    return {
+      status: 'skipped',
+      displayText: 'AI建议未启用',
+      generatedAt: new Date().toISOString(),
+      error: 'missing AI environment variables',
+    };
+  }
+
+  const promptConfig = await getAiPromptConfig(moduleName, approvalTypeName);
+  const controller = new AbortController();
+  const configuredTimeout = Number(process.env.AI_REQUEST_TIMEOUT_MS);
+  const timeoutMs =
+    Number.isFinite(configuredTimeout) && configuredTimeout > 0
+      ? configuredTimeout
+      : 12000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const businessPayload = JSON.stringify(sanitizeForAi(businessData), null, 2);
+    const response = await fetch(`${apiBase.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: promptConfig.prompt,
+          },
+          {
+            role: 'user',
+            content: limitText(
+              [
+                `业务模块：${moduleName}`,
+                `审批类型：${approvalTypeName}`,
+                `申请人：${applicant}`,
+                '业务字段：',
+                businessPayload,
+              ].join('\n'),
+            ),
+          },
+        ],
+        temperature: 0.2,
+        max_tokens: 120,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`AI request failed: ${response.status}`);
+    }
+
+    const body = await response.json();
+    const message = body?.choices?.[0]?.message?.content;
+    return parseAiSuggestion(message);
+  } catch (error) {
+    return {
+      status: 'failed',
+      displayText: 'AI建议生成失败',
+      generatedAt: new Date().toISOString(),
+      error: error instanceof Error ? error.message.slice(0, 160) : 'AI request failed',
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     dataDir,
   });
+});
+
+app.get('/api/ai-prompts', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const moduleName = String(req.query?.moduleName || '').trim();
+    const approvalTypeName = String(req.query?.approvalTypeName || '').trim();
+
+    if (!moduleName || !approvalTypeName) {
+      return res.status(400).json({ error: 'missing AI prompt target' });
+    }
+
+    res.json(await getAiPromptConfig(moduleName, approvalTypeName));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/ai-prompts', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const moduleName = String(req.body?.moduleName || '').trim();
+    const approvalTypeName = String(req.body?.approvalTypeName || '').trim();
+    const prompt = String(req.body?.prompt || '').trim();
+
+    if (!moduleName || !approvalTypeName || !prompt) {
+      return res.status(400).json({ error: 'missing AI prompt fields' });
+    }
+
+    const key = getPromptKey(moduleName, approvalTypeName);
+    const now = new Date().toISOString();
+    const config = await updatePromptConfigs((configs) => {
+      const existing = configs.find((item) => item.key === key);
+
+      if (existing) {
+        existing.moduleName = moduleName;
+        existing.approvalTypeName = approvalTypeName;
+        existing.prompt = prompt;
+        existing.updatedAt = now;
+        existing.updatedBy = req.user.name;
+        return existing;
+      }
+
+      const nextConfig = {
+        key,
+        moduleName,
+        approvalTypeName,
+        prompt,
+        updatedAt: now,
+        updatedBy: req.user.name,
+      };
+      configs.unshift(nextConfig);
+      return nextConfig;
+    });
+
+    res.json({ ...config, isDefault: false });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/accounts', authenticate, requireRoles('developer'), async (_req, res, next) => {
@@ -660,24 +1046,26 @@ app.post('/api/records', authenticate, requireRoles('applicant'), async (req, re
       return res.status(403).json({ error: 'applicant does not match current user' });
     }
 
-    const record = await updateRecords((records) => {
-      const now = new Date().toISOString();
-      const newRecord = {
-        id: `APP-${Date.now()}`,
-        moduleName,
-        approvalTypeName,
-        businessData,
-        status: '待审批',
-        applicant,
-        createdAt: now,
-        updatedAt: now,
-        logs: [
-          createLog('发起申请', applicant, '提交了审批单'),
-        ],
-      };
-
-      records.unshift(newRecord);
-      return newRecord;
+    const now = new Date().toISOString();
+    const aiSuggestion = await generateAiSuggestion({
+      moduleName,
+      approvalTypeName,
+      applicant,
+      businessData,
+    });
+    const record = await createBusinessRecord({
+      id: `APP-${Date.now()}`,
+      moduleName,
+      approvalTypeName,
+      businessData,
+      status: '待审批',
+      applicant,
+      aiSuggestion,
+      createdAt: now,
+      updatedAt: now,
+      logs: [
+        createLog('发起申请', applicant, '提交了审批单'),
+      ],
     });
 
     res.status(201).json(record);
@@ -707,15 +1095,7 @@ app.patch('/api/records/:id/status', authenticate, requireRoles('approver', 'bos
       return res.status(400).json({ error: 'reject reason is required' });
     }
 
-    const updatedRecord = await updateRecords((records) => {
-      const record = records.find((item) => item.id === id);
-
-      if (!record) {
-        const error = new Error('approval record not found');
-        error.statusCode = 404;
-        throw error;
-      }
-
+    const updatedRecord = await updateRecordById(id, (record) => {
       if (record.status !== '待审批') {
         const error = new Error('approval record has already been processed');
         error.statusCode = 409;
@@ -758,10 +1138,7 @@ app.delete('/api/records', authenticate, requireRoles('boss'), async (_req, res,
       return res.status(403).json({ error: 'record deletion is disabled' });
     }
 
-    await updateRecords((records) => {
-      records.splice(0, records.length);
-      return null;
-    });
+    await clearRecordFiles();
 
     res.status(204).end();
   } catch (error) {

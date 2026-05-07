@@ -82,6 +82,27 @@ export interface ApprovalAttachment {
   uploadedAt: string;
 }
 
+export type AiSuggestionStatus = 'generated' | 'failed' | 'skipped';
+
+export interface AiSuggestion {
+  status: AiSuggestionStatus;
+  riskLevel?: string;
+  advice?: string;
+  displayText: string;
+  generatedAt?: string;
+  error?: string;
+}
+
+export interface AiPromptConfig {
+  key: string;
+  moduleName: string;
+  approvalTypeName: string;
+  prompt: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  isDefault?: boolean;
+}
+
 export interface ApprovalRecord {
   id: string;
   moduleName: string;
@@ -89,6 +110,7 @@ export interface ApprovalRecord {
   businessData: Record<string, any>;
   status: ApprovalStatus;
   applicant: string;
+  aiSuggestion?: AiSuggestion;
   createdAt: string;
   updatedAt: string;
   approver?: string;
