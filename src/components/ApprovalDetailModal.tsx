@@ -40,6 +40,13 @@ function getAiSuggestionDisplay(record: ApprovalRecord) {
     };
   }
 
+  if (record.aiSuggestion.status === 'generating') {
+    return {
+      text: 'AI建议生成中',
+      tone: 'neutral',
+    };
+  }
+
   if (record.aiSuggestion.status === 'generated') {
     return {
       text: record.aiSuggestion.displayText,

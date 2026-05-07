@@ -716,6 +716,30 @@ async function generateAiSuggestion({ moduleName, approvalTypeName, applicant, b
   }
 }
 
+function createGeneratingAiSuggestion() {
+  return {
+    status: 'generating',
+    displayText: 'AI建议生成中',
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+function scheduleAiSuggestionGeneration(record) {
+  void generateAiSuggestion({
+    moduleName: record.moduleName,
+    approvalTypeName: record.approvalTypeName,
+    applicant: record.applicant,
+    businessData: record.businessData,
+  })
+    .then((aiSuggestion) => updateRecordById(record.id, (currentRecord) => {
+      currentRecord.aiSuggestion = aiSuggestion;
+      return currentRecord;
+    }))
+    .catch((error) => {
+      console.error('AI suggestion background generation failed:', error);
+    });
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
@@ -1047,12 +1071,6 @@ app.post('/api/records', authenticate, requireRoles('applicant'), async (req, re
     }
 
     const now = new Date().toISOString();
-    const aiSuggestion = await generateAiSuggestion({
-      moduleName,
-      approvalTypeName,
-      applicant,
-      businessData,
-    });
     const record = await createBusinessRecord({
       id: `APP-${Date.now()}`,
       moduleName,
@@ -1060,7 +1078,7 @@ app.post('/api/records', authenticate, requireRoles('applicant'), async (req, re
       businessData,
       status: '待审批',
       applicant,
-      aiSuggestion,
+      aiSuggestion: createGeneratingAiSuggestion(),
       createdAt: now,
       updatedAt: now,
       logs: [
@@ -1069,6 +1087,7 @@ app.post('/api/records', authenticate, requireRoles('applicant'), async (req, re
     });
 
     res.status(201).json(record);
+    scheduleAiSuggestionGeneration(record);
   } catch (error) {
     next(error);
   }

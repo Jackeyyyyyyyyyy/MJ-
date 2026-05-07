@@ -7,10 +7,42 @@ import { auth } from '../auth';
 import { cn } from '../lib/utils';
 import { ApprovalAttachment, Module, ApprovalType } from '../types';
 
+interface BatchModifyDetailRow {
+  order: string;
+  containerNo: string;
+  feeName: string;
+  originalAmount: string;
+  originalSupplier: string;
+  updatedAmount: string;
+  updatedSupplier: string;
+}
+
 interface CreateApprovalModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void | Promise<void>;
+}
+
+const batchModifyDetailColumns: Array<{ key: keyof BatchModifyDetailRow; label: string; placeholder: string; type?: string }> = [
+  { key: 'order', label: '订单', placeholder: '输入订单' },
+  { key: 'containerNo', label: '箱号', placeholder: '输入箱号' },
+  { key: 'feeName', label: '费用名', placeholder: '输入费用名' },
+  { key: 'originalAmount', label: '原始金额', placeholder: '原始金额', type: 'number' },
+  { key: 'originalSupplier', label: '原始供应商', placeholder: '原始供应商' },
+  { key: 'updatedAmount', label: '修改后金额', placeholder: '修改后金额', type: 'number' },
+  { key: 'updatedSupplier', label: '修改后供应商', placeholder: '修改后供应商' },
+];
+
+function createEmptyBatchModifyDetail(): BatchModifyDetailRow {
+  return {
+    order: '',
+    containerNo: '',
+    feeName: '',
+    originalAmount: '',
+    originalSupplier: '',
+    updatedAmount: '',
+    updatedSupplier: '',
+  };
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -40,7 +72,11 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const handleTypeSelect = (type: ApprovalType) => {
     setSelectedType(type);
     const initialData: Record<string, any> = {};
-    type.businessFields.forEach(field => initialData[field] = '');
+    type.businessFields.forEach(field => {
+      initialData[field] = selectedModule?.name === '资金' && type.name === '批量修改' && field === '明细'
+        ? [createEmptyBatchModifyDetail()]
+        : '';
+    });
     setFormData(initialData);
     setStep(3);
   };
@@ -86,6 +122,18 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
 
     const newErrors: Record<string, string> = {};
     selectedType.businessFields.forEach(field => {
+      const value = formData[field];
+      if (Array.isArray(value)) {
+        const hasEmptyCell = value.length === 0 || value.some((row) => {
+          return batchModifyDetailColumns.some((column) => !String(row?.[column.key] || '').trim());
+        });
+
+        if (hasEmptyCell) {
+          newErrors[field] = '请完整填写明细';
+        }
+        return;
+      }
+
       if (!formData[field]) {
         newErrors[field] = '必填项';
       }
@@ -96,15 +144,20 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       return;
     }
 
-    await storage.addRecord({
+    const payload = {
       moduleName: selectedModule.name,
       approvalTypeName: selectedType.name,
       businessData: formData,
       applicant: user.name
-    });
+    };
 
-    await onSuccess();
     handleClose();
+
+    storage.addRecord(payload)
+      .then(() => onSuccess())
+      .catch((error) => {
+        window.alert(error instanceof Error ? error.message : '申请提交失败，请稍后再试');
+      });
   };
 
   const handleClose = () => {

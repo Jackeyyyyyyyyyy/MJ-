@@ -82,7 +82,7 @@ export interface ApprovalAttachment {
   uploadedAt: string;
 }
 
-export type AiSuggestionStatus = 'generated' | 'failed' | 'skipped';
+export type AiSuggestionStatus = 'generating' | 'generated' | 'failed' | 'skipped';
 
 export interface AiSuggestion {
   status: AiSuggestionStatus;
