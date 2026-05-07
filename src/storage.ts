@@ -1,4 +1,4 @@
-import { ApprovalAttachment, ApprovalRecord, ApprovalStatus } from './types';
+import { ApprovalAttachment, ApprovalRecord, ApprovalStatus, SystemAccount } from './types';
 import { auth } from './auth';
 
 type NewApprovalRecord = Omit<ApprovalRecord, 'id' | 'createdAt' | 'updatedAt' | 'logs' | 'status'>;
@@ -55,6 +55,10 @@ async function download(url: string): Promise<Blob> {
 export const storage = {
   getRecords(): Promise<ApprovalRecord[]> {
     return request<ApprovalRecord[]>('/records');
+  },
+
+  getAccounts(): Promise<SystemAccount[]> {
+    return request<SystemAccount[]>('/accounts');
   },
 
   addRecord(record: NewApprovalRecord): Promise<ApprovalRecord> {

@@ -48,7 +48,35 @@ const users = {
   applicant: { username: 'applicant', role: 'applicant', name: '张申请', password: appPassword },
   approver: { username: 'approver', role: 'approver', name: '李审批', password: appPassword },
   boss: { username: 'boss', role: 'boss', name: '王老板', password: appPassword },
-  developer: { username: 'developer', role: 'developer', name: '系统开发员', password: appPassword },
+  developer: { username: 'developer', role: 'developer', name: '超级管理员', password: appPassword },
+};
+
+const roleLabels = {
+  applicant: '申请人',
+  approver: '审批人',
+  boss: '管理员',
+  developer: '超级管理员',
+};
+
+const rolePermissions = {
+  applicant: [
+    { key: 'record:create', label: '创建申请' },
+    { key: 'record:own:read', label: '查看本人申请' },
+  ],
+  approver: [
+    { key: 'record:read', label: '查看审批记录' },
+    { key: 'record:review', label: '审批处理' },
+  ],
+  boss: [
+    { key: 'record:read:all', label: '查看全部申请' },
+    { key: 'record:review:all', label: '管理审批结果' },
+  ],
+  developer: [
+    { key: 'record:read:all', label: '查看全部申请' },
+    { key: 'record:review:all', label: '管理审批结果' },
+    { key: 'perspective:switch', label: '切换业务视角' },
+    { key: 'account:permissions:read', label: '管理账号权限' },
+  ],
 };
 
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '30mb' }));
@@ -251,6 +279,15 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     dataDir,
   });
+});
+
+app.get('/api/accounts', authenticate, requireRoles('developer'), (_req, res) => {
+  res.json(Object.values(users).map(({ password, ...user }) => ({
+    ...user,
+    roleLabel: roleLabels[user.role] || user.role,
+    permissions: rolePermissions[user.role] || [],
+    canSwitchPerspective: user.role === 'developer',
+  })));
 });
 
 app.post('/api/auth/login', (req, res) => {

@@ -4,6 +4,7 @@ import AppLayout from './components/AppLayout';
 import ApplicantHome from './components/ApplicantHome';
 import ApproverHome from './components/ApproverHome';
 import BossDashboard from './components/BossDashboard';
+import AccountPermissionAdmin from './components/AccountPermissionAdmin';
 import ApprovalTable from './components/ApprovalTable';
 import ApprovalDetailModal from './components/ApprovalDetailModal';
 import ApprovalProgressModal from './components/ApprovalProgressModal';
@@ -17,6 +18,7 @@ export default function App() {
   const [perspective, setPerspective] = useState<Role | null>(auth.getPerspective());
   const [selectedModule, setSelectedModule] = useState<string>('');
   const [selectedType, setSelectedType] = useState<string>('');
+  const [activeAdminView, setActiveAdminView] = useState<'accounts' | null>(null);
   
   // Dynamic list state
   const [dynamicRecords, setDynamicRecords] = useState<ApprovalRecord[]>([]);
@@ -29,6 +31,7 @@ export default function App() {
     setPerspective(auth.getPerspective());
     setSelectedModule('');
     setSelectedType('');
+    setActiveAdminView(null);
   };
 
   const handleLogout = () => {
@@ -40,6 +43,13 @@ export default function App() {
   const handleSelectType = (moduleName: string, typeName: string) => {
     setSelectedModule(moduleName);
     setSelectedType(typeName);
+    setActiveAdminView(null);
+  };
+
+  const handleOpenAccountAdmin = () => {
+    setSelectedModule('');
+    setSelectedType('');
+    setActiveAdminView('accounts');
   };
 
   const loadDynamicRecords = async () => {
@@ -77,6 +87,10 @@ export default function App() {
   }
 
   const renderContent = () => {
+    if (activeAdminView === 'accounts') {
+      return <AccountPermissionAdmin />;
+    }
+
     if (selectedType) {
       const canReview = perspective === 'approver' || perspective === 'boss';
 
@@ -125,7 +139,12 @@ export default function App() {
   return (
     <AppLayout 
       onLogout={handleLogout} 
-      onPerspectiveChange={(p) => setPerspective(p)}
+      onPerspectiveChange={(p) => {
+        setPerspective(p);
+        setActiveAdminView(null);
+      }}
+      activeAdminView={activeAdminView}
+      onOpenAccountAdmin={handleOpenAccountAdmin}
       selectedModule={selectedModule}
       selectedType={selectedType}
       onSelectType={handleSelectType}

@@ -20,6 +20,17 @@ export interface User {
   name: string;
 }
 
+export interface AccountPermission {
+  key: string;
+  label: string;
+}
+
+export interface SystemAccount extends User {
+  roleLabel: string;
+  permissions: AccountPermission[];
+  canSwitchPerspective: boolean;
+}
+
 export interface BusinessField {
   name: string;
 }

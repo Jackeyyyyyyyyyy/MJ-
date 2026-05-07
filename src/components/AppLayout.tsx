@@ -10,6 +10,8 @@ interface AppLayoutProps {
   children: React.ReactNode;
   onLogout: () => void;
   onPerspectiveChange: (role: Role) => void;
+  activeAdminView?: 'accounts' | null;
+  onOpenAccountAdmin: () => void;
   selectedModule?: string;
   selectedType?: string;
   onSelectType: (module: string, type: string) => void;
@@ -22,7 +24,7 @@ function getPerspectiveLabel(role: Role) {
     case 'applicant': return '申请人';
     case 'approver': return '审核员';
     case 'boss': return '老板';
-    default: return '开发者';
+    default: return '超级管理员';
   }
 }
 
@@ -61,6 +63,8 @@ export default function AppLayout({
   children, 
   onLogout, 
   onPerspectiveChange,
+  activeAdminView,
+  onOpenAccountAdmin,
   selectedModule,
   selectedType,
   onSelectType
@@ -74,7 +78,9 @@ export default function AppLayout({
     onPerspectiveChange(role);
   };
 
-  const displayRole = getPerspectiveLabel(perspective || user?.role || 'applicant');
+  const displayRole = user?.role === 'developer'
+    ? '超级管理员'
+    : getPerspectiveLabel(perspective || user?.role || 'applicant');
   const isDeveloper = user?.role === 'developer';
 
   return (
@@ -83,6 +89,12 @@ export default function AppLayout({
         currentPerspective={perspective || 'applicant'} 
         selectedModule={selectedModule}
         selectedType={selectedType}
+        isSuperAdmin={isDeveloper}
+        activeAdminView={activeAdminView}
+        onOpenAccountAdmin={() => {
+          onOpenAccountAdmin();
+          setIsSidebarOpen(false);
+        }}
         onSelectType={(m, t) => {
           onSelectType(m, t);
           setIsSidebarOpen(false);
