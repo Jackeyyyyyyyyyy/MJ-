@@ -55,19 +55,19 @@ export default function ApplicantHome() {
         title="我的申请"
         subtitle="管理与追踪"
         items={summaryItems}
-        action={(
+      />
+
+      <div className="space-y-5">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-[20px] font-bold tracking-tight">历史记录</h2>
           <button
             onClick={() => setIsCreateModalOpen(true)}
-            className="h-9 px-4 bg-black text-white rounded-lg text-[13px] font-bold hover:bg-zinc-800 transition-all flex items-center justify-center gap-2"
+            className="h-11 px-5 bg-black text-white rounded-full text-[14px] font-bold hover:bg-zinc-800 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-sm"
           >
             <Plus size={15} strokeWidth={3} />
             <span>新建申请</span>
           </button>
-        )}
-      />
-
-      <div className="space-y-5">
-        <h2 className="text-[20px] font-bold tracking-tight">历史记录</h2>
+        </div>
         <div className="bg-white border border-border-silver rounded-2xl overflow-hidden shadow-sm">
           <ApprovalTable 
             records={records}
