@@ -17,7 +17,8 @@ export const approvalSchema: Schema = {
         {
           "name": "班列供应商变更",
           "businessFields": [
-            "发生日期",
+            "班列名称",
+            "发车日期",
             "修改后供应商",
             "修改后服务模式"
           ],
