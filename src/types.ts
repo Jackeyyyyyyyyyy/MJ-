@@ -103,6 +103,59 @@ export interface AiPromptConfig {
   isDefault?: boolean;
 }
 
+export interface AiAssistantRecord {
+  id: string;
+  moduleName: string;
+  approvalTypeName: string;
+  status: ApprovalStatus;
+  applicant: string;
+  createdAt: string;
+  updatedAt: string;
+  approver?: string;
+  rejectReason?: string;
+  aiSuggestion?: Pick<AiSuggestion, 'status' | 'riskLevel' | 'displayText'> | null;
+  businessData: Record<string, string>;
+}
+
+export interface AiAssistantOverview {
+  aiEnabled: boolean;
+  summary: {
+    total: number;
+    pending: number;
+    approved: number;
+    rejected: number;
+    today: number;
+    highRisk: number;
+    aiAttention: number;
+  };
+  highRiskRecords: AiAssistantRecord[];
+  aiAttentionRecords: AiAssistantRecord[];
+  priorityRecords: AiAssistantRecord[];
+  moduleStats: Array<{
+    moduleName: string;
+    total: number;
+    pending: number;
+    highRisk: number;
+  }>;
+  topApplicants: Array<{
+    name: string;
+    count: number;
+  }>;
+}
+
+export interface AiAssistantChatResponse {
+  enabled: boolean;
+  answer: string;
+  relatedRecords: AiAssistantRecord[];
+}
+
+export interface AiAssistantPromptConfig {
+  prompt: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  isDefault?: boolean;
+}
+
 export interface ApprovalRecord {
   id: string;
   moduleName: string;

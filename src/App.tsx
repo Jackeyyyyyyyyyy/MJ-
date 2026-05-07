@@ -9,6 +9,7 @@ import ApprovalTable from './components/ApprovalTable';
 import ApprovalDetailModal from './components/ApprovalDetailModal';
 import ApprovalProgressModal from './components/ApprovalProgressModal';
 import AiPromptEditor from './components/AiPromptEditor';
+import AiAssistantHome from './components/AiAssistantHome';
 import { auth } from './auth';
 import { storage } from './storage';
 import { Role, ApprovalRecord, ApprovalStatus } from './types';
@@ -19,7 +20,7 @@ export default function App() {
   const [perspective, setPerspective] = useState<Role | null>(auth.getPerspective());
   const [selectedModule, setSelectedModule] = useState<string>('');
   const [selectedType, setSelectedType] = useState<string>('');
-  const [activeAdminView, setActiveAdminView] = useState<'accounts' | null>(null);
+  const [activeAdminView, setActiveAdminView] = useState<'accounts' | 'ai-assistant' | null>(null);
   
   // Dynamic list state
   const [dynamicRecords, setDynamicRecords] = useState<ApprovalRecord[]>([]);
@@ -51,6 +52,12 @@ export default function App() {
     setSelectedModule('');
     setSelectedType('');
     setActiveAdminView('accounts');
+  };
+
+  const handleOpenAiAssistant = () => {
+    setSelectedModule('');
+    setSelectedType('');
+    setActiveAdminView('ai-assistant');
   };
 
   const loadDynamicRecords = async () => {
@@ -90,6 +97,10 @@ export default function App() {
   const renderContent = () => {
     if (activeAdminView === 'accounts') {
       return <AccountPermissionAdmin />;
+    }
+
+    if (activeAdminView === 'ai-assistant') {
+      return <AiAssistantHome />;
     }
 
     if (selectedType) {
@@ -155,6 +166,7 @@ export default function App() {
       }}
       activeAdminView={activeAdminView}
       onOpenAccountAdmin={handleOpenAccountAdmin}
+      onOpenAiAssistant={handleOpenAiAssistant}
       selectedModule={selectedModule}
       selectedType={selectedType}
       onSelectType={handleSelectType}

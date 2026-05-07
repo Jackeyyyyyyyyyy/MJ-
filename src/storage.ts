@@ -1,4 +1,14 @@
-import { AccountInput, AiPromptConfig, ApprovalAttachment, ApprovalRecord, ApprovalStatus, SystemAccount } from './types';
+import {
+  AccountInput,
+  AiAssistantChatResponse,
+  AiAssistantOverview,
+  AiAssistantPromptConfig,
+  AiPromptConfig,
+  ApprovalAttachment,
+  ApprovalRecord,
+  ApprovalStatus,
+  SystemAccount,
+} from './types';
 import { auth } from './auth';
 
 type NewApprovalRecord = Omit<ApprovalRecord, 'id' | 'createdAt' | 'updatedAt' | 'logs' | 'status'>;
@@ -88,6 +98,28 @@ export const storage = {
     return request<AiPromptConfig>('/ai-prompts', {
       method: 'PATCH',
       body: JSON.stringify({ moduleName, approvalTypeName, prompt }),
+    });
+  },
+
+  getAiAssistantOverview(): Promise<AiAssistantOverview> {
+    return request<AiAssistantOverview>('/ai-assistant/overview');
+  },
+
+  askAiAssistant(question: string): Promise<AiAssistantChatResponse> {
+    return request<AiAssistantChatResponse>('/ai-assistant/chat', {
+      method: 'POST',
+      body: JSON.stringify({ question }),
+    });
+  },
+
+  getAiAssistantPrompt(): Promise<AiAssistantPromptConfig> {
+    return request<AiAssistantPromptConfig>('/ai-assistant/prompt');
+  },
+
+  updateAiAssistantPrompt(prompt: string): Promise<AiAssistantPromptConfig> {
+    return request<AiAssistantPromptConfig>('/ai-assistant/prompt', {
+      method: 'PATCH',
+      body: JSON.stringify({ prompt }),
     });
   },
 

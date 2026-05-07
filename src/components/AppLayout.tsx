@@ -10,8 +10,9 @@ interface AppLayoutProps {
   children: React.ReactNode;
   onLogout: () => void;
   onPerspectiveChange: (role: Role) => void;
-  activeAdminView?: 'accounts' | null;
+  activeAdminView?: 'accounts' | 'ai-assistant' | null;
   onOpenAccountAdmin: () => void;
+  onOpenAiAssistant: () => void;
   selectedModule?: string;
   selectedType?: string;
   onSelectType: (module: string, type: string) => void;
@@ -65,6 +66,7 @@ export default function AppLayout({
   onPerspectiveChange,
   activeAdminView,
   onOpenAccountAdmin,
+  onOpenAiAssistant,
   selectedModule,
   selectedType,
   onSelectType
@@ -93,6 +95,10 @@ export default function AppLayout({
         activeAdminView={activeAdminView}
         onOpenAccountAdmin={() => {
           onOpenAccountAdmin();
+          setIsSidebarOpen(false);
+        }}
+        onOpenAiAssistant={() => {
+          onOpenAiAssistant();
           setIsSidebarOpen(false);
         }}
         onSelectType={(m, t) => {

@@ -10,6 +10,7 @@ MJ 审批中心是一个基于 React、Vite、TypeScript、Tailwind CSS 和 Expr
 - 开发者账号：可在申请人、审批人、管理端视角之间切换
 - 审批类型由 `src/approvalSchema.ts` 配置驱动
 - AI 审批建议：申请提交时按业务类型生成风险建议，超级管理员可维护每个业务类型的提示词
+- AI 管理助手：老板和超级管理员可在左侧入口查看全局洞察、提问审批数据并打开相关单据
 
 ## 本地运行
 
@@ -99,6 +100,12 @@ AI 提示词配置会保存到：
 
 ```text
 /app/data/ai-prompt-configs.json
+```
+
+AI 管理助手提示词配置会保存到：
+
+```text
+/app/data/ai-assistant-config.json
 ```
 
 上传附件会保存到：

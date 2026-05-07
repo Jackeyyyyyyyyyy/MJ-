@@ -4,6 +4,7 @@ import { Role } from '../types';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
+  Bot,
   ChevronRight, 
   ChevronDown, 
   Layers, 
@@ -19,8 +20,9 @@ interface SidebarProps {
   selectedType?: string;
   onSelectType: (module: string, type: string) => void;
   isSuperAdmin?: boolean;
-  activeAdminView?: 'accounts' | null;
+  activeAdminView?: 'accounts' | 'ai-assistant' | null;
   onOpenAccountAdmin?: () => void;
+  onOpenAiAssistant?: () => void;
   isOpen?: boolean;
   onClose?: () => void;
 }
@@ -33,6 +35,7 @@ export default function Sidebar({
   isSuperAdmin,
   activeAdminView,
   onOpenAccountAdmin,
+  onOpenAiAssistant,
   isOpen,
   onClose,
 }: SidebarProps) {
@@ -56,16 +59,28 @@ export default function Sidebar({
     },
   ];
 
-  const adminItems = isSuperAdmin
-    ? [
-        {
-          id: 'accounts',
-          label: '账号权限管理',
-          icon: ShieldCheck,
-          onClick: onOpenAccountAdmin,
-        },
-      ]
-    : [];
+  const adminItems = [
+    ...(currentPerspective === 'boss' || isSuperAdmin
+      ? [
+          {
+            id: 'ai-assistant',
+            label: 'AI 助手',
+            icon: Bot,
+            onClick: onOpenAiAssistant,
+          },
+        ]
+      : []),
+    ...(isSuperAdmin
+      ? [
+          {
+            id: 'accounts',
+            label: '账号权限管理',
+            icon: ShieldCheck,
+            onClick: onOpenAccountAdmin,
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div className={cn(

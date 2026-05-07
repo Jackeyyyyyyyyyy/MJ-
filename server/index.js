@@ -19,8 +19,11 @@ const uploadsDir = path.join(dataDir, 'uploads');
 const uploadsIndexFile = path.join(dataDir, 'approval-uploads.json');
 const businessRecordsDir = path.join(dataDir, 'business-records');
 const aiPromptConfigsFile = path.join(dataDir, 'ai-prompt-configs.json');
+const aiAssistantConfigFile = path.join(dataDir, 'ai-assistant-config.json');
 const validStatuses = new Set(['草稿', '待审批', '已批准', '已拒绝']);
 const managedRoles = new Set(['applicant', 'approver', 'boss']);
+const defaultAiAssistantPrompt =
+  '你是 MJ 审批系统的管理助手，只做只读分析。你负责总结审批风险、发现异常、解释待办优先级，并引用相关审批单。不得编造数据，不得替用户做审批决定，不得建议绕过流程。回答要先给简短结论，再列关键原因；如果涉及具体单据，请在 relatedRecordIds 中返回对应 recordId。';
 const defaultAiPromptBase =
   '你是 MJ 审批风控助手。请只根据申请字段判断资料完整性、业务合理性和明显风险，输出“低/中/高风险：建议……”，不超过 45 字，不编造未提供信息。';
 const defaultAiPromptFocus = {
@@ -116,6 +119,7 @@ const rolePermissions = {
   boss: [
     { key: 'record:read:all', label: '查看全部申请' },
     { key: 'record:review:all', label: '管理审批结果' },
+    { key: 'ai:assistant:read', label: '使用AI管理助手' },
   ],
   developer: [
     { key: 'record:read:all', label: '查看全部申请' },
@@ -123,6 +127,8 @@ const rolePermissions = {
     { key: 'perspective:switch', label: '切换业务视角' },
     { key: 'account:permissions:read', label: '管理账号权限' },
     { key: 'ai:prompts:write', label: '维护AI审批提示词' },
+    { key: 'ai:assistant:read', label: '使用AI管理助手' },
+    { key: 'ai:assistant:write', label: '维护AI助手提示词' },
   ],
 };
 
@@ -305,6 +311,30 @@ async function writeJsonArrayFile(file, items) {
   await fs.rename(tempFile, file);
 }
 
+async function readJsonObjectFile(file, fallback = {}) {
+  try {
+    const content = await fs.readFile(file, 'utf8');
+    if (!content.trim()) return { ...fallback };
+
+    const data = JSON.parse(content);
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error(`${path.basename(file)} file must contain an object`);
+    }
+
+    return data;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { ...fallback };
+    throw error;
+  }
+}
+
+async function writeJsonObjectFile(file, data) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const tempFile = `${file}.tmp`;
+  await fs.writeFile(tempFile, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  await fs.rename(tempFile, file);
+}
+
 async function listBusinessRecordFiles() {
   try {
     const entries = await fs.readdir(businessRecordsDir, { withFileTypes: true });
@@ -420,6 +450,7 @@ let writeQueue = Promise.resolve();
 let uploadWriteQueue = Promise.resolve();
 let accountWriteQueue = Promise.resolve();
 let promptWriteQueue = Promise.resolve();
+let assistantConfigWriteQueue = Promise.resolve();
 
 function createBusinessRecord(record) {
   const operation = writeQueue.catch(() => undefined).then(async () => {
@@ -510,6 +541,28 @@ function updatePromptConfigs(mutator) {
   });
 
   promptWriteQueue = operation.catch(() => undefined);
+  return operation;
+}
+
+async function readAiAssistantConfig() {
+  const config = await readJsonObjectFile(aiAssistantConfigFile, {});
+  return {
+    prompt: String(config.prompt || defaultAiAssistantPrompt),
+    updatedAt: config.updatedAt,
+    updatedBy: config.updatedBy,
+    isDefault: !config.prompt,
+  };
+}
+
+function updateAiAssistantConfig(mutator) {
+  const operation = assistantConfigWriteQueue.catch(() => undefined).then(async () => {
+    const config = await readAiAssistantConfig();
+    const result = await mutator(config);
+    await writeJsonObjectFile(aiAssistantConfigFile, result);
+    return result;
+  });
+
+  assistantConfigWriteQueue = operation.catch(() => undefined);
   return operation;
 }
 
@@ -740,6 +793,222 @@ function scheduleAiSuggestionGeneration(record) {
     });
 }
 
+function isAiConfigured() {
+  return Boolean(
+    process.env.OPENAI_API_KEY?.trim() &&
+    process.env.OPENAI_API_BASE?.trim() &&
+    process.env.OPENAI_MODEL?.trim()
+  );
+}
+
+function getRiskRank(record) {
+  const text = `${record.aiSuggestion?.riskLevel || ''} ${record.aiSuggestion?.displayText || ''}`;
+  if (text.includes('高风险')) return 3;
+  if (text.includes('中风险')) return 2;
+  if (text.includes('低风险')) return 1;
+  return 0;
+}
+
+function stringifyBusinessValue(value) {
+  if (isAttachmentList(value)) {
+    return `附件${value.length}个：${value.map((attachment) => attachment.name).join('、')}`;
+  }
+
+  if (value && typeof value === 'object') {
+    return JSON.stringify(sanitizeForAi(value));
+  }
+
+  return String(value ?? '');
+}
+
+function summarizeBusinessData(businessData) {
+  return Object.fromEntries(
+    Object.entries(businessData || {})
+      .slice(0, 8)
+      .map(([key, value]) => [key, stringifyBusinessValue(value).slice(0, 180)]),
+  );
+}
+
+function toAssistantRecord(record) {
+  return {
+    id: record.id,
+    moduleName: record.moduleName,
+    approvalTypeName: record.approvalTypeName,
+    status: record.status,
+    applicant: record.applicant,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    approver: record.approver,
+    rejectReason: record.rejectReason,
+    aiSuggestion: record.aiSuggestion
+      ? {
+          status: record.aiSuggestion.status,
+          riskLevel: record.aiSuggestion.riskLevel,
+          displayText: record.aiSuggestion.displayText,
+        }
+      : null,
+    businessData: summarizeBusinessData(record.businessData),
+  };
+}
+
+function buildOverview(records) {
+  const today = new Date().toISOString().slice(0, 10);
+  const summary = records.reduce(
+    (current, record) => {
+      current.total += 1;
+      if (record.status === '待审批') current.pending += 1;
+      if (record.status === '已批准') current.approved += 1;
+      if (record.status === '已拒绝') current.rejected += 1;
+      if (String(record.createdAt || '').startsWith(today)) current.today += 1;
+      if (getRiskRank(record) === 3) current.highRisk += 1;
+      if (['failed', 'generating', 'skipped'].includes(record.aiSuggestion?.status)) current.aiAttention += 1;
+      return current;
+    },
+    { total: 0, pending: 0, approved: 0, rejected: 0, today: 0, highRisk: 0, aiAttention: 0 },
+  );
+
+  const moduleMap = new Map();
+  const applicantMap = new Map();
+  records.forEach((record) => {
+    const moduleStat = moduleMap.get(record.moduleName) || { moduleName: record.moduleName, total: 0, pending: 0, highRisk: 0 };
+    moduleStat.total += 1;
+    if (record.status === '待审批') moduleStat.pending += 1;
+    if (getRiskRank(record) === 3) moduleStat.highRisk += 1;
+    moduleMap.set(record.moduleName, moduleStat);
+
+    applicantMap.set(record.applicant, (applicantMap.get(record.applicant) || 0) + 1);
+  });
+
+  const sortedRecords = [...records].sort((left, right) => {
+    const riskDelta = getRiskRank(right) - getRiskRank(left);
+    if (riskDelta !== 0) return riskDelta;
+    return (Date.parse(right.createdAt || '') || 0) - (Date.parse(left.createdAt || '') || 0);
+  });
+
+  return {
+    aiEnabled: isAiConfigured(),
+    summary,
+    highRiskRecords: sortedRecords.filter((record) => getRiskRank(record) === 3).slice(0, 6).map(toAssistantRecord),
+    aiAttentionRecords: sortedRecords
+      .filter((record) => ['failed', 'generating', 'skipped'].includes(record.aiSuggestion?.status))
+      .slice(0, 6)
+      .map(toAssistantRecord),
+    priorityRecords: sortedRecords
+      .filter((record) => record.status === '待审批')
+      .slice(0, 8)
+      .map(toAssistantRecord),
+    moduleStats: [...moduleMap.values()].sort((left, right) => right.pending - left.pending || right.total - left.total),
+    topApplicants: [...applicantMap.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 5),
+  };
+}
+
+function parseAssistantJson(rawText) {
+  const text = String(rawText || '').trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const jsonText = fenced ? fenced[1] : text;
+  const start = jsonText.indexOf('{');
+  const end = jsonText.lastIndexOf('}');
+
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(jsonText.slice(start, end + 1));
+    } catch {
+      // Fall through to plain text handling.
+    }
+  }
+
+  return { answer: text || 'AI助手没有返回有效内容。', relatedRecordIds: [] };
+}
+
+function getRelatedRecordIds(answer, records) {
+  const explicitIds = Array.isArray(answer.relatedRecordIds) ? answer.relatedRecordIds : [];
+  const textIds = String(answer.answer || '').match(/APP-\d+/g) || [];
+  const allowedIds = new Set(records.map((record) => record.id));
+  return [...new Set([...explicitIds, ...textIds].map(String))]
+    .filter((id) => allowedIds.has(id))
+    .slice(0, 8);
+}
+
+async function askAiAssistant(question, records) {
+  if (!isAiConfigured()) {
+    return {
+      enabled: false,
+      answer: 'AI助手暂未启用，请先配置 OPENAI_API_KEY、OPENAI_API_BASE 和 OPENAI_MODEL。',
+      relatedRecords: [],
+    };
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY.trim();
+  const apiBase = process.env.OPENAI_API_BASE.trim();
+  const model = process.env.OPENAI_MODEL.trim();
+  const config = await readAiAssistantConfig();
+  const overview = buildOverview(records);
+  const recordPayload = records.map(toAssistantRecord);
+  const controller = new AbortController();
+  const configuredTimeout = Number(process.env.AI_REQUEST_TIMEOUT_MS);
+  const timeoutMs =
+    Number.isFinite(configuredTimeout) && configuredTimeout > 0
+      ? configuredTimeout
+      : 12000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${apiBase.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: `${config.prompt}\n请只返回 JSON：{"answer":"中文回答","relatedRecordIds":["APP-..."]}。relatedRecordIds 只能使用输入数据里真实存在的 id。`,
+          },
+          {
+            role: 'user',
+            content: limitText(
+              JSON.stringify({
+                question,
+                overview,
+                records: recordPayload,
+              }, null, 2),
+              22000,
+            ),
+          },
+        ],
+        temperature: 0.2,
+        max_tokens: 900,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`AI assistant request failed: ${response.status}`);
+    }
+
+    const body = await response.json();
+    const parsed = parseAssistantJson(body?.choices?.[0]?.message?.content);
+    const relatedRecordIds = getRelatedRecordIds(parsed, records);
+    const relatedRecords = relatedRecordIds
+      .map((id) => records.find((record) => record.id === id))
+      .filter(Boolean)
+      .map(toAssistantRecord);
+
+    return {
+      enabled: true,
+      answer: String(parsed.answer || 'AI助手没有返回有效内容。').trim(),
+      relatedRecords,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
@@ -799,6 +1068,69 @@ app.patch('/api/ai-prompts', authenticate, requireRoles('developer'), async (req
     });
 
     res.json({ ...config, isDefault: false });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/ai-assistant/overview', authenticate, requireRoles('boss'), async (_req, res, next) => {
+  try {
+    const records = await readRecords();
+    res.json(buildOverview(records));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/ai-assistant/chat', authenticate, requireRoles('boss'), async (req, res, next) => {
+  try {
+    const question = String(req.body?.question || '').trim();
+
+    if (!question) {
+      return res.status(400).json({ error: 'missing assistant question' });
+    }
+
+    const records = await readRecords();
+
+    try {
+      res.json(await askAiAssistant(question, records));
+    } catch (error) {
+      res.json({
+        enabled: isAiConfigured(),
+        answer: error instanceof Error ? `AI助手暂时无法回答：${error.message}` : 'AI助手暂时无法回答，请稍后再试。',
+        relatedRecords: [],
+      });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/ai-assistant/prompt', authenticate, requireRoles('developer'), async (_req, res, next) => {
+  try {
+    res.json(await readAiAssistantConfig());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/ai-assistant/prompt', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const prompt = String(req.body?.prompt || '').trim();
+
+    if (!prompt) {
+      return res.status(400).json({ error: 'missing AI assistant prompt' });
+    }
+
+    const now = new Date().toISOString();
+    const config = await updateAiAssistantConfig(() => ({
+      prompt,
+      updatedAt: now,
+      updatedBy: req.user.name,
+      isDefault: false,
+    }));
+
+    res.json(config);
   } catch (error) {
     next(error);
   }
