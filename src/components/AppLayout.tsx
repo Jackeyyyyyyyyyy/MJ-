@@ -1,7 +1,7 @@
 import React from 'react';
 import { auth } from '../auth';
 import Sidebar from './Sidebar';
-import { LogOut, User as UserIcon } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { Role } from '../types';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -13,6 +13,48 @@ interface AppLayoutProps {
   selectedModule?: string;
   selectedType?: string;
   onSelectType: (module: string, type: string) => void;
+}
+
+const PERSPECTIVE_ROLES: Role[] = ['applicant', 'approver', 'boss'];
+
+function getPerspectiveLabel(role: Role) {
+  switch(role) {
+    case 'applicant': return '申请人';
+    case 'approver': return '审核员';
+    case 'boss': return '老板';
+    default: return '开发者';
+  }
+}
+
+interface PerspectiveSwitcherProps {
+  perspective: Role | null;
+  onChange: (role: Role) => void;
+}
+
+function PerspectiveSwitcher({ perspective, onChange }: PerspectiveSwitcherProps) {
+  return (
+    <div
+      className="grid grid-cols-3 items-center gap-1 p-1 bg-lightest-gray-background rounded-apple-btn"
+      aria-label="开发者视角切换"
+    >
+      {PERSPECTIVE_ROLES.map((role) => (
+        <button
+          key={role}
+          type="button"
+          onClick={() => onChange(role)}
+          aria-pressed={perspective === role}
+          className={cn(
+            "h-10 px-4 lg:px-6 text-[13px] lg:text-[12px] font-bold rounded-apple-btn transition-all whitespace-nowrap",
+            perspective === role
+              ? "bg-pure-white text-midnight-graphite shadow-sm"
+              : "text-medium-gray hover:text-midnight-graphite"
+          )}
+        >
+          {getPerspectiveLabel(role)}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export default function AppLayout({ 
@@ -32,16 +74,8 @@ export default function AppLayout({
     onPerspectiveChange(role);
   };
 
-  const getPerspectiveLabel = (p: Role) => {
-    switch(p) {
-      case 'applicant': return '申请人';
-      case 'approver': return '审核员';
-      case 'boss': return '老板';
-      default: return '开发者';
-    }
-  };
-
   const displayRole = getPerspectiveLabel(perspective || user?.role || 'applicant');
+  const isDeveloper = user?.role === 'developer';
 
   return (
     <div className="flex h-screen bg-canvas-white overflow-hidden relative">
@@ -71,58 +105,59 @@ export default function AppLayout({
       </AnimatePresence>
 
       <div className="flex-1 flex flex-col min-w-0 relative h-full overflow-hidden">
-        <header className="h-16 lg:h-20 glass flex items-center justify-between px-6 lg:px-12 grow-0 shrink-0 z-30">
-          <div className="flex items-center gap-4 lg:gap-6">
-            <button 
-              onClick={() => setIsSidebarOpen(true)}
-              className="w-10 h-10 flex items-center justify-center lg:hidden text-midnight-graphite"
-            >
-              <div className="flex flex-col gap-1.5 w-5">
-                <span className="w-full h-0.5 bg-midnight-graphite rounded-full" />
-                <span className="w-full h-0.5 bg-midnight-graphite rounded-full" />
-              </div>
-            </button>
-            {user?.role === 'developer' && (
-              <div className="hidden sm:flex items-center p-1 bg-lightest-gray-background rounded-apple-btn">
-                {(['applicant', 'approver', 'boss'] as Role[]).map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => handlePerspectiveChange(r)}
-                    className={cn(
-                      "px-4 lg:px-6 py-1.5 text-[12px] font-semibold rounded-apple-btn transition-all",
-                      perspective === r
-                        ? "bg-pure-white text-midnight-graphite shadow-sm"
-                        : "text-medium-gray hover:text-midnight-graphite"
-                    )}
-                  >
-                    {getPerspectiveLabel(r)}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-4 lg:gap-8">
-            <div className="flex items-center gap-3 lg:gap-4 group cursor-pointer">
-              <div className="hidden sm:flex flex-col items-end">
-                <p className="text-[14px] font-semibold text-midnight-graphite tracking-tight leading-none">{displayRole}</p>
-              </div>
-              
-              <div className="w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-lightest-gray-background text-midnight-graphite flex items-center justify-center font-semibold text-[14px] transition-transform group-hover:scale-95 duration-500">
-                {displayRole.charAt(0)}
-              </div>
+        <header className="glass grow-0 shrink-0 z-30">
+          <div className="h-16 lg:h-20 flex items-center justify-between px-6 lg:px-12">
+            <div className="flex items-center gap-4 lg:gap-6">
+              <button 
+                onClick={() => setIsSidebarOpen(true)}
+                className="w-10 h-10 flex items-center justify-center lg:hidden text-midnight-graphite"
+              >
+                <div className="flex flex-col gap-1.5 w-5">
+                  <span className="w-full h-0.5 bg-midnight-graphite rounded-full" />
+                  <span className="w-full h-0.5 bg-midnight-graphite rounded-full" />
+                </div>
+              </button>
+              {isDeveloper && (
+                <div className="hidden sm:block">
+                  <PerspectiveSwitcher
+                    perspective={perspective}
+                    onChange={handlePerspectiveChange}
+                  />
+                </div>
+              )}
             </div>
 
-            <div className="w-px h-4 bg-border-silver" />
+            <div className="flex items-center gap-4 lg:gap-8">
+              <div className="flex items-center gap-3 lg:gap-4 group cursor-pointer">
+                <div className="hidden sm:flex flex-col items-end">
+                  <p className="text-[14px] font-semibold text-midnight-graphite tracking-tight leading-none">{displayRole}</p>
+                </div>
+                
+                <div className="w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-lightest-gray-background text-midnight-graphite flex items-center justify-center font-semibold text-[14px] transition-transform group-hover:scale-95 duration-500">
+                  {displayRole.charAt(0)}
+                </div>
+              </div>
 
-            <button 
-              onClick={onLogout}
-              className="w-10 h-10 lg:w-11 lg:h-11 flex items-center justify-center text-medium-gray hover:text-interactive-blue transition-all duration-300"
-              title="退出登录"
-            >
-              <LogOut size={18} strokeWidth={2} />
-            </button>
+              <div className="w-px h-4 bg-border-silver" />
+
+              <button 
+                onClick={onLogout}
+                className="w-10 h-10 lg:w-11 lg:h-11 flex items-center justify-center text-medium-gray hover:text-interactive-blue transition-all duration-300"
+                title="退出登录"
+              >
+                <LogOut size={18} strokeWidth={2} />
+              </button>
+            </div>
           </div>
+
+          {isDeveloper && (
+            <div className="sm:hidden px-5 pb-3">
+              <PerspectiveSwitcher
+                perspective={perspective}
+                onChange={handlePerspectiveChange}
+              />
+            </div>
+          )}
         </header>
 
         <main className="flex-1 overflow-y-auto no-scrollbar pt-12 lg:pt-16 px-6 lg:px-20 pb-40">

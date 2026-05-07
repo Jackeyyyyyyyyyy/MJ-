@@ -82,41 +82,51 @@ export default function BossDashboard() {
   }, [allRecords, searchTerm, filterStatus]);
 
   const stats = useMemo(() => {
-    return {
-      total: allRecords.length,
-      pending: allRecords.filter(r => r.status === ApprovalStatus.PENDING).length,
-      approved: allRecords.filter(r => r.status === ApprovalStatus.APPROVED).length,
-      rejected: allRecords.filter(r => r.status === ApprovalStatus.REJECTED).length
-    };
+    return allRecords.reduce(
+      (summary, record) => {
+        summary.total += 1;
+        if (record.status === ApprovalStatus.PENDING) summary.pending += 1;
+        if (record.status === ApprovalStatus.APPROVED) summary.approved += 1;
+        if (record.status === ApprovalStatus.REJECTED) summary.rejected += 1;
+        return summary;
+      },
+      { total: 0, pending: 0, approved: 0, rejected: 0 },
+    );
   }, [allRecords]);
 
-  const cards = [
-    { label: '总申请', value: stats.total, icon: FileText },
-    { label: '待审批', value: stats.pending, icon: Clock },
-    { label: '已通过', value: stats.approved, icon: CheckCircle2 },
-    { label: '被驳回', value: stats.rejected, icon: XCircle },
+  const summaryItems = [
+    { label: '总申请', value: stats.total, icon: FileText, tone: 'text-midnight-graphite', bg: 'bg-lightest-gray-background' },
+    { label: '待审批', value: stats.pending, icon: Clock, tone: 'text-medium-gray', bg: 'bg-lightest-gray-background' },
+    { label: '已通过', value: stats.approved, icon: CheckCircle2, tone: 'text-[#2e7d32]', bg: 'bg-[#e8f5e9]' },
+    { label: '被驳回', value: stats.rejected, icon: XCircle, tone: 'text-[#c62828]', bg: 'bg-[#ffebee]' },
   ];
 
   return (
-    <div className="space-y-16 pb-40 animate-in fade-in duration-700">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-[32px] font-bold tracking-tight">概览</h1>
-        <p className="text-[14px] text-light-gray font-medium">实时运营状态</p>
-      </header>
+    <div className="space-y-8 pb-40 animate-in fade-in duration-700">
+      <section className="bg-white border border-border-silver rounded-lg overflow-hidden">
+        <div className="flex flex-col lg:flex-row lg:items-stretch">
+          <header className="px-5 py-4 lg:w-[240px] border-b lg:border-b-0 lg:border-r border-border-silver flex flex-col justify-center">
+            <h1 className="text-[22px] font-bold tracking-tight">概览</h1>
+            <p className="text-[12px] text-light-gray font-semibold mt-1">实时运营状态</p>
+          </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {cards.map((card, idx) => (
-          <div key={idx} className="bg-white border border-border-silver p-8 flex flex-col gap-6 group hover:shadow-xl hover:shadow-black/[0.02] transition-all rounded-2xl">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-light-gray uppercase tracking-widest">{card.label}</span>
-              <card.icon size={18} className="text-light-silver" />
-            </div>
-            <p className="text-[32px] font-bold text-midnight-graphite tracking-tighter">{card.value}</p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 flex-1 divide-x-0 lg:divide-x divide-y lg:divide-y-0 divide-border-silver">
+            {summaryItems.map((item) => (
+              <div key={item.label} className="min-h-[72px] px-4 py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0 flex flex-col gap-1">
+                  <span className="text-[11px] font-bold text-light-gray tracking-widest">{item.label}</span>
+                  <span className="text-[24px] leading-none font-bold text-midnight-graphite tracking-tight">{item.value}</span>
+                </div>
+                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0", item.bg, item.tone)}>
+                  <item.icon size={16} strokeWidth={2.5} />
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      </section>
 
-      <div className="space-y-8">
+      <div className="space-y-5">
         <div className="flex flex-col lg:flex-row gap-6 lg:items-center justify-between">
           <h2 className="text-[20px] font-bold tracking-tight">流水明细</h2>
           
