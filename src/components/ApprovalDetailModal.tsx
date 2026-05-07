@@ -32,6 +32,22 @@ interface PreviewState {
   text?: string;
 }
 
+const batchModifyDetailColumns = [
+  { key: 'order', label: '订单' },
+  { key: 'containerNo', label: '箱号' },
+  { key: 'feeName', label: '费用名' },
+  { key: 'originalAmount', label: '原始金额' },
+  { key: 'originalSupplier', label: '原始供应商' },
+  { key: 'updatedAmount', label: '修改后金额' },
+  { key: 'updatedSupplier', label: '修改后供应商' },
+];
+
+function isBatchModifyDetailRows(value: unknown) {
+  return Array.isArray(value) && value.every((row) => {
+    return !!row && typeof row === 'object' && batchModifyDetailColumns.every((column) => column.key in row);
+  });
+}
+
 function getAiSuggestionDisplay(record: ApprovalRecord) {
   if (!record.aiSuggestion) {
     return {
@@ -276,9 +292,33 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                 </div>
                 <div className="grid grid-cols-1 gap-2">
                   {Object.entries(record.businessData).map(([key, value]) => (
-                    <div key={key} className="flex items-center justify-between gap-6 p-7 bg-[#fbfbfd] rounded-[24px] group border border-transparent hover:border-black/[0.02] hover:bg-white transition-all">
+                    <div key={key} className={cn(
+                      "gap-6 p-7 bg-[#fbfbfd] rounded-[24px] group border border-transparent hover:border-black/[0.02] hover:bg-white transition-all",
+                      isBatchModifyDetailRows(value) ? "flex flex-col items-stretch" : "flex items-center justify-between",
+                    )}>
                       <span className="text-[11px] font-black text-medium-gray uppercase tracking-[0.16em]">{key}</span>
-                      {isAttachmentList(value) ? (
+                      {isBatchModifyDetailRows(value) ? (
+                        <div className="overflow-x-auto no-scrollbar">
+                          <div className="min-w-[920px] overflow-hidden rounded-2xl border border-border-silver bg-white">
+                            <div className="grid grid-cols-7 border-b border-border-silver bg-canvas-white">
+                              {batchModifyDetailColumns.map((column) => (
+                                <div key={column.key} className="px-3 py-3 text-[11px] font-black text-medium-gray">
+                                  {column.label}
+                                </div>
+                              ))}
+                            </div>
+                            {value.map((row, rowIndex) => (
+                              <div key={rowIndex} className="grid grid-cols-7 border-b border-border-silver last:border-b-0">
+                                {batchModifyDetailColumns.map((column) => (
+                                  <div key={column.key} className="px-3 py-4 text-[13px] font-bold text-black break-all">
+                                    {String((row as Record<string, unknown>)[column.key] || '-')}
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : isAttachmentList(value) ? (
                         <div className="min-w-0 flex flex-col items-end gap-2">
                           {value.map((attachment) => (
                             <div key={attachment.id} className="max-w-full flex items-center gap-2">

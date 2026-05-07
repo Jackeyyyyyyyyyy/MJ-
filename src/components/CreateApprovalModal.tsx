@@ -169,7 +169,100 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     onClose();
   };
 
+  const isBatchModifyDetailField = (field: string) => {
+    return selectedModule?.name === '资金' && selectedType?.name === '批量修改' && field === '明细';
+  };
+
+  const getBatchModifyDetails = (field: string): BatchModifyDetailRow[] => {
+    const value = formData[field];
+    return Array.isArray(value) && value.length > 0 ? value : [createEmptyBatchModifyDetail()];
+  };
+
+  const updateBatchModifyDetail = (
+    field: string,
+    rowIndex: number,
+    key: keyof BatchModifyDetailRow,
+    value: string,
+  ) => {
+    const rows = getBatchModifyDetails(field).map((row, index) => (
+      index === rowIndex ? { ...row, [key]: value } : row
+    ));
+    handleInputChange(field, rows);
+  };
+
+  const addBatchModifyDetail = (field: string) => {
+    handleInputChange(field, [...getBatchModifyDetails(field), createEmptyBatchModifyDetail()]);
+  };
+
+  const removeBatchModifyDetail = (field: string, rowIndex: number) => {
+    const rows = getBatchModifyDetails(field).filter((_, index) => index !== rowIndex);
+    handleInputChange(field, rows.length > 0 ? rows : [createEmptyBatchModifyDetail()]);
+  };
+
+  const renderBatchModifyDetailInput = (field: string) => {
+    const rows = getBatchModifyDetails(field);
+
+    return (
+      <div className={cn(
+        "border border-border-silver bg-canvas-white overflow-hidden",
+        errors[field] && "border-rose-500",
+      )}>
+        <div className="overflow-x-auto no-scrollbar">
+          <div className="min-w-[980px]">
+            <div className="grid grid-cols-[1.05fr_1fr_1fr_0.9fr_1fr_0.95fr_1fr_52px] border-b border-border-silver bg-pure-white">
+              {batchModifyDetailColumns.map((column) => (
+                <div key={column.key} className="px-3 py-3 text-[12px] font-bold text-medium-gray">
+                  {column.label}
+                </div>
+              ))}
+              <div className="px-3 py-3 text-[12px] font-bold text-medium-gray text-center">操作</div>
+            </div>
+
+            {rows.map((row, rowIndex) => (
+              <div key={rowIndex} className="grid grid-cols-[1.05fr_1fr_1fr_0.9fr_1fr_0.95fr_1fr_52px] border-b border-border-silver last:border-b-0 bg-white">
+                {batchModifyDetailColumns.map((column) => (
+                  <div key={column.key} className="p-2">
+                    <input
+                      type={column.type || 'text'}
+                      value={row[column.key]}
+                      onChange={(event) => updateBatchModifyDetail(field, rowIndex, column.key, event.target.value)}
+                      className="w-full h-10 px-2 bg-canvas-white border border-transparent focus:border-interactive-blue outline-none text-[13px] font-semibold"
+                      placeholder={column.placeholder}
+                    />
+                  </div>
+                ))}
+                <div className="p-2 flex items-center justify-center">
+                  <button
+                    type="button"
+                    onClick={() => removeBatchModifyDetail(field, rowIndex)}
+                    className="w-9 h-9 flex items-center justify-center rounded-full text-light-gray hover:text-rose-500 hover:bg-[#ffebee] transition-colors"
+                    title="删除明细"
+                  >
+                    <X size={16} strokeWidth={2.5} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => addBatchModifyDetail(field)}
+          className="w-full h-12 bg-pure-white text-action-blue text-[13px] font-bold hover:bg-lightest-gray-background transition-colors flex items-center justify-center gap-2"
+        >
+          <Plus size={15} strokeWidth={3} />
+          添加资金明细
+        </button>
+      </div>
+    );
+  };
+
   const renderFieldInput = (field: string) => {
+    if (isBatchModifyDetailField(field)) {
+      return renderBatchModifyDetailInput(field);
+    }
+
     const isDate = field.includes('日期') || field.includes('时间');
     const isMoney = field.includes('金额') || field.includes('价格') || field.includes('利润') || field.includes('汇率');
     const isFile = field.includes('附件');
@@ -239,7 +332,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
             initial={{ opacity: 0, scale: 0.98, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.98, y: 20 }}
-            className="bg-pure-white w-full max-w-2xl relative flex flex-col max-h-[90vh] shadow-apple-xl overflow-hidden"
+            className="bg-pure-white w-full max-w-5xl relative flex flex-col max-h-[90vh] shadow-apple-xl overflow-hidden"
           >
             <div className="px-10 py-8 border-b border-border-silver flex items-center justify-between">
               <div className="flex items-center gap-4 font-display">
