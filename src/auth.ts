@@ -68,7 +68,7 @@ export const auth = {
     const user = this.getCurrentUser();
     if (!user) return null;
     if (user.role === 'developer') {
-      return (localStorage.getItem('mj_current_perspective') as Role) || 'boss';
+      return (localStorage.getItem('mj_current_perspective') as Role) || 'developer';
     }
     return user.role;
   },

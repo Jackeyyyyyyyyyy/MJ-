@@ -39,6 +39,7 @@ export default function Sidebar({
   isOpen,
   onClose,
 }: SidebarProps) {
+  const isSuperAdminPerspective = Boolean(isSuperAdmin && currentPerspective === 'developer');
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({
     [approvalSchema.modules[0].name]: true
   });
@@ -60,7 +61,7 @@ export default function Sidebar({
   ];
 
   const adminItems = [
-    ...(currentPerspective === 'boss' || isSuperAdmin
+    ...(currentPerspective === 'boss' || isSuperAdminPerspective
       ? [
           {
             id: 'ai-assistant',
@@ -70,7 +71,7 @@ export default function Sidebar({
           },
         ]
       : []),
-    ...(isSuperAdmin
+    ...(isSuperAdminPerspective
       ? [
           {
             id: 'accounts',

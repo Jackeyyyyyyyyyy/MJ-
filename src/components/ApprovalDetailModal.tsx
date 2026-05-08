@@ -25,11 +25,20 @@ function canPreviewAttachment(attachment: ApprovalAttachment) {
   return type.startsWith('image/') || type === 'application/pdf' || type.startsWith('text/');
 }
 
+function isPlainDisplayObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && !isAttachmentList(value);
+}
+
 interface PreviewState {
   attachment: ApprovalAttachment;
   url: string;
   kind: 'image' | 'pdf' | 'text';
   text?: string;
+}
+
+interface SupplierQuotationInfoValue {
+  quotationRows: Array<Record<string, unknown>>;
+  attachments: ApprovalAttachment[];
 }
 
 const batchModifyDetailColumns = [
@@ -66,6 +75,20 @@ const customerInvoiceInfoColumns = [
   { key: 'bankAndAccount', label: '开户行及账户' },
 ];
 
+const supplierQuotationColumns = [
+  { key: 'truckType', label: '拖车类型' },
+  { key: 'pickupPoint', label: '提箱点' },
+  { key: 'dropoffPoint', label: '落箱点' },
+  { key: 'province', label: '省份' },
+  { key: 'city', label: '市' },
+  { key: 'county', label: '县' },
+  { key: 'priceLimit', label: '报价限制' },
+  { key: 'beforeQuote', label: '提交前报价' },
+  { key: 'weight', label: '权重' },
+  { key: 'afterQuote', label: '提交后报价' },
+  { key: 'remark', label: '备注' },
+];
+
 function isCustomerInfoChangeValue(value: unknown) {
   return !!value
     && typeof value === 'object'
@@ -73,6 +96,13 @@ function isCustomerInfoChangeValue(value: unknown) {
     && Array.isArray((value as Record<string, unknown>).bankAccounts)
     && Array.isArray((value as Record<string, unknown>).bankVoucher)
     && Array.isArray((value as Record<string, unknown>).invoiceInfos);
+}
+
+function isSupplierQuotationInfoValue(value: unknown): value is SupplierQuotationInfoValue {
+  return !!value
+    && typeof value === 'object'
+    && Array.isArray((value as SupplierQuotationInfoValue).quotationRows)
+    && Array.isArray((value as SupplierQuotationInfoValue).attachments);
 }
 
 function getStructuredDetailColumns(value: unknown) {
@@ -297,6 +327,40 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
     );
   };
 
+  const renderSupplierQuotationInfo = (value: unknown) => {
+    const data = value as SupplierQuotationInfoValue;
+
+    return (
+      <div className="space-y-5">
+        <div className="overflow-x-auto no-scrollbar">
+          <div className="min-w-[1320px] overflow-hidden rounded-2xl border border-border-silver bg-white">
+            <div className="grid grid-cols-[1fr_1fr_1fr_0.8fr_0.8fr_0.8fr_1fr_1.1fr_0.8fr_1.1fr_1fr] border-b border-border-silver bg-canvas-white">
+              {supplierQuotationColumns.map((column) => (
+                <div key={column.key} className="px-3 py-3 text-[11px] font-black text-medium-gray">
+                  {column.label}
+                </div>
+              ))}
+            </div>
+            {data.quotationRows.map((row, rowIndex) => (
+              <div key={rowIndex} className="grid grid-cols-[1fr_1fr_1fr_0.8fr_0.8fr_0.8fr_1fr_1.1fr_0.8fr_1.1fr_1fr] border-b border-border-silver last:border-b-0">
+                {supplierQuotationColumns.map((column) => (
+                  <div key={column.key} className="px-3 py-4 text-[13px] font-bold text-black break-all">
+                    {String(row[column.key] || '-')}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-border-silver bg-white p-4">
+          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">报价附件</p>
+          {renderAttachmentList(data.attachments)}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <AnimatePresence>
       <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -425,7 +489,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                       key={key}
                       className={cn(
                         "gap-6 p-7 bg-[#fbfbfd] rounded-[24px] group border border-transparent hover:border-black/[0.02] hover:bg-white transition-all",
-                        isCustomerInfoChangeValue(value) || getStructuredDetailColumns(value).length > 0
+                        isCustomerInfoChangeValue(value) || isSupplierQuotationInfoValue(value) || getStructuredDetailColumns(value).length > 0
                           ? "flex flex-col items-stretch"
                           : "flex items-center justify-between",
                       )}
@@ -433,6 +497,8 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                       <span className="text-[11px] font-black text-medium-gray uppercase tracking-[0.16em]">{key}</span>
                       {isCustomerInfoChangeValue(value) ? (
                         renderCustomerInfoChange(value)
+                      ) : isSupplierQuotationInfoValue(value) ? (
+                        renderSupplierQuotationInfo(value)
                       ) : getStructuredDetailColumns(value).length > 0 ? (
                         <div className="overflow-x-auto no-scrollbar">
                           <div className="min-w-[840px] overflow-hidden rounded-2xl border border-border-silver bg-white">
@@ -486,6 +552,14 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                                 <Download size={14} strokeWidth={2.5} />
                               </button>
                             </div>
+                          ))}
+                        </div>
+                      ) : isPlainDisplayObject(value) ? (
+                        <div className="min-w-0 flex flex-col items-end gap-2">
+                          {Object.entries(value).map(([itemKey, itemValue]) => (
+                            <span key={itemKey} className="text-[15px] font-black text-black tracking-tight text-right break-all">
+                              {itemKey}：{String(itemValue || '-')}
+                            </span>
                           ))}
                         </div>
                       ) : (

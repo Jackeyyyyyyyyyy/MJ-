@@ -18,14 +18,14 @@ interface AppLayoutProps {
   onSelectType: (module: string, type: string) => void;
 }
 
-const PERSPECTIVE_ROLES: Role[] = ['applicant', 'approver', 'boss'];
+const PERSPECTIVE_ROLES: Role[] = ['applicant', 'approver', 'boss', 'developer'];
 
 function getPerspectiveLabel(role: Role) {
   switch(role) {
-    case 'applicant': return '申请人';
-    case 'approver': return '审核员';
+    case 'applicant': return '申请';
+    case 'approver': return '审批';
     case 'boss': return '老板';
-    default: return '超级管理员';
+    default: return '超管';
   }
 }
 
@@ -37,8 +37,8 @@ interface PerspectiveSwitcherProps {
 function PerspectiveSwitcher({ perspective, onChange }: PerspectiveSwitcherProps) {
   return (
     <div
-      className="grid grid-cols-3 items-center gap-1 p-1 bg-lightest-gray-background rounded-apple-btn"
-      aria-label="开发者视角切换"
+      className="grid grid-cols-4 items-center gap-1 p-1 bg-lightest-gray-background rounded-apple-btn"
+      aria-label="超管视角切换"
     >
       {PERSPECTIVE_ROLES.map((role) => (
         <button
@@ -47,7 +47,7 @@ function PerspectiveSwitcher({ perspective, onChange }: PerspectiveSwitcherProps
           onClick={() => onChange(role)}
           aria-pressed={perspective === role}
           className={cn(
-            "h-10 px-4 lg:px-6 text-[13px] lg:text-[12px] font-bold rounded-apple-btn transition-all whitespace-nowrap",
+            "h-10 px-3 lg:px-5 text-[13px] lg:text-[12px] font-bold rounded-apple-btn transition-all whitespace-nowrap",
             perspective === role
               ? "bg-pure-white text-midnight-graphite shadow-sm"
               : "text-medium-gray hover:text-midnight-graphite"
@@ -80,9 +80,7 @@ export default function AppLayout({
     onPerspectiveChange(role);
   };
 
-  const displayRole = user?.role === 'developer'
-    ? '超级管理员'
-    : getPerspectiveLabel(perspective || user?.role || 'applicant');
+  const displayRole = getPerspectiveLabel(perspective || user?.role || 'applicant');
   const isDeveloper = user?.role === 'developer';
 
   return (

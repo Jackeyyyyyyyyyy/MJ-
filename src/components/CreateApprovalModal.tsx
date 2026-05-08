@@ -52,6 +52,43 @@ interface CustomerInfoChangeValue {
   invoiceInfos: CustomerInvoiceInfoRow[];
 }
 
+interface SupplierRoleServiceRow {
+  [key: string]: string;
+  role: string;
+  service: string;
+}
+
+interface SupplierInfoChangeValue {
+  roleServices: SupplierRoleServiceRow[];
+  bankAccounts: CustomerBankAccountRow[];
+  invoiceInfos: CustomerInvoiceInfoRow[];
+}
+
+interface ProjectCargoChangeValue {
+  销售项目货: string;
+  客服项目货: string;
+}
+
+interface SupplierQuotationRow {
+  [key: string]: string;
+  truckType: string;
+  pickupPoint: string;
+  dropoffPoint: string;
+  province: string;
+  city: string;
+  county: string;
+  priceLimit: string;
+  beforeQuote: string;
+  weight: string;
+  afterQuote: string;
+  remark: string;
+}
+
+interface SupplierQuotationInfoValue {
+  quotationRows: SupplierQuotationRow[];
+  attachments: ApprovalAttachment[];
+}
+
 interface CreateApprovalModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -91,6 +128,32 @@ const customerInvoiceInfoColumns: Array<{ key: keyof CustomerInvoiceInfoRow; lab
   { key: 'addressPhone', label: '地址、电话', placeholder: '输入地址、电话' },
   { key: 'bankAndAccount', label: '开户行及账户', placeholder: '输入开户行及账户' },
 ];
+
+const supplierRoleServiceColumns: Array<{ key: keyof SupplierRoleServiceRow; label: string; placeholder: string }> = [
+  { key: 'role', label: '角色', placeholder: '如 班列公司 / 车队' },
+  { key: 'service', label: '服务', placeholder: '输入服务内容' },
+];
+
+const projectCargoOptions = ['项目货', '非项目货'];
+
+const supplierQuotationColumns: Array<{ key: keyof SupplierQuotationRow; label: string; placeholder: string }> = [
+  { key: 'truckType', label: '拖车类型', placeholder: '输入拖车类型' },
+  { key: 'pickupPoint', label: '提箱点', placeholder: '输入提箱点' },
+  { key: 'dropoffPoint', label: '落箱点', placeholder: '输入落箱点' },
+  { key: 'province', label: '省份', placeholder: '输入省份' },
+  { key: 'city', label: '市', placeholder: '输入市' },
+  { key: 'county', label: '县', placeholder: '输入县' },
+  { key: 'priceLimit', label: '报价限制', placeholder: '输入报价限制' },
+  { key: 'beforeQuote', label: '提交前报价', placeholder: '输入提交前报价' },
+  { key: 'weight', label: '权重', placeholder: '输入权重' },
+  { key: 'afterQuote', label: '提交后报价', placeholder: '输入提交后报价' },
+  { key: 'remark', label: '备注', placeholder: '输入备注' },
+];
+
+const createEmptyProjectCargoChange = (): ProjectCargoChangeValue => ({
+  销售项目货: '',
+  客服项目货: '',
+});
 
 function createEmptyBatchModifyDetail(): BatchModifyDetailRow {
   return {
@@ -143,6 +206,44 @@ function createEmptyCustomerInfoChange(): CustomerInfoChangeValue {
   };
 }
 
+function createEmptySupplierRoleService(): SupplierRoleServiceRow {
+  return {
+    role: '',
+    service: '',
+  };
+}
+
+function createEmptySupplierInfoChange(): SupplierInfoChangeValue {
+  return {
+    roleServices: [createEmptySupplierRoleService()],
+    bankAccounts: [createEmptyCustomerBankAccount()],
+    invoiceInfos: [createEmptyCustomerInvoiceInfo()],
+  };
+}
+
+function createEmptySupplierQuotationRow(): SupplierQuotationRow {
+  return {
+    truckType: '',
+    pickupPoint: '',
+    dropoffPoint: '',
+    province: '',
+    city: '',
+    county: '',
+    priceLimit: '',
+    beforeQuote: '',
+    weight: '',
+    afterQuote: '',
+    remark: '',
+  };
+}
+
+function createEmptySupplierQuotationInfo(): SupplierQuotationInfoValue {
+  return {
+    quotationRows: [createEmptySupplierQuotationRow()],
+    attachments: [],
+  };
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -177,6 +278,12 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         initialData[field] = [createEmptyFundsReductionDetail()];
       } else if (selectedModule?.name === '客户' && type.name === '客户信息' && field === '修改后内容') {
         initialData[field] = createEmptyCustomerInfoChange();
+      } else if (selectedModule?.name === '供应商' && type.name === '供应商信息' && field === '内容') {
+        initialData[field] = createEmptySupplierInfoChange();
+      } else if (selectedModule?.name === '订单' && type.name === '项目货变更' && field === '变更为') {
+        initialData[field] = createEmptyProjectCargoChange();
+      } else if (selectedModule?.name === '供应商' && type.name === '报价' && field === '报价信息') {
+        initialData[field] = createEmptySupplierQuotationInfo();
       } else {
         initialData[field] = '';
       }
@@ -256,6 +363,38 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
   };
 
+  const handleSupplierQuotationAttachmentUpload = async (field: string, fileList: FileList | null) => {
+    const files = fileList ? Array.from<File>(fileList) : [];
+    if (files.length === 0) return;
+
+    const uploadKey = `${field}.attachments`;
+    setUploadingFields(prev => ({ ...prev, [uploadKey]: true }));
+
+    try {
+      const payload = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          type: file.type || 'application/octet-stream',
+          size: file.size,
+          data: await readFileAsDataUrl(file),
+        })),
+      );
+      const uploads = await storage.uploadFiles(payload);
+      const currentValue = getSupplierQuotationInfoValue(field);
+      handleInputChange(field, {
+        ...currentValue,
+        attachments: uploads,
+      });
+    } catch (error) {
+      setErrors(prev => ({
+        ...prev,
+        [field]: error instanceof Error ? error.message : '文件上传失败',
+      }));
+    } finally {
+      setUploadingFields(prev => ({ ...prev, [uploadKey]: false }));
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedModule || !selectedType || !user) return;
@@ -285,6 +424,44 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
 
         if (hasEmptyBankCell || hasEmptyInvoiceCell) {
           newErrors[field] = '请完整填写修改后内容';
+        }
+        return;
+      }
+
+      if (isSupplierInfoChangeValue(value)) {
+        const hasEmptyRoleServiceCell = value.roleServices.length === 0 || value.roleServices.some((row) => (
+          supplierRoleServiceColumns.some((column) => !String(row[column.key] || '').trim())
+        ));
+        const hasEmptyBankCell = value.bankAccounts.length === 0 || value.bankAccounts.some((row) => (
+          customerBankAccountColumns.some((column) => !String(row[column.key] || '').trim())
+        ));
+        const hasEmptyInvoiceCell = value.invoiceInfos.length === 0 || value.invoiceInfos.some((row) => (
+          customerInvoiceInfoColumns.some((column) => !String(row[column.key] || '').trim())
+        ));
+
+        if (hasEmptyRoleServiceCell || hasEmptyBankCell || hasEmptyInvoiceCell) {
+          newErrors[field] = '请完整填写内容';
+        }
+        return;
+      }
+
+      if (isSupplierQuotationInfoValue(value)) {
+        const requiredColumns = supplierQuotationColumns.filter((column) => column.key !== 'remark');
+        const hasEmptyQuotationCell = value.quotationRows.length === 0 || value.quotationRows.some((row) => (
+          requiredColumns.some((column) => !String(row[column.key] || '').trim())
+        ));
+
+        if (hasEmptyQuotationCell) {
+          newErrors[field] = '请完整填写报价信息';
+        }
+        return;
+      }
+
+      if (isProjectCargoChangeValue(value)) {
+        const hasEmptyCargoChoice = !value.销售项目货 || !value.客服项目货;
+
+        if (hasEmptyCargoChoice) {
+          newErrors[field] = '请选择项目货类型';
         }
         return;
       }
@@ -333,13 +510,57 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       && Array.isArray((value as CustomerInfoChangeValue).invoiceInfos);
   };
 
+  const isSupplierQuotationInfoValue = (value: unknown): value is SupplierQuotationInfoValue => {
+    return !!value
+      && typeof value === 'object'
+      && Array.isArray((value as SupplierQuotationInfoValue).quotationRows)
+      && Array.isArray((value as SupplierQuotationInfoValue).attachments);
+  };
+
+  const isSupplierInfoChangeValue = (value: unknown): value is SupplierInfoChangeValue => {
+    return !!value
+      && typeof value === 'object'
+      && Array.isArray((value as SupplierInfoChangeValue).roleServices)
+      && Array.isArray((value as SupplierInfoChangeValue).bankAccounts)
+      && Array.isArray((value as SupplierInfoChangeValue).invoiceInfos);
+  };
+
+  const isProjectCargoChangeValue = (value: unknown): value is ProjectCargoChangeValue => {
+    return !!value
+      && typeof value === 'object'
+      && '销售项目货' in value
+      && '客服项目货' in value;
+  };
+
   const isCustomerInfoChangeField = (field: string) => {
     return selectedModule?.name === '客户' && selectedType?.name === '客户信息' && field === '修改后内容';
+  };
+
+  const isSupplierQuotationInfoField = (field: string) => {
+    return selectedModule?.name === '供应商' && selectedType?.name === '报价' && field === '报价信息';
+  };
+
+  const isSupplierInfoChangeField = (field: string) => {
+    return selectedModule?.name === '供应商' && selectedType?.name === '供应商信息' && field === '内容';
+  };
+
+  const isProjectCargoChangeField = (field: string) => {
+    return selectedModule?.name === '订单' && selectedType?.name === '项目货变更' && field === '变更为';
   };
 
   const getCustomerInfoChangeValue = (field: string): CustomerInfoChangeValue => {
     const value = formData[field];
     return isCustomerInfoChangeValue(value) ? value : createEmptyCustomerInfoChange();
+  };
+
+  const getSupplierQuotationInfoValue = (field: string): SupplierQuotationInfoValue => {
+    const value = formData[field];
+    return isSupplierQuotationInfoValue(value) ? value : createEmptySupplierQuotationInfo();
+  };
+
+  const getSupplierInfoChangeValue = (field: string): SupplierInfoChangeValue => {
+    const value = formData[field];
+    return isSupplierInfoChangeValue(value) ? value : createEmptySupplierInfoChange();
   };
 
   const updateCustomerRows = (
@@ -379,6 +600,48 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       ? createEmptyCustomerBankAccount()
       : createEmptyCustomerInvoiceInfo();
     updateCustomerRows(field, section, rows.length > 0 ? rows : [fallbackRow]);
+  };
+
+  const updateSupplierRows = (
+    field: string,
+    section: 'roleServices' | 'bankAccounts' | 'invoiceInfos',
+    rows: Array<SupplierRoleServiceRow | CustomerBankAccountRow | CustomerInvoiceInfoRow>,
+  ) => {
+    handleInputChange(field, {
+      ...getSupplierInfoChangeValue(field),
+      [section]: rows,
+    });
+  };
+
+  const updateSupplierRow = (
+    field: string,
+    section: 'roleServices' | 'bankAccounts' | 'invoiceInfos',
+    rowIndex: number,
+    key: string,
+    value: string,
+  ) => {
+    const rows = getSupplierInfoChangeValue(field)[section].map((row, index) => (
+      index === rowIndex ? { ...row, [key]: value } : row
+    ));
+    updateSupplierRows(field, section, rows);
+  };
+
+  const createEmptySupplierSectionRow = (section: 'roleServices' | 'bankAccounts' | 'invoiceInfos') => {
+    if (section === 'roleServices') return createEmptySupplierRoleService();
+    if (section === 'bankAccounts') return createEmptyCustomerBankAccount();
+    return createEmptyCustomerInvoiceInfo();
+  };
+
+  const addSupplierRow = (field: string, section: 'roleServices' | 'bankAccounts' | 'invoiceInfos') => {
+    updateSupplierRows(field, section, [
+      ...getSupplierInfoChangeValue(field)[section],
+      createEmptySupplierSectionRow(section),
+    ]);
+  };
+
+  const removeSupplierRow = (field: string, section: 'roleServices' | 'bankAccounts' | 'invoiceInfos', rowIndex: number) => {
+    const rows = getSupplierInfoChangeValue(field)[section].filter((_, index) => index !== rowIndex);
+    updateSupplierRows(field, section, rows.length > 0 ? rows : [createEmptySupplierSectionRow(section)]);
   };
 
   const renderCustomerAttachmentInput = (
@@ -501,6 +764,240 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     );
   };
 
+  const renderSupplierEditableTable = (
+    field: string,
+    section: 'roleServices' | 'bankAccounts' | 'invoiceInfos',
+    title: string,
+    columns: Array<{ key: string | number; label: string; placeholder: string }>,
+  ) => {
+    const rows = getSupplierInfoChangeValue(field)[section];
+    const gridTemplate = section === 'roleServices'
+      ? "grid-cols-[1fr_2fr_52px]"
+      : (section === 'bankAccounts' ? "grid-cols-[1fr_1fr_1.2fr_1.3fr_52px]" : "grid-cols-[0.9fr_1.3fr_1fr_1.6fr_1.5fr_52px]");
+    const minWidth = section === 'roleServices'
+      ? "min-w-[520px]"
+      : (section === 'bankAccounts' ? "min-w-[760px]" : "min-w-[1040px]");
+
+    return (
+      <div className="rounded-2xl border border-border-silver bg-white overflow-hidden">
+        <div className="px-4 py-3 border-b border-border-silver flex items-center justify-between bg-pure-white">
+          <p className="text-[14px] font-bold text-midnight-graphite">{title}</p>
+          <button
+            type="button"
+            onClick={() => addSupplierRow(field, section)}
+            className="h-8 px-3 rounded-lg bg-canvas-white text-action-blue text-[12px] font-bold hover:bg-lightest-gray-background flex items-center gap-1.5"
+          >
+            <Plus size={13} strokeWidth={3} />
+            添加
+          </button>
+        </div>
+        <div className="overflow-x-auto no-scrollbar">
+          <div className={minWidth}>
+            <div className={cn("grid border-b border-border-silver bg-canvas-white", gridTemplate)}>
+              {columns.map((column) => (
+                <div key={column.key} className="px-3 py-3 text-[12px] font-bold text-medium-gray">
+                  {column.label}
+                </div>
+              ))}
+              <div className="px-3 py-3 text-[12px] font-bold text-medium-gray text-center">操作</div>
+            </div>
+            {rows.map((row, rowIndex) => (
+              <div key={rowIndex} className={cn("grid border-b border-border-silver last:border-b-0", gridTemplate)}>
+                {columns.map((column) => (
+                  <div key={column.key} className="p-2">
+                    <input
+                      value={row[String(column.key)]}
+                      onChange={(event) => updateSupplierRow(field, section, rowIndex, String(column.key), event.target.value)}
+                      className="w-full h-10 px-2 bg-canvas-white border border-transparent focus:border-interactive-blue outline-none text-[13px] font-semibold"
+                      placeholder={column.placeholder}
+                    />
+                  </div>
+                ))}
+                <div className="p-2 flex items-center justify-center">
+                  <button
+                    type="button"
+                    onClick={() => removeSupplierRow(field, section, rowIndex)}
+                    className="w-9 h-9 flex items-center justify-center rounded-full text-light-gray hover:text-rose-500 hover:bg-[#ffebee] transition-colors"
+                    title="删除"
+                  >
+                    <X size={16} strokeWidth={2.5} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSupplierInfoChangeInput = (field: string) => {
+    return (
+      <div className={cn(
+        "space-y-4 rounded-[24px] border border-border-silver bg-canvas-white p-4",
+        errors[field] && "border-rose-500",
+      )}>
+        {renderSupplierEditableTable(field, 'roleServices', '角色与服务', supplierRoleServiceColumns)}
+        {renderSupplierEditableTable(field, 'bankAccounts', '银行账户', customerBankAccountColumns)}
+        {renderSupplierEditableTable(field, 'invoiceInfos', '开票信息', customerInvoiceInfoColumns)}
+      </div>
+    );
+  };
+
+  const updateSupplierQuotationRows = (field: string, rows: SupplierQuotationRow[]) => {
+    handleInputChange(field, {
+      ...getSupplierQuotationInfoValue(field),
+      quotationRows: rows,
+    });
+  };
+
+  const updateSupplierQuotationRow = (
+    field: string,
+    rowIndex: number,
+    key: string,
+    value: string,
+  ) => {
+    const rows = getSupplierQuotationInfoValue(field).quotationRows.map((row, index) => (
+      index === rowIndex ? { ...row, [key]: value } : row
+    ));
+    updateSupplierQuotationRows(field, rows);
+  };
+
+  const addSupplierQuotationRow = (field: string) => {
+    updateSupplierQuotationRows(field, [
+      ...getSupplierQuotationInfoValue(field).quotationRows,
+      createEmptySupplierQuotationRow(),
+    ]);
+  };
+
+  const removeSupplierQuotationRow = (field: string, rowIndex: number) => {
+    const rows = getSupplierQuotationInfoValue(field).quotationRows.filter((_, index) => index !== rowIndex);
+    updateSupplierQuotationRows(field, rows.length > 0 ? rows : [createEmptySupplierQuotationRow()]);
+  };
+
+  const renderSupplierQuotationInfoInput = (field: string) => {
+    const value = getSupplierQuotationInfoValue(field);
+    const uploadKey = `${field}.attachments`;
+    const isUploading = !!uploadingFields[uploadKey];
+    const fileValue = value.attachments.map((file) => file.name).join('、');
+
+    return (
+      <div className={cn(
+        "rounded-[24px] border border-border-silver bg-canvas-white overflow-hidden",
+        errors[field] && "border-rose-500",
+      )}>
+        <div className="overflow-x-auto no-scrollbar">
+          <div className="min-w-[1480px]">
+            <div className="grid grid-cols-[1fr_1fr_1fr_0.8fr_0.8fr_0.8fr_1fr_1.1fr_0.8fr_1.1fr_1fr_52px] border-b border-border-silver bg-pure-white">
+              {supplierQuotationColumns.map((column) => (
+                <div key={column.key} className="px-3 py-3 text-[12px] font-bold text-medium-gray">
+                  {column.label}
+                </div>
+              ))}
+              <div className="px-3 py-3 text-[12px] font-bold text-medium-gray text-center">操作</div>
+            </div>
+
+            {value.quotationRows.map((row, rowIndex) => (
+              <div key={rowIndex} className="grid grid-cols-[1fr_1fr_1fr_0.8fr_0.8fr_0.8fr_1fr_1.1fr_0.8fr_1.1fr_1fr_52px] border-b border-border-silver bg-white last:border-b-0">
+                {supplierQuotationColumns.map((column) => (
+                  <div key={column.key} className="p-2">
+                    <input
+                      value={row[column.key]}
+                      onChange={(event) => updateSupplierQuotationRow(field, rowIndex, String(column.key), event.target.value)}
+                      className="w-full h-10 px-2 bg-canvas-white border border-transparent focus:border-interactive-blue outline-none text-[13px] font-semibold"
+                      placeholder={column.placeholder}
+                    />
+                  </div>
+                ))}
+                <div className="p-2 flex items-center justify-center">
+                  <button
+                    type="button"
+                    onClick={() => removeSupplierQuotationRow(field, rowIndex)}
+                    className="w-9 h-9 flex items-center justify-center rounded-full text-light-gray hover:text-rose-500 hover:bg-[#ffebee] transition-colors"
+                    title="删除报价明细"
+                  >
+                    <X size={16} strokeWidth={2.5} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => addSupplierQuotationRow(field)}
+          className="w-full h-12 bg-pure-white text-action-blue text-[13px] font-bold hover:bg-lightest-gray-background transition-colors flex items-center justify-center gap-2 border-t border-border-silver"
+        >
+          <Plus size={15} strokeWidth={3} />
+          添加报价明细
+        </button>
+
+        <div className="px-4 py-4 border-t border-border-silver bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[14px] font-bold text-midnight-graphite">报价附件</p>
+            <p className="text-[12px] font-semibold text-light-gray mt-1 truncate">
+              {fileValue || '未上传附件'}
+            </p>
+          </div>
+          <label className={cn(
+            "h-10 px-4 rounded-lg bg-black text-white text-[13px] font-bold cursor-pointer hover:bg-zinc-800 transition-all flex items-center justify-center gap-2",
+            isUploading && "pointer-events-none opacity-60",
+          )}>
+            <Upload size={14} />
+            {isUploading ? '上传中' : '选择附件'}
+            <input
+              type="file"
+              className="sr-only"
+              multiple
+              onChange={(event) => {
+                const fileList = event.currentTarget.files;
+                void handleSupplierQuotationAttachmentUpload(field, fileList);
+                event.currentTarget.value = '';
+              }}
+            />
+          </label>
+        </div>
+      </div>
+    );
+  };
+
+  const renderProjectCargoChangeInput = (field: string) => {
+    const value = isProjectCargoChangeValue(formData[field])
+      ? formData[field]
+      : createEmptyProjectCargoChange();
+
+    const renderSelect = (key: keyof ProjectCargoChangeValue) => (
+      <div className="flex flex-col gap-2">
+        <span className="text-[12px] font-bold text-medium-gray">{key}</span>
+        <select
+          className={cn(
+            "input-field border-b border-border-silver focus:border-interactive-blue transition-colors",
+            !value[key] && "text-light-gray",
+            errors[field] && "border-rose-500"
+          )}
+          value={value[key]}
+          onChange={(event) => handleInputChange(field, {
+            ...value,
+            [key]: event.target.value,
+          })}
+        >
+          <option value="">请选择</option>
+          {projectCargoOptions.map(option => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </div>
+    );
+
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {renderSelect('销售项目货')}
+        {renderSelect('客服项目货')}
+      </div>
+    );
+  };
+
   const getStructuredDetailColumns = (field: string) => {
     if (selectedModule?.name !== '资金' || field !== '明细') return [];
     if (selectedType?.name === '批量修改') return batchModifyDetailColumns;
@@ -610,6 +1107,18 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const renderFieldInput = (field: string) => {
     if (isCustomerInfoChangeField(field)) {
       return renderCustomerInfoChangeInput(field);
+    }
+
+    if (isSupplierInfoChangeField(field)) {
+      return renderSupplierInfoChangeInput(field);
+    }
+
+    if (isSupplierQuotationInfoField(field)) {
+      return renderSupplierQuotationInfoInput(field);
+    }
+
+    if (isProjectCargoChangeField(field)) {
+      return renderProjectCargoChangeInput(field);
     }
 
     if (isStructuredDetailField(field)) {

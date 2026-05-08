@@ -95,11 +95,14 @@ export default function App() {
   }
 
   const renderContent = () => {
-    if (activeAdminView === 'accounts') {
+    const isSuperAdminPerspective = auth.getCurrentUser()?.role === 'developer' && perspective === 'developer';
+    const canUseAiAssistant = perspective === 'boss' || isSuperAdminPerspective;
+
+    if (activeAdminView === 'accounts' && isSuperAdminPerspective) {
       return <AccountPermissionAdmin />;
     }
 
-    if (activeAdminView === 'ai-assistant') {
+    if (activeAdminView === 'ai-assistant' && canUseAiAssistant) {
       return <AiAssistantHome />;
     }
 
@@ -118,7 +121,7 @@ export default function App() {
             <h1 className="text-2xl font-bold text-slate-900">{selectedType}</h1>
           </div>
 
-          {auth.getCurrentUser()?.role === 'developer' && (
+          {isSuperAdminPerspective && (
             <AiPromptEditor
               moduleName={selectedModule}
               approvalTypeName={selectedType}

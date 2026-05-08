@@ -23,9 +23,9 @@ const roleTone: Record<string, string> = {
 };
 
 const roleOptions: Array<{ value: ManagedRole; label: string }> = [
-  { value: 'applicant', label: '申请人' },
-  { value: 'approver', label: '审批人' },
-  { value: 'boss', label: '管理员' },
+  { value: 'applicant', label: '申请' },
+  { value: 'approver', label: '审批' },
+  { value: 'boss', label: '老板' },
 ];
 
 const defaultAccount: AccountInput = {

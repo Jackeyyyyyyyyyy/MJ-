@@ -101,10 +101,10 @@ const superAdmin = {
 };
 
 const roleLabels = {
-  applicant: '申请人',
-  approver: '审批人',
-  boss: '管理员',
-  developer: '超级管理员',
+  applicant: '申请',
+  approver: '审批',
+  boss: '老板',
+  developer: '超管',
 };
 
 const rolePermissions = {

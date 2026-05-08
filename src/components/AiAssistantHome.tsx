@@ -126,7 +126,7 @@ function RecordButton({ record, onOpen }: RecordButtonProps) {
 
 export default function AiAssistantHome() {
   const user = auth.getCurrentUser();
-  const isDeveloper = user?.role === 'developer';
+  const isDeveloperPerspective = user?.role === 'developer' && auth.getPerspective() === 'developer';
   const [overview, setOverview] = useState<AiAssistantOverview | null>(null);
   const [records, setRecords] = useState<ApprovalRecord[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -142,7 +142,7 @@ export default function AiAssistantHome() {
 
   const insights = useMemo(() => buildInsights(overview), [overview]);
   const recordMap = useMemo(() => new Map(records.map((record) => [record.id, record])), [records]);
-  const canSavePrompt = Boolean(isDeveloper && prompt.trim() && prompt.trim() !== savedPrompt.trim() && !isPromptSaving);
+  const canSavePrompt = Boolean(isDeveloperPerspective && prompt.trim() && prompt.trim() !== savedPrompt.trim() && !isPromptSaving);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -156,7 +156,7 @@ export default function AiAssistantHome() {
       setOverview(nextOverview);
       setRecords(nextRecords);
 
-      if (isDeveloper) {
+      if (isDeveloperPerspective) {
         const config = await storage.getAiAssistantPrompt();
         setPrompt(config.prompt);
         setSavedPrompt(config.prompt);
@@ -170,7 +170,7 @@ export default function AiAssistantHome() {
 
   useEffect(() => {
     void loadData();
-  }, [isDeveloper]);
+  }, [isDeveloperPerspective]);
 
   const openRecord = async (id: string) => {
     const current = recordMap.get(id);
@@ -425,7 +425,7 @@ export default function AiAssistantHome() {
             </>
           )}
 
-          {isDeveloper && (
+          {isDeveloperPerspective && (
             <div className="bg-white border border-border-silver rounded-lg overflow-hidden">
               <div className="px-5 py-4 border-b border-border-silver flex items-center justify-between gap-3">
                 <div>
