@@ -41,6 +41,12 @@ interface SupplierQuotationInfoValue {
   attachments: ApprovalAttachment[];
 }
 
+interface SupplierInfoChangeValue {
+  roleServices: Array<Record<string, unknown>>;
+  bankAccounts: Array<Record<string, unknown>>;
+  invoiceInfos: Array<Record<string, unknown>>;
+}
+
 const batchModifyDetailColumns = [
   { key: 'order', label: '订单' },
   { key: 'containerNo', label: '箱号' },
@@ -75,6 +81,11 @@ const customerInvoiceInfoColumns = [
   { key: 'bankAndAccount', label: '开户行及账户' },
 ];
 
+const supplierRoleServiceColumns = [
+  { key: 'role', label: '角色' },
+  { key: 'service', label: '服务' },
+];
+
 const supplierQuotationColumns = [
   { key: 'truckType', label: '拖车类型' },
   { key: 'pickupPoint', label: '提箱点' },
@@ -103,6 +114,14 @@ function isSupplierQuotationInfoValue(value: unknown): value is SupplierQuotatio
     && typeof value === 'object'
     && Array.isArray((value as SupplierQuotationInfoValue).quotationRows)
     && Array.isArray((value as SupplierQuotationInfoValue).attachments);
+}
+
+function isSupplierInfoChangeValue(value: unknown): value is SupplierInfoChangeValue {
+  return !!value
+    && typeof value === 'object'
+    && Array.isArray((value as SupplierInfoChangeValue).roleServices)
+    && Array.isArray((value as SupplierInfoChangeValue).bankAccounts)
+    && Array.isArray((value as SupplierInfoChangeValue).invoiceInfos);
 }
 
 function getStructuredDetailColumns(value: unknown) {
@@ -271,31 +290,36 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
   const renderCustomerTable = (
     rows: Array<Record<string, unknown>>,
     columns: Array<{ key: string; label: string }>,
-  ) => (
-    <div className="overflow-x-auto no-scrollbar">
-      <div className={cn(
-        "overflow-hidden rounded-2xl border border-border-silver bg-white",
-        columns.length === 4 ? "min-w-[720px]" : "min-w-[960px]",
-      )}>
-        <div className={cn("grid border-b border-border-silver bg-canvas-white", columns.length === 4 ? "grid-cols-4" : "grid-cols-5")}>
-          {columns.map((column) => (
-            <div key={column.key} className="px-3 py-3 text-[11px] font-black text-medium-gray">
-              {column.label}
-            </div>
-          ))}
-        </div>
-        {rows.map((row, rowIndex) => (
-          <div key={rowIndex} className={cn("grid border-b border-border-silver last:border-b-0", columns.length === 4 ? "grid-cols-4" : "grid-cols-5")}>
+  ) => {
+    const gridClass = columns.length === 2 ? "grid-cols-2" : (columns.length === 4 ? "grid-cols-4" : "grid-cols-5");
+    const minWidth = columns.length === 2 ? "min-w-[520px]" : (columns.length === 4 ? "min-w-[720px]" : "min-w-[960px]");
+
+    return (
+      <div className="overflow-x-auto no-scrollbar">
+        <div className={cn(
+          "overflow-hidden rounded-2xl border border-border-silver bg-white",
+          minWidth,
+        )}>
+          <div className={cn("grid border-b border-border-silver bg-canvas-white", gridClass)}>
             {columns.map((column) => (
-              <div key={column.key} className="px-3 py-4 text-[13px] font-bold text-black break-all">
-                {String(row[column.key] || '-')}
+              <div key={column.key} className="px-3 py-3 text-[11px] font-black text-medium-gray">
+                {column.label}
               </div>
             ))}
           </div>
-        ))}
+          {rows.map((row, rowIndex) => (
+            <div key={rowIndex} className={cn("grid border-b border-border-silver last:border-b-0", gridClass)}>
+              {columns.map((column) => (
+                <div key={column.key} className="px-3 py-4 text-[13px] font-bold text-black break-all">
+                  {String(row[column.key] || '-')}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderCustomerInfoChange = (value: unknown) => {
     const data = value as {
@@ -318,6 +342,27 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
         <div className="rounded-2xl border border-border-silver bg-white p-4">
           <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">银行凭证</p>
           {renderAttachmentList(data.bankVoucher)}
+        </div>
+        <div>
+          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">开票信息</p>
+          {renderCustomerTable(data.invoiceInfos, customerInvoiceInfoColumns)}
+        </div>
+      </div>
+    );
+  };
+
+  const renderSupplierInfoChange = (value: unknown) => {
+    const data = value as SupplierInfoChangeValue;
+
+    return (
+      <div className="space-y-5">
+        <div>
+          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">角色与服务</p>
+          {renderCustomerTable(data.roleServices, supplierRoleServiceColumns)}
+        </div>
+        <div>
+          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">银行账户</p>
+          {renderCustomerTable(data.bankAccounts, customerBankAccountColumns)}
         </div>
         <div>
           <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">开票信息</p>
@@ -489,7 +534,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                       key={key}
                       className={cn(
                         "gap-6 p-7 bg-[#fbfbfd] rounded-[24px] group border border-transparent hover:border-black/[0.02] hover:bg-white transition-all",
-                        isCustomerInfoChangeValue(value) || isSupplierQuotationInfoValue(value) || getStructuredDetailColumns(value).length > 0
+                        isCustomerInfoChangeValue(value) || isSupplierInfoChangeValue(value) || isSupplierQuotationInfoValue(value) || getStructuredDetailColumns(value).length > 0
                           ? "flex flex-col items-stretch"
                           : "flex items-center justify-between",
                       )}
@@ -497,6 +542,8 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                       <span className="text-[11px] font-black text-medium-gray uppercase tracking-[0.16em]">{key}</span>
                       {isCustomerInfoChangeValue(value) ? (
                         renderCustomerInfoChange(value)
+                      ) : isSupplierInfoChangeValue(value) ? (
+                        renderSupplierInfoChange(value)
                       ) : isSupplierQuotationInfoValue(value) ? (
                         renderSupplierQuotationInfo(value)
                       ) : getStructuredDetailColumns(value).length > 0 ? (
