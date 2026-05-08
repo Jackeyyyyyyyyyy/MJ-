@@ -10,9 +10,10 @@ import ApprovalDetailModal from './components/ApprovalDetailModal';
 import ApprovalProgressModal from './components/ApprovalProgressModal';
 import AiPromptEditor from './components/AiPromptEditor';
 import AiAssistantHome from './components/AiAssistantHome';
+import WorkflowDesigner from './components/WorkflowDesigner';
 import { auth } from './auth';
 import { storage } from './storage';
-import { Role, ApprovalRecord, ApprovalStatus } from './types';
+import { AdminView, Role, ApprovalRecord, ApprovalStatus } from './types';
 import { approvalSchema } from './approvalSchema';
 
 export default function App() {
@@ -20,7 +21,7 @@ export default function App() {
   const [perspective, setPerspective] = useState<Role | null>(auth.getPerspective());
   const [selectedModule, setSelectedModule] = useState<string>('');
   const [selectedType, setSelectedType] = useState<string>('');
-  const [activeAdminView, setActiveAdminView] = useState<'accounts' | 'ai-assistant' | null>(null);
+  const [activeAdminView, setActiveAdminView] = useState<AdminView | null>(null);
   
   // Dynamic list state
   const [dynamicRecords, setDynamicRecords] = useState<ApprovalRecord[]>([]);
@@ -58,6 +59,12 @@ export default function App() {
     setSelectedModule('');
     setSelectedType('');
     setActiveAdminView('ai-assistant');
+  };
+
+  const handleOpenWorkflowDesigner = () => {
+    setSelectedModule('');
+    setSelectedType('');
+    setActiveAdminView('workflow-designer');
   };
 
   const loadDynamicRecords = async () => {
@@ -104,6 +111,10 @@ export default function App() {
 
     if (activeAdminView === 'ai-assistant' && canUseAiAssistant) {
       return <AiAssistantHome />;
+    }
+
+    if (activeAdminView === 'workflow-designer' && isSuperAdminPerspective) {
+      return <WorkflowDesigner />;
     }
 
     if (selectedType) {
@@ -171,6 +182,7 @@ export default function App() {
       activeAdminView={activeAdminView}
       onOpenAccountAdmin={handleOpenAccountAdmin}
       onOpenAiAssistant={handleOpenAiAssistant}
+      onOpenWorkflowDesigner={handleOpenWorkflowDesigner}
       selectedModule={selectedModule}
       selectedType={selectedType}
       onSelectType={handleSelectType}

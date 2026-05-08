@@ -20,6 +20,8 @@ const uploadsIndexFile = path.join(dataDir, 'approval-uploads.json');
 const businessRecordsDir = path.join(dataDir, 'business-records');
 const aiPromptConfigsFile = path.join(dataDir, 'ai-prompt-configs.json');
 const aiAssistantConfigFile = path.join(dataDir, 'ai-assistant-config.json');
+const workflowTemplatesFile = path.join(dataDir, 'workflow-templates.json');
+const organizationFile = path.join(dataDir, 'organization-directory.json');
 const validStatuses = new Set(['草稿', '待审批', '已批准', '已拒绝']);
 const managedRoles = new Set(['applicant', 'approver', 'boss']);
 const defaultAiAssistantPrompt =
@@ -451,6 +453,8 @@ let uploadWriteQueue = Promise.resolve();
 let accountWriteQueue = Promise.resolve();
 let promptWriteQueue = Promise.resolve();
 let assistantConfigWriteQueue = Promise.resolve();
+let workflowWriteQueue = Promise.resolve();
+let organizationWriteQueue = Promise.resolve();
 
 function createBusinessRecord(record) {
   const operation = writeQueue.catch(() => undefined).then(async () => {
@@ -563,6 +567,205 @@ function updateAiAssistantConfig(mutator) {
   });
 
   assistantConfigWriteQueue = operation.catch(() => undefined);
+  return operation;
+}
+
+function createDefaultOrganizationDirectory() {
+  return {
+    departments: [
+      { id: 'dept-board', name: '董事会', leaderIds: ['qin-an-tang'] },
+      { id: 'dept-management', name: '总经办', parentId: 'dept-board', leaderIds: ['fan-lu'] },
+      { id: 'dept-sales', name: '销售部', parentId: 'dept-management', leaderIds: ['yang-nan'] },
+      { id: 'dept-finance', name: '财务部', parentId: 'dept-management', leaderIds: ['qian-lin'] },
+      { id: 'dept-operations', name: '运营清关', parentId: 'dept-management', leaderIds: ['li-qi'] },
+      { id: 'dept-admin', name: '行政人事', parentId: 'dept-management', leaderIds: ['lin-jin-biao'] },
+      { id: 'dept-warehouse', name: '仓储物流', parentId: 'dept-management', leaderIds: ['huang-song-yuan'] },
+    ],
+    members: [
+      { id: 'qin-an-tang', name: '秦安堂', departmentId: 'dept-board', title: '董事长', roleGroupIds: ['role-board'], enabled: true },
+      { id: 'fan-lu', name: '范璐', departmentId: 'dept-management', title: '总经理', supervisorId: 'qin-an-tang', roleGroupIds: ['role-gm'], enabled: true },
+      { id: 'yang-nan', name: '杨宿南', departmentId: 'dept-sales', title: '业务一部负责人', supervisorId: 'fan-lu', roleGroupIds: ['role-sales'], enabled: true },
+      { id: 'hong-wei', name: '洪伟', departmentId: 'dept-sales', title: '销售经理', supervisorId: 'yang-nan', roleGroupIds: ['role-sales'], enabled: true },
+      { id: 'qian-lin', name: '钱琳', departmentId: 'dept-finance', title: '财务总监', supervisorId: 'fan-lu', roleGroupIds: ['role-finance'], enabled: true },
+      { id: 'hu-ning-fei', name: '胡宁飞', departmentId: 'dept-finance', title: '财务助理', supervisorId: 'qian-lin', roleGroupIds: ['role-finance'], enabled: true },
+      { id: 'ye-fei', name: '叶飞', departmentId: 'dept-finance', title: '审批人', supervisorId: 'qian-lin', roleGroupIds: ['role-finance'], enabled: true },
+      { id: 'lin-jin-biao', name: '林金彪', departmentId: 'dept-admin', title: '行政人事', supervisorId: 'fan-lu', roleGroupIds: ['role-admin'], enabled: true },
+      { id: 'huang-song-yuan', name: '黄松源', departmentId: 'dept-warehouse', title: '仓储负责人', supervisorId: 'fan-lu', roleGroupIds: ['role-warehouse'], enabled: true },
+      { id: 'li-qi', name: '利祺', departmentId: 'dept-operations', title: '操作', supervisorId: 'fan-lu', roleGroupIds: ['role-ops'], enabled: true },
+      { id: 'qin-sheng', name: '秦笙', departmentId: 'dept-management', title: '抄送人', supervisorId: 'fan-lu', roleGroupIds: ['role-assistant'], enabled: true },
+      { id: 'wang-tumiao', name: '王涂妙', departmentId: 'dept-finance', title: '抄送人', supervisorId: 'qian-lin', roleGroupIds: ['role-finance'], enabled: true },
+      { id: 'jiang-hua', name: '姜华', departmentId: 'dept-finance', title: '抄送人', supervisorId: 'qian-lin', roleGroupIds: ['role-finance'], enabled: true },
+    ],
+    roleGroups: [
+      { id: 'role-board', name: '董事长', memberIds: ['qin-an-tang'] },
+      { id: 'role-gm', name: '总经理', memberIds: ['fan-lu'] },
+      { id: 'role-finance', name: '财务', memberIds: ['qian-lin', 'hu-ning-fei', 'ye-fei', 'wang-tumiao', 'jiang-hua'] },
+      { id: 'role-sales', name: '销售', memberIds: ['yang-nan', 'hong-wei'] },
+      { id: 'role-admin', name: '行政人事', memberIds: ['lin-jin-biao'] },
+      { id: 'role-warehouse', name: '仓储物流', memberIds: ['huang-song-yuan'] },
+      { id: 'role-ops', name: '操作', memberIds: ['li-qi'] },
+      { id: 'role-assistant', name: '总助/抄送', memberIds: ['qin-sheng'] },
+    ],
+    updatedAt: '2026-05-08T00:00:00.000Z',
+  };
+}
+
+function createDefaultWorkflowVersion(status = 'draft') {
+  const baseNodes = [
+    {
+      id: 'node-supervisor',
+      type: 'approver',
+      title: '直接主管',
+      subtitle: '从直接主管到第4级主管',
+      rule: { type: 'multi_supervisor', supervisorDepth: 4, emptyApproverAction: 'auto_pass' },
+    },
+    {
+      id: 'node-finance-director',
+      type: 'approver',
+      title: '财务总监',
+      subtitle: '钱琳',
+      rule: { type: 'specified', memberIds: ['qian-lin'], emptyApproverAction: 'block_submit' },
+    },
+    {
+      id: 'node-finance-approval',
+      type: 'approver',
+      title: '审批人',
+      subtitle: '叶飞',
+      rule: { type: 'specified', memberIds: ['ye-fei'], emptyApproverAction: 'block_submit' },
+    },
+    {
+      id: 'node-gm-countersign',
+      type: 'approver',
+      title: '总经理',
+      subtitle: '总经理会签',
+      rule: { type: 'role', roleGroupId: 'role-gm', emptyApproverAction: 'block_submit' },
+    },
+  ];
+
+  const branchRanges = [
+    ['cond-1', '条件1', '付款总额 <= 10000'],
+    ['cond-2', '条件2', '10000 < 付款总额 <= 50000'],
+    ['cond-3', '条件3', '50000 < 付款总额 <= 200000'],
+    ['cond-4', '条件4', '付款总额 > 200000'],
+  ];
+
+  return {
+    id: `version-${status}-1`,
+    version: 1,
+    status,
+    basic: {
+      name: '预付款申请',
+      moduleName: '资金',
+      approvalTypeName: '预付款申请',
+      visibleRange: '全公司',
+    },
+    formFields: [
+      { id: 'field-vendor', label: '供应商', type: 'text', required: true },
+      { id: 'field-currency', label: '币种', type: 'select', required: true },
+      { id: 'field-amount', label: '付款总额', type: 'money', required: true },
+      { id: 'field-account', label: '预付账单编号', type: 'text', required: true },
+      { id: 'field-attachment', label: '附件', type: 'attachment', required: false },
+    ],
+    nodes: [
+      { id: 'node-start', type: 'start', title: '发起人', subtitle: '金华魔术信息科技有限公司' },
+      {
+        id: 'node-amount-conditions',
+        type: 'condition',
+        title: '金额条件',
+        subtitle: '按付款总额自动分支',
+        conditions: branchRanges.map(([id, title, expression], index) => ({
+          id,
+          title,
+          expression,
+          priority: index + 1,
+          nodes: baseNodes.map((node) => ({
+            ...node,
+            id: `${node.id}-${index + 1}`,
+          })),
+        })),
+      },
+      {
+        id: 'node-chairman',
+        type: 'approver',
+        title: '董事长',
+        subtitle: '董事长会签',
+        rule: { type: 'role', roleGroupId: 'role-board', emptyApproverAction: 'block_submit' },
+      },
+      {
+        id: 'node-copy',
+        type: 'cc',
+        title: '抄送人',
+        subtitle: '秦笙、王涂妙、姜华、钱琳',
+        rule: { type: 'specified', memberIds: ['qin-sheng', 'wang-tumiao', 'jiang-hua', 'qian-lin'] },
+      },
+    ],
+    advanced: {
+      allowWithdraw: true,
+      allowTransfer: true,
+      enablePrint: true,
+      autoArchive: true,
+    },
+    savedAt: '2026-05-08T00:00:00.000Z',
+  };
+}
+
+function createDefaultWorkflowTemplate() {
+  const draft = createDefaultWorkflowVersion('draft');
+  return {
+    id: 'workflow-prepayment',
+    name: draft.basic.name,
+    moduleName: draft.basic.moduleName,
+    approvalTypeName: draft.basic.approvalTypeName,
+    status: 'draft',
+    currentVersion: 1,
+    draft,
+    updatedAt: draft.savedAt,
+  };
+}
+
+async function readWorkflowTemplates() {
+  const templates = await readJsonArrayFile(workflowTemplatesFile, 'workflow templates', { optional: true });
+  return templates.length > 0 ? templates : [createDefaultWorkflowTemplate()];
+}
+
+async function writeWorkflowTemplates(templates) {
+  await writeJsonArrayFile(workflowTemplatesFile, templates);
+}
+
+function updateWorkflowTemplates(mutator) {
+  const operation = workflowWriteQueue.catch(() => undefined).then(async () => {
+    const templates = await readWorkflowTemplates();
+    const result = await mutator(templates);
+    await writeWorkflowTemplates(templates);
+    return result;
+  });
+
+  workflowWriteQueue = operation.catch(() => undefined);
+  return operation;
+}
+
+async function readOrganizationDirectory() {
+  const directory = await readJsonObjectFile(organizationFile, {});
+  if (
+    !Array.isArray(directory.departments) ||
+    !Array.isArray(directory.members) ||
+    !Array.isArray(directory.roleGroups)
+  ) {
+    return createDefaultOrganizationDirectory();
+  }
+
+  return directory;
+}
+
+function updateOrganizationDirectory(mutator) {
+  const operation = organizationWriteQueue.catch(() => undefined).then(async () => {
+    const directory = await readOrganizationDirectory();
+    const result = await mutator(directory);
+    await writeJsonObjectFile(organizationFile, result);
+    return result;
+  });
+
+  organizationWriteQueue = operation.catch(() => undefined);
   return operation;
 }
 
@@ -1028,6 +1231,136 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     dataDir,
   });
+});
+
+app.get('/api/workflow-templates', authenticate, requireRoles('developer'), async (_req, res, next) => {
+  try {
+    res.json(await readWorkflowTemplates());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/workflow-templates/:id', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const templates = await readWorkflowTemplates();
+    const template = templates.find((item) => item.id === req.params.id);
+
+    if (!template) {
+      return res.status(404).json({ error: 'workflow template not found' });
+    }
+
+    res.json(template);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/workflow-templates/:id/draft', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const draft = req.body?.draft;
+
+    if (!draft || !Array.isArray(draft.nodes) || !draft.basic?.name) {
+      return res.status(400).json({ error: 'missing workflow draft' });
+    }
+
+    const now = new Date().toISOString();
+    const template = await updateWorkflowTemplates((templates) => {
+      const existing = templates.find((item) => item.id === req.params.id);
+
+      if (!existing) {
+        const error = new Error('workflow template not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const nextDraft = JSON.parse(JSON.stringify(draft));
+      const publishedVersion = Number(existing.publishedVersion?.version || 0);
+      const draftVersion = Number(nextDraft.version || 1);
+
+      nextDraft.id = nextDraft.id || `draft-${Date.now()}`;
+      nextDraft.version = publishedVersion > 0 && draftVersion <= publishedVersion ? publishedVersion + 1 : draftVersion;
+      nextDraft.status = 'draft';
+      nextDraft.savedAt = now;
+      nextDraft.savedBy = req.user.name;
+
+      existing.name = String(nextDraft.basic.name || existing.name);
+      existing.moduleName = String(nextDraft.basic.moduleName || existing.moduleName);
+      existing.approvalTypeName = String(nextDraft.basic.approvalTypeName || existing.approvalTypeName);
+      existing.status = 'draft';
+      existing.draft = nextDraft;
+      existing.updatedAt = now;
+      existing.updatedBy = req.user.name;
+
+      return existing;
+    });
+
+    res.json(template);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/workflow-templates/:id/publish', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const now = new Date().toISOString();
+    const template = await updateWorkflowTemplates((templates) => {
+      const existing = templates.find((item) => item.id === req.params.id);
+
+      if (!existing) {
+        const error = new Error('workflow template not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const published = JSON.parse(JSON.stringify(existing.draft));
+      published.status = 'published';
+      published.publishedAt = now;
+      published.savedAt = existing.draft.savedAt || now;
+      published.savedBy = existing.draft.savedBy || req.user.name;
+
+      existing.publishedVersion = published;
+      existing.status = 'published';
+      existing.currentVersion = Number(published.version || existing.currentVersion || 1);
+      existing.updatedAt = now;
+      existing.updatedBy = req.user.name;
+
+      return existing;
+    });
+
+    res.json(template);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/organization', authenticate, requireRoles('developer'), async (_req, res, next) => {
+  try {
+    res.json(await readOrganizationDirectory());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/organization', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const { departments, members, roleGroups } = req.body || {};
+
+    if (!Array.isArray(departments) || !Array.isArray(members) || !Array.isArray(roleGroups)) {
+      return res.status(400).json({ error: 'missing organization directory' });
+    }
+
+    const directory = await updateOrganizationDirectory(() => ({
+      departments,
+      members,
+      roleGroups,
+      updatedAt: new Date().toISOString(),
+    }));
+
+    res.json(directory);
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/ai-prompts', authenticate, requireRoles('developer'), async (req, res, next) => {

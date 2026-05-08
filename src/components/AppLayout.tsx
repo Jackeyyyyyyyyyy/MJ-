@@ -2,7 +2,7 @@ import React from 'react';
 import { auth } from '../auth';
 import Sidebar from './Sidebar';
 import { LogOut } from 'lucide-react';
-import { Role } from '../types';
+import { AdminView, Role } from '../types';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -10,9 +10,10 @@ interface AppLayoutProps {
   children: React.ReactNode;
   onLogout: () => void;
   onPerspectiveChange: (role: Role) => void;
-  activeAdminView?: 'accounts' | 'ai-assistant' | null;
+  activeAdminView?: AdminView | null;
   onOpenAccountAdmin: () => void;
   onOpenAiAssistant: () => void;
+  onOpenWorkflowDesigner: () => void;
   selectedModule?: string;
   selectedType?: string;
   onSelectType: (module: string, type: string) => void;
@@ -67,6 +68,7 @@ export default function AppLayout({
   activeAdminView,
   onOpenAccountAdmin,
   onOpenAiAssistant,
+  onOpenWorkflowDesigner,
   selectedModule,
   selectedType,
   onSelectType
@@ -97,6 +99,10 @@ export default function AppLayout({
         }}
         onOpenAiAssistant={() => {
           onOpenAiAssistant();
+          setIsSidebarOpen(false);
+        }}
+        onOpenWorkflowDesigner={() => {
+          onOpenWorkflowDesigner();
           setIsSidebarOpen(false);
         }}
         onSelectType={(m, t) => {

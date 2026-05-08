@@ -14,6 +14,124 @@ export enum ApprovalStatus {
 
 export type Role = 'applicant' | 'approver' | 'boss' | 'developer';
 
+export type AdminView = 'accounts' | 'ai-assistant' | 'workflow-designer';
+
+export type WorkflowStatus = 'draft' | 'published';
+export type WorkflowStepKey = 'basic' | 'form' | 'flow' | 'advanced';
+export type WorkflowNodeType = 'start' | 'approver' | 'cc' | 'condition';
+export type ApproverRuleType =
+  | 'specified'
+  | 'direct_supervisor'
+  | 'nth_supervisor'
+  | 'multi_supervisor'
+  | 'role'
+  | 'initiator_select';
+
+export interface OrganizationDepartment {
+  id: string;
+  name: string;
+  parentId?: string;
+  leaderIds: string[];
+}
+
+export interface OrganizationMember {
+  id: string;
+  name: string;
+  departmentId: string;
+  title: string;
+  supervisorId?: string;
+  roleGroupIds: string[];
+  enabled: boolean;
+}
+
+export interface OrganizationRoleGroup {
+  id: string;
+  name: string;
+  memberIds: string[];
+}
+
+export interface OrganizationDirectory {
+  departments: OrganizationDepartment[];
+  members: OrganizationMember[];
+  roleGroups: OrganizationRoleGroup[];
+  updatedAt?: string;
+}
+
+export interface ApproverRule {
+  type: ApproverRuleType;
+  memberIds?: string[];
+  roleGroupId?: string;
+  supervisorLevel?: number;
+  supervisorDepth?: number;
+  emptyApproverAction?: 'auto_pass' | 'block_submit';
+}
+
+export interface WorkflowNode {
+  id: string;
+  type: WorkflowNodeType;
+  title: string;
+  subtitle?: string;
+  rule?: ApproverRule;
+}
+
+export interface WorkflowCondition {
+  id: string;
+  title: string;
+  expression: string;
+  priority: number;
+  nodes: WorkflowNode[];
+}
+
+export interface WorkflowConditionNode extends WorkflowNode {
+  type: 'condition';
+  conditions: WorkflowCondition[];
+}
+
+export interface WorkflowFormField {
+  id: string;
+  label: string;
+  type: 'text' | 'number' | 'money' | 'date' | 'select' | 'attachment';
+  required: boolean;
+}
+
+export interface WorkflowAdvancedSettings {
+  allowWithdraw: boolean;
+  allowTransfer: boolean;
+  enablePrint: boolean;
+  autoArchive: boolean;
+}
+
+export interface WorkflowVersion {
+  id: string;
+  version: number;
+  status: WorkflowStatus;
+  basic: {
+    name: string;
+    moduleName: string;
+    approvalTypeName: string;
+    visibleRange: string;
+  };
+  formFields: WorkflowFormField[];
+  nodes: Array<WorkflowNode | WorkflowConditionNode>;
+  advanced: WorkflowAdvancedSettings;
+  savedAt: string;
+  savedBy?: string;
+  publishedAt?: string;
+}
+
+export interface WorkflowTemplate {
+  id: string;
+  name: string;
+  moduleName: string;
+  approvalTypeName: string;
+  status: WorkflowStatus;
+  currentVersion: number;
+  draft: WorkflowVersion;
+  publishedVersion?: WorkflowVersion;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
 export interface User {
   username: string;
   role: Role;

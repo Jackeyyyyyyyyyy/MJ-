@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { approvalSchema } from '../approvalSchema';
-import { Role } from '../types';
+import { AdminView, Role } from '../types';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -9,6 +9,7 @@ import {
   ChevronDown, 
   Layers, 
   Home,
+  GitBranch,
   LayoutDashboard,
   ShieldCheck,
   X
@@ -20,9 +21,10 @@ interface SidebarProps {
   selectedType?: string;
   onSelectType: (module: string, type: string) => void;
   isSuperAdmin?: boolean;
-  activeAdminView?: 'accounts' | 'ai-assistant' | null;
+  activeAdminView?: AdminView | null;
   onOpenAccountAdmin?: () => void;
   onOpenAiAssistant?: () => void;
+  onOpenWorkflowDesigner?: () => void;
   isOpen?: boolean;
   onClose?: () => void;
 }
@@ -36,6 +38,7 @@ export default function Sidebar({
   activeAdminView,
   onOpenAccountAdmin,
   onOpenAiAssistant,
+  onOpenWorkflowDesigner,
   isOpen,
   onClose,
 }: SidebarProps) {
@@ -73,6 +76,12 @@ export default function Sidebar({
       : []),
     ...(isSuperAdminPerspective
       ? [
+          {
+            id: 'workflow-designer',
+            label: '审批流配置',
+            icon: GitBranch,
+            onClick: onOpenWorkflowDesigner,
+          },
           {
             id: 'accounts',
             label: '账号权限管理',
