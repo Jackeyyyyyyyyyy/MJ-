@@ -459,6 +459,7 @@ export default function AiAssistantHome() {
         record={selectedRecord}
         onClose={() => setSelectedRecord(null)}
         showAiSuggestion
+        showAiRawResponse={user?.role === 'developer'}
       />
     </div>
   );

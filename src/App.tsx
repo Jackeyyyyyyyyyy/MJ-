@@ -139,6 +139,7 @@ export default function App() {
             record={selectedOne}
             onClose={() => { setSelectedOne(null); setShowD(false); }}
             showAiSuggestion={canSeeAiSuggestion}
+            showAiRawResponse={auth.getCurrentUser()?.role === 'developer'}
             onApprove={canReview ? (record) => { setShowD(false); void handleDynamicApprove(record); } : undefined}
             onReject={canReview ? (record) => { setShowD(false); void handleDynamicReject(record); } : undefined}
           />

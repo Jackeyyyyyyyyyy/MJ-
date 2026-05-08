@@ -679,6 +679,7 @@ function normalizeAiSuggestionText(rawText) {
 }
 
 function parseAiSuggestion(rawText) {
+  const rawResponseText = String(rawText || '');
   const displayText = normalizeAiSuggestionText(rawText);
   const riskMatch = displayText.match(/(低|中|高)风险/);
   const riskLevel = riskMatch ? `${riskMatch[1]}风险` : undefined;
@@ -689,7 +690,20 @@ function parseAiSuggestion(rawText) {
     riskLevel,
     advice,
     displayText,
+    rawText: rawResponseText,
     generatedAt: new Date().toISOString(),
+  };
+}
+
+function toPublicRecord(record, user) {
+  if (!record.aiSuggestion || user?.role === 'developer') {
+    return record;
+  }
+
+  const { rawText, ...aiSuggestion } = record.aiSuggestion;
+  return {
+    ...record,
+    aiSuggestion,
   };
 }
 
@@ -1381,10 +1395,14 @@ app.get('/api/records', authenticate, async (req, res, next) => {
     const records = await readRecords();
 
     if (req.user.role === 'applicant') {
-      return res.json(records.filter((record) => record.applicant === req.user.name));
+      return res.json(
+        records
+          .filter((record) => record.applicant === req.user.name)
+          .map((record) => toPublicRecord(record, req.user)),
+      );
     }
 
-    res.json(records);
+    res.json(records.map((record) => toPublicRecord(record, req.user)));
   } catch (error) {
     next(error);
   }
@@ -1418,7 +1436,7 @@ app.post('/api/records', authenticate, requireRoles('applicant'), async (req, re
       ],
     });
 
-    res.status(201).json(record);
+    res.status(201).json(toPublicRecord(record, req.user));
     scheduleAiSuggestionGeneration(record);
   } catch (error) {
     next(error);
@@ -1477,7 +1495,7 @@ app.patch('/api/records/:id/status', authenticate, requireRoles('approver', 'bos
       return record;
     });
 
-    res.json(updatedRecord);
+    res.json(toPublicRecord(updatedRecord, req.user));
   } catch (error) {
     next(error);
   }

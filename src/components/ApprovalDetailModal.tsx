@@ -12,6 +12,7 @@ interface ApprovalDetailModalProps {
   onApprove?: (record: ApprovalRecord) => void;
   onReject?: (record: ApprovalRecord) => void;
   showAiSuggestion?: boolean;
+  showAiRawResponse?: boolean;
 }
 
 function isAttachmentList(value: unknown): value is ApprovalAttachment[] {
@@ -168,7 +169,7 @@ function getAiSuggestionDisplay(record: ApprovalRecord) {
   };
 }
 
-export default function ApprovalDetailModal({ record, onClose, onApprove, onReject, showAiSuggestion = false }: ApprovalDetailModalProps) {
+export default function ApprovalDetailModal({ record, onClose, onApprove, onReject, showAiSuggestion = false, showAiRawResponse = false }: ApprovalDetailModalProps) {
   const [preview, setPreview] = React.useState<PreviewState | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = React.useState(false);
 
@@ -182,6 +183,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
 
   const canReview = record.status === ApprovalStatus.PENDING && !!onApprove && !!onReject;
   const aiSuggestion = getAiSuggestionDisplay(record);
+  const aiRawText = typeof record.aiSuggestion?.rawText === 'string' ? record.aiSuggestion.rawText.trim() : '';
   const finishedAt = record.approvedAt || record.rejectedAt;
   const approvalTimeline = [
     {
@@ -479,6 +481,12 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                       <p className="text-[16px] font-black text-black leading-snug tracking-tight">
                         {aiSuggestion.text}
                       </p>
+                      {showAiRawResponse && aiRawText && (
+                        <div className="mt-5 pt-5 border-t border-black/[0.08]">
+                          <p className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em] mb-2">AI完整返回</p>
+                          <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[12px] font-semibold leading-5 text-midnight-graphite">{aiRawText}</pre>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

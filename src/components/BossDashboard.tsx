@@ -159,6 +159,7 @@ export default function BossDashboard() {
           record={selectedRecord}
           onClose={() => { if(!isRejecting && !isApproving) setSelectedRecord(null); setShowDetail(false); }}
           showAiSuggestion
+          showAiRawResponse={user?.role === 'developer'}
           onApprove={openApproveConfirm}
           onReject={openRejectConfirm}
         />

@@ -89,6 +89,7 @@ export interface AiSuggestion {
   riskLevel?: string;
   advice?: string;
   displayText: string;
+  rawText?: string;
   generatedAt?: string;
   error?: string;
 }
