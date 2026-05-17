@@ -14,7 +14,7 @@ export enum ApprovalStatus {
 
 export type Role = 'applicant' | 'approver' | 'boss' | 'developer';
 
-export type AdminView = 'accounts' | 'ai-assistant';
+export type AdminView = 'accounts' | 'ai-assistant' | 'organization' | 'workflows';
 
 export type ApproverRuleType =
   | 'specified'
@@ -34,6 +34,7 @@ export interface OrganizationDepartment {
 export interface OrganizationMember {
   id: string;
   name: string;
+  accountUsername?: string;
   departmentId: string;
   title: string;
   supervisorId?: string;
@@ -62,6 +63,89 @@ export interface ApproverRule {
   supervisorDepth?: number;
   emptyApproverAction?: 'auto_pass' | 'block_submit';
 }
+
+export type WorkflowStepStatus = 'not_started' | 'pending' | 'approved' | 'rejected' | 'skipped';
+
+export interface WorkflowApproverSnapshot {
+  memberId: string;
+  name: string;
+  accountUsername?: string;
+}
+
+export interface WorkflowInstanceStep {
+  stepId: string;
+  name: string;
+  order: number;
+  approvers: WorkflowApproverSnapshot[];
+  status: WorkflowStepStatus;
+  actedByMemberId?: string;
+  actedByName?: string;
+  actedByAccountUsername?: string;
+  actedAt?: string;
+  comment?: string;
+}
+
+export interface WorkflowInstance {
+  workflowId: string;
+  workflowName: string;
+  workflowVersion: number;
+  currentStepIndex: number;
+  steps: WorkflowInstanceStep[];
+}
+
+export interface WorkflowFormField {
+  id: string;
+  label: string;
+  type: string;
+  required?: boolean;
+}
+
+export interface WorkflowNode {
+  id: string;
+  type: 'start' | 'approver' | 'condition' | 'cc';
+  title: string;
+  subtitle?: string;
+  rule?: ApproverRule;
+  conditions?: Array<{
+    id: string;
+    title: string;
+    expression: string;
+    priority: number;
+    nodes: WorkflowNode[];
+  }>;
+}
+
+export interface WorkflowVersion {
+  id: string;
+  version: number;
+  status: 'draft' | 'published' | 'disabled';
+  basic: {
+    name: string;
+    moduleName: string;
+    approvalTypeName: string;
+    visibleRange?: string;
+  };
+  formFields?: WorkflowFormField[];
+  nodes: WorkflowNode[];
+  savedAt?: string;
+  savedBy?: string;
+  publishedAt?: string;
+}
+
+export interface WorkflowTemplate {
+  id: string;
+  name: string;
+  moduleName: string;
+  approvalTypeName: string;
+  status: 'draft' | 'published' | 'disabled';
+  currentVersion: number;
+  draft: WorkflowVersion;
+  publishedVersion?: WorkflowVersion;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export type WorkflowTemplateInput = Pick<WorkflowTemplate, 'name' | 'moduleName' | 'approvalTypeName'>;
 
 export interface User {
   username: string;
@@ -213,6 +297,8 @@ export interface ApprovalRecord {
   businessData: Record<string, any>;
   status: ApprovalStatus;
   applicant: string;
+  workflowInstance?: WorkflowInstance;
+  currentUserCanApprove?: boolean;
   aiSuggestion?: AiSuggestion;
   createdAt: string;
   updatedAt: string;

@@ -13,26 +13,48 @@ interface ApprovalProgressModalProps {
 export default function ApprovalProgressModal({ record, onClose }: ApprovalProgressModalProps) {
   if (!record) return null;
 
-  const steps = [
-    {
-      title: '发起申请',
-      desc: `发起人：${record.applicant}`,
-      time: record.createdAt,
-      status: 'completed'
-    },
-    {
-      title: '审批人处理',
-      desc: record.status === ApprovalStatus.PENDING ? '待审批人处理' : (record.approver ? `审批人：${record.approver}` : '处理完成'),
-      time: record.approvedAt || record.rejectedAt,
-      status: record.status === ApprovalStatus.PENDING ? 'current' : 'completed'
-    },
-    {
-      title: '审批通过',
-      desc: record.status === ApprovalStatus.APPROVED ? '审批流程顺利结束' : (record.status === ApprovalStatus.REJECTED ? '审批流程已被拒绝' : '待处理'),
-      time: record.approvedAt || record.rejectedAt,
-      status: record.status === ApprovalStatus.APPROVED ? 'completed' : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending')
-    }
-  ];
+  const workflowSteps = record.workflowInstance?.steps;
+  const steps = workflowSteps?.length
+    ? [
+        {
+          title: '发起申请',
+          desc: `发起人：${record.applicant}`,
+          time: record.createdAt,
+          status: 'completed'
+        },
+        ...workflowSteps.map((step) => ({
+          title: step.name,
+          desc: [
+            `审批人：${step.approvers.map((approver) => approver.name).join('、') || '未解析'}`,
+            step.actedByName ? `操作人：${step.actedByName}` : '',
+            step.comment ? `意见：${step.comment}` : '',
+          ].filter(Boolean).join(' ｜ '),
+          time: step.actedAt,
+          status: step.status === 'approved' || step.status === 'skipped'
+            ? 'completed'
+            : (step.status === 'pending' ? 'current' : (step.status === 'rejected' ? 'failed' : 'pending')),
+        })),
+      ]
+    : [
+        {
+          title: '发起申请',
+          desc: `发起人：${record.applicant}`,
+          time: record.createdAt,
+          status: 'completed'
+        },
+        {
+          title: '审批人处理',
+          desc: record.status === ApprovalStatus.PENDING ? '待审批人处理' : (record.approver ? `审批人：${record.approver}` : '处理完成'),
+          time: record.approvedAt || record.rejectedAt,
+          status: record.status === ApprovalStatus.PENDING ? 'current' : 'completed'
+        },
+        {
+          title: '审批通过',
+          desc: record.status === ApprovalStatus.APPROVED ? '审批流程顺利结束' : (record.status === ApprovalStatus.REJECTED ? '审批流程已被拒绝' : '待处理'),
+          time: record.approvedAt || record.rejectedAt,
+          status: record.status === ApprovalStatus.APPROVED ? 'completed' : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending')
+        }
+      ];
 
   return (
     <AnimatePresence>

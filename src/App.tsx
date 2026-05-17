@@ -5,6 +5,8 @@ import ApplicantHome from './components/ApplicantHome';
 import ApproverHome from './components/ApproverHome';
 import BossDashboard from './components/BossDashboard';
 import AccountPermissionAdmin from './components/AccountPermissionAdmin';
+import OrganizationAdmin from './components/OrganizationAdmin';
+import WorkflowAdmin from './components/WorkflowAdmin';
 import ApprovalTable from './components/ApprovalTable';
 import ApprovalDetailModal from './components/ApprovalDetailModal';
 import ApprovalProgressModal from './components/ApprovalProgressModal';
@@ -60,6 +62,18 @@ export default function App() {
     setActiveAdminView('ai-assistant');
   };
 
+  const handleOpenOrganizationAdmin = () => {
+    setSelectedModule('');
+    setSelectedType('');
+    setActiveAdminView('organization');
+  };
+
+  const handleOpenWorkflowAdmin = () => {
+    setSelectedModule('');
+    setSelectedType('');
+    setActiveAdminView('workflows');
+  };
+
   const loadDynamicRecords = async () => {
     if (selectedType) {
       const all = await storage.getRecords();
@@ -106,6 +120,14 @@ export default function App() {
       return <AiAssistantHome />;
     }
 
+    if (activeAdminView === 'organization' && isSuperAdminPerspective) {
+      return <OrganizationAdmin />;
+    }
+
+    if (activeAdminView === 'workflows' && isSuperAdminPerspective) {
+      return <WorkflowAdmin />;
+    }
+
     if (selectedType) {
       const canReview = perspective === 'approver' || perspective === 'boss';
       const canSeeAiSuggestion = canReview || auth.getCurrentUser()?.role === 'developer';
@@ -140,8 +162,8 @@ export default function App() {
             onClose={() => { setSelectedOne(null); setShowD(false); }}
             showAiSuggestion={canSeeAiSuggestion}
             showAiRawResponse={auth.getCurrentUser()?.role === 'developer'}
-            onApprove={canReview ? (record) => { setShowD(false); void handleDynamicApprove(record); } : undefined}
-            onReject={canReview ? (record) => { setShowD(false); void handleDynamicReject(record); } : undefined}
+            onApprove={canReview && selectedOne?.currentUserCanApprove ? (record) => { setShowD(false); void handleDynamicApprove(record); } : undefined}
+            onReject={canReview && selectedOne?.currentUserCanApprove ? (record) => { setShowD(false); void handleDynamicReject(record); } : undefined}
           />
           <ApprovalProgressModal record={selectedOne} onClose={() => { setSelectedOne(null); setShowP(false); }} />
         </div>
@@ -171,6 +193,8 @@ export default function App() {
       activeAdminView={activeAdminView}
       onOpenAccountAdmin={handleOpenAccountAdmin}
       onOpenAiAssistant={handleOpenAiAssistant}
+      onOpenOrganizationAdmin={handleOpenOrganizationAdmin}
+      onOpenWorkflowAdmin={handleOpenWorkflowAdmin}
       selectedModule={selectedModule}
       selectedType={selectedType}
       onSelectType={handleSelectType}

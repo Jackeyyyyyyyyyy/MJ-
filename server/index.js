@@ -22,7 +22,16 @@ const aiPromptConfigsFile = path.join(dataDir, 'ai-prompt-configs.json');
 const aiAssistantConfigFile = path.join(dataDir, 'ai-assistant-config.json');
 const workflowTemplatesFile = path.join(dataDir, 'workflow-templates.json');
 const organizationFile = path.join(dataDir, 'organization-directory.json');
-const validStatuses = new Set(['草稿', '待审批', '已批准', '已拒绝']);
+const STATUS_DRAFT = '\u8349\u7a3f';
+const STATUS_PENDING = '\u5f85\u5ba1\u6279';
+const STATUS_APPROVED = '\u5df2\u6279\u51c6';
+const STATUS_REJECTED = '\u5df2\u62d2\u7edd';
+const validStatuses = new Set([STATUS_DRAFT, STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED]);
+const STEP_NOT_STARTED = 'not_started';
+const STEP_PENDING = 'pending';
+const STEP_APPROVED = 'approved';
+const STEP_REJECTED = 'rejected';
+const STEP_SKIPPED = 'skipped';
 const managedRoles = new Set(['applicant', 'approver', 'boss']);
 const defaultAiAssistantPrompt =
   '你是 MJ 审批系统的管理助手，只做只读分析。你负责总结审批风险、发现异常、解释待办优先级，并引用相关审批单。不得编造数据，不得替用户做审批决定，不得建议绕过流程。回答要先给简短结论，再列关键原因；如果涉及具体单据，请在 relatedRecordIds 中返回对应 recordId。';
@@ -769,6 +778,280 @@ function updateOrganizationDirectory(mutator) {
   return operation;
 }
 
+function createHttpError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function normalizeWorkflowText(value) {
+  return String(value || '').trim();
+}
+
+function getPublishedVersion(template) {
+  if (template?.status !== 'published') return null;
+  if (!template.publishedVersion || template.publishedVersion.status === 'disabled') return null;
+  return template.publishedVersion;
+}
+
+async function findPublishedWorkflow(moduleName, approvalTypeName) {
+  const templates = await readWorkflowTemplates();
+  return templates.find((template) => {
+    const version = getPublishedVersion(template);
+    return version &&
+      normalizeWorkflowText(version.basic?.moduleName || template.moduleName) === normalizeWorkflowText(moduleName) &&
+      normalizeWorkflowText(version.basic?.approvalTypeName || template.approvalTypeName) === normalizeWorkflowText(approvalTypeName);
+  }) || null;
+}
+
+function getLinearApproverNodes(version) {
+  return Array.isArray(version?.nodes)
+    ? version.nodes.filter((node) => node?.type === 'approver')
+    : [];
+}
+
+function findMemberByAccount(directory, username) {
+  return (directory.members || []).find((member) => (
+    member.enabled !== false &&
+    normalizeWorkflowText(member.accountUsername).toLowerCase() === normalizeWorkflowText(username).toLowerCase()
+  )) || null;
+}
+
+function findMemberById(directory, memberId) {
+  return (directory.members || []).find((member) => member.id === memberId && member.enabled !== false) || null;
+}
+
+function toApproverSnapshot(member) {
+  return {
+    memberId: member.id,
+    name: member.name,
+    accountUsername: member.accountUsername,
+  };
+}
+
+function uniqueMembers(members) {
+  const seen = new Set();
+  return members.filter((member) => {
+    if (!member || seen.has(member.id)) return false;
+    seen.add(member.id);
+    return true;
+  });
+}
+
+function getRoleGroupMembers(directory, roleGroupId) {
+  const roleGroup = (directory.roleGroups || []).find((item) => item.id === roleGroupId);
+  const memberIds = new Set([
+    ...(roleGroup?.memberIds || []),
+    ...(directory.members || [])
+      .filter((member) => Array.isArray(member.roleGroupIds) && member.roleGroupIds.includes(roleGroupId))
+      .map((member) => member.id),
+  ]);
+
+  return uniqueMembers([...memberIds].map((memberId) => findMemberById(directory, memberId)).filter(Boolean));
+}
+
+function getSupervisorAtLevel(directory, member, level) {
+  let current = member;
+  const targetLevel = Math.max(1, Number(level) || 1);
+
+  for (let index = 0; index < targetLevel; index += 1) {
+    if (!current?.supervisorId) return null;
+    current = findMemberById(directory, current.supervisorId);
+  }
+
+  return current || null;
+}
+
+function getSupervisorChain(directory, member, depth) {
+  const supervisors = [];
+  let current = member;
+  const maxDepth = Math.max(1, Number(depth) || 1);
+
+  for (let index = 0; index < maxDepth; index += 1) {
+    const supervisor = getSupervisorAtLevel(directory, current, 1);
+    if (!supervisor) break;
+    supervisors.push(supervisor);
+    current = supervisor;
+  }
+
+  return supervisors;
+}
+
+function resolveApproversForRule(rule, directory, applicantMember) {
+  const approverRule = rule || { type: 'specified', memberIds: [] };
+  let members = [];
+
+  if (approverRule.type === 'specified') {
+    members = (approverRule.memberIds || []).map((memberId) => findMemberById(directory, memberId)).filter(Boolean);
+  } else if (approverRule.type === 'role') {
+    members = getRoleGroupMembers(directory, approverRule.roleGroupId);
+  } else if (approverRule.type === 'direct_supervisor') {
+    if (!applicantMember) {
+      throw createHttpError('Cannot resolve direct supervisor because applicant is not bound to organization.', 400);
+    }
+    members = [getSupervisorAtLevel(directory, applicantMember, 1)].filter(Boolean);
+  } else if (approverRule.type === 'nth_supervisor') {
+    if (!applicantMember) {
+      throw createHttpError('Cannot resolve supervisor because applicant is not bound to organization.', 400);
+    }
+    members = [getSupervisorAtLevel(directory, applicantMember, approverRule.supervisorLevel || 1)].filter(Boolean);
+  } else if (approverRule.type === 'multi_supervisor') {
+    if (!applicantMember) {
+      throw createHttpError('Cannot resolve supervisor chain because applicant is not bound to organization.', 400);
+    }
+    members = getSupervisorChain(directory, applicantMember, approverRule.supervisorDepth || 1);
+  }
+
+  return uniqueMembers(members).filter((member) => normalizeWorkflowText(member.accountUsername));
+}
+
+function createWorkflowStep(node, order, approvers, status = STEP_NOT_STARTED, comment) {
+  return {
+    stepId: node.id || `step-${order}`,
+    name: node.title || `Step ${order}`,
+    order,
+    approvers: approvers.map(toApproverSnapshot),
+    status,
+    ...(comment ? { comment } : {}),
+  };
+}
+
+async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, applicantUsername }) {
+  const template = await findPublishedWorkflow(moduleName, approvalTypeName);
+  if (!template) {
+    throw createHttpError('No published approval workflow matches this business type. Please ask an administrator to configure and publish one.', 400);
+  }
+
+  const version = getPublishedVersion(template);
+  const nodes = getLinearApproverNodes(version);
+  if (nodes.length === 0) {
+    throw createHttpError('The matched approval workflow has no linear approval steps.', 400);
+  }
+
+  const directory = await readOrganizationDirectory();
+  const applicantMember = findMemberByAccount(directory, applicantUsername);
+  const steps = [];
+
+  nodes.forEach((node, index) => {
+    const rule = node.rule || {};
+    const approvers = resolveApproversForRule(rule, directory, applicantMember);
+
+    if (approvers.length === 0) {
+      if (rule.emptyApproverAction === 'auto_pass') {
+        steps.push(createWorkflowStep(node, index, [], STEP_SKIPPED, 'No approver was resolved; step was skipped automatically.'));
+        return;
+      }
+
+      throw createHttpError(`No approver can be resolved for workflow step: ${node.title || index + 1}.`, 400);
+    }
+
+    steps.push(createWorkflowStep(node, index, approvers));
+  });
+
+  const firstPendingIndex = steps.findIndex((step) => step.status === STEP_NOT_STARTED);
+  if (firstPendingIndex >= 0) {
+    steps[firstPendingIndex].status = STEP_PENDING;
+  }
+
+  return {
+    instance: {
+      workflowId: template.id,
+      workflowName: version.basic?.name || template.name,
+      workflowVersion: Number(version.version || template.currentVersion || 1),
+      currentStepIndex: firstPendingIndex,
+      steps,
+    },
+    initialStatus: firstPendingIndex >= 0 ? STATUS_PENDING : STATUS_APPROVED,
+  };
+}
+
+function getCurrentWorkflowStep(record) {
+  const instance = record?.workflowInstance;
+  if (!instance || !Array.isArray(instance.steps)) return null;
+  const currentStep = instance.steps[Number(instance.currentStepIndex)];
+  return currentStep?.status === STEP_PENDING ? currentStep : null;
+}
+
+function canUserApproveRecord(user, record) {
+  if (!user || record?.status !== STATUS_PENDING) return false;
+
+  const currentStep = getCurrentWorkflowStep(record);
+  if (!record.workflowInstance) {
+    return ['approver', 'boss', 'developer'].includes(user.role);
+  }
+
+  if (!currentStep) return false;
+  return (currentStep.approvers || []).some((approver) => (
+    normalizeWorkflowText(approver.accountUsername).toLowerCase() === normalizeWorkflowText(user.username).toLowerCase()
+  ));
+}
+
+function appendApprovalLog(record, action, user, details, step) {
+  record.logs = [
+    ...(record.logs || []),
+    {
+      ...createLog(action, user.name),
+      details,
+      ...(step ? { stepId: step.stepId, stepName: step.name } : {}),
+    },
+  ];
+}
+
+function getActingApprover(user, step) {
+  return (step.approvers || []).find((approver) => (
+    normalizeWorkflowText(approver.accountUsername).toLowerCase() === normalizeWorkflowText(user.username).toLowerCase()
+  )) || null;
+}
+
+function advanceWorkflowRecord(record, user, status, reason) {
+  const currentStep = getCurrentWorkflowStep(record);
+  if (!currentStep) {
+    throw createHttpError('approval record has no pending workflow step', 409);
+  }
+
+  const actingApprover = getActingApprover(user, currentStep);
+  if (!actingApprover) {
+    throw createHttpError('current user is not an approver for this workflow step', 403);
+  }
+
+  const now = new Date().toISOString();
+  const comment = String(reason || '').trim();
+  currentStep.actedByMemberId = actingApprover.memberId;
+  currentStep.actedByName = user.name;
+  currentStep.actedByAccountUsername = user.username;
+  currentStep.actedAt = now;
+  currentStep.comment = status === STATUS_REJECTED ? comment : (comment || 'Approved');
+
+  record.updatedAt = now;
+  record.approver = user.name;
+
+  if (status === STATUS_REJECTED) {
+    currentStep.status = STEP_REJECTED;
+    record.status = STATUS_REJECTED;
+    record.rejectedAt = now;
+    record.rejectReason = comment;
+    appendApprovalLog(record, '\u62d2\u7edd', user, comment, currentStep);
+    return record;
+  }
+
+  currentStep.status = STEP_APPROVED;
+  appendApprovalLog(record, '\u6279\u51c6', user, `${currentStep.name} approved`, currentStep);
+
+  const nextStepIndex = record.workflowInstance.steps.findIndex((step) => step.status === STEP_NOT_STARTED);
+  if (nextStepIndex >= 0) {
+    record.workflowInstance.steps[nextStepIndex].status = STEP_PENDING;
+    record.workflowInstance.currentStepIndex = nextStepIndex;
+    appendApprovalLog(record, '\u6d41\u7a0b\u63a8\u8fdb', user, `Moved to ${record.workflowInstance.steps[nextStepIndex].name}`, record.workflowInstance.steps[nextStepIndex]);
+  } else {
+    record.workflowInstance.currentStepIndex = -1;
+    record.status = STATUS_APPROVED;
+    record.approvedAt = now;
+    appendApprovalLog(record, '\u5b8c\u6210', user, 'Workflow approved', currentStep);
+  }
+
+  return record;
+}
+
 async function findAccount(username) {
   if (username === superAdmin.username) return superAdmin;
 
@@ -899,14 +1182,12 @@ function parseAiSuggestion(rawText) {
 }
 
 function toPublicRecord(record, user) {
-  if (!record.aiSuggestion || user?.role === 'developer') {
-    return record;
-  }
-
-  const { rawText, ...aiSuggestion } = record.aiSuggestion;
   return {
     ...record,
-    aiSuggestion,
+    currentUserCanApprove: canUserApproveRecord(user, record),
+    ...(record.aiSuggestion && user?.role !== 'developer'
+      ? { aiSuggestion: (({ rawText, ...aiSuggestion }) => aiSuggestion)(record.aiSuggestion) }
+      : {}),
   };
 }
 
@@ -1241,6 +1522,73 @@ app.get('/api/workflow-templates', authenticate, requireRoles('developer'), asyn
   }
 });
 
+app.post('/api/workflow-templates', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const name = normalizeWorkflowText(req.body?.name);
+    const moduleName = normalizeWorkflowText(req.body?.moduleName);
+    const approvalTypeName = normalizeWorkflowText(req.body?.approvalTypeName);
+
+    if (!name || !moduleName || !approvalTypeName) {
+      return res.status(400).json({ error: 'missing workflow template fields' });
+    }
+
+    const now = new Date().toISOString();
+    const template = await updateWorkflowTemplates((templates) => {
+      const duplicated = templates.some((item) => (
+        normalizeWorkflowText(item.moduleName) === moduleName &&
+        normalizeWorkflowText(item.approvalTypeName) === approvalTypeName &&
+        item.status !== 'disabled'
+      ));
+
+      if (duplicated) {
+        throw createHttpError('workflow template already exists for this business type', 409);
+      }
+
+      const draft = {
+        id: `draft-${Date.now()}`,
+        version: 1,
+        status: 'draft',
+        basic: {
+          name,
+          moduleName,
+          approvalTypeName,
+          visibleRange: 'all',
+        },
+        formFields: [],
+        nodes: [
+          {
+            id: 'node-start',
+            type: 'start',
+            title: '\u53d1\u8d77\u4eba',
+            subtitle: 'Applicant',
+          },
+        ],
+        savedAt: now,
+        savedBy: req.user.name,
+      };
+
+      const nextTemplate = {
+        id: `workflow-${Date.now()}`,
+        name,
+        moduleName,
+        approvalTypeName,
+        status: 'draft',
+        currentVersion: 1,
+        draft,
+        updatedAt: now,
+        updatedBy: req.user.name,
+      };
+
+      templates.unshift(nextTemplate);
+      return nextTemplate;
+    });
+
+    res.status(201).json(template);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/workflow-templates/:id', authenticate, requireRoles('developer'), async (req, res, next) => {
   try {
     const templates = await readWorkflowTemplates();
@@ -1314,6 +1662,9 @@ app.post('/api/workflow-templates/:id/publish', authenticate, requireRoles('deve
       }
 
       const published = JSON.parse(JSON.stringify(existing.draft));
+      if (getLinearApproverNodes(published).length === 0) {
+        throw createHttpError('workflow must contain at least one linear approval step before publishing', 400);
+      }
       published.status = 'published';
       published.publishedAt = now;
       published.savedAt = existing.draft.savedAt || now;
@@ -1325,6 +1676,36 @@ app.post('/api/workflow-templates/:id/publish', authenticate, requireRoles('deve
       existing.updatedAt = now;
       existing.updatedBy = req.user.name;
 
+      return existing;
+    });
+
+    res.json(template);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/workflow-templates/:id/status', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const status = normalizeWorkflowText(req.body?.status);
+    if (!['draft', 'published', 'disabled'].includes(status)) {
+      return res.status(400).json({ error: 'invalid workflow status' });
+    }
+
+    const template = await updateWorkflowTemplates((templates) => {
+      const existing = templates.find((item) => item.id === req.params.id);
+
+      if (!existing) {
+        throw createHttpError('workflow template not found', 404);
+      }
+
+      if (status === 'published' && !existing.publishedVersion) {
+        throw createHttpError('workflow must be published before it can be enabled', 400);
+      }
+
+      existing.status = status;
+      existing.updatedAt = new Date().toISOString();
+      existing.updatedBy = req.user.name;
       return existing;
     });
 
@@ -1754,18 +2135,26 @@ app.post('/api/records', authenticate, requireRoles('applicant'), async (req, re
     }
 
     const now = new Date().toISOString();
+    const workflow = await createWorkflowInstanceForRecord({
+      moduleName,
+      approvalTypeName,
+      applicantUsername: req.user.username,
+    });
     const record = await createBusinessRecord({
       id: `APP-${Date.now()}`,
       moduleName,
       approvalTypeName,
       businessData,
-      status: '待审批',
+      status: workflow.initialStatus,
       applicant,
+      workflowInstance: workflow.instance,
       aiSuggestion: createGeneratingAiSuggestion(),
       createdAt: now,
       updatedAt: now,
+      ...(workflow.initialStatus === STATUS_APPROVED ? { approvedAt: now } : {}),
       logs: [
-        createLog('发起申请', applicant, '提交了审批单'),
+        createLog('\u53d1\u8d77\u7533\u8bf7', applicant, '\u63d0\u4ea4\u4e86\u5ba1\u6279\u5355'),
+        createLog('\u5339\u914d\u5ba1\u6279\u6d41', 'system', `Matched workflow: ${workflow.instance.workflowName} v${workflow.instance.workflowVersion}`),
       ],
     });
 
@@ -1781,37 +2170,37 @@ app.patch('/api/records/:id/status', authenticate, requireRoles('approver', 'bos
     const { id } = req.params;
     const { status, approver, reason } = req.body || {};
 
-    if (!validStatuses.has(status)) {
+    if (!validStatuses.has(status) || ![STATUS_APPROVED, STATUS_REJECTED].includes(status)) {
       return res.status(400).json({ error: 'invalid approval status' });
     }
 
-    if (!approver) {
-      return res.status(400).json({ error: 'missing approver' });
-    }
-
-    if (req.user.role !== 'developer' && approver !== req.user.name) {
+    if (approver && req.user.role !== 'developer' && approver !== req.user.name) {
       return res.status(403).json({ error: 'approver does not match current user' });
     }
 
-    if (status === '已拒绝' && !String(reason || '').trim()) {
+    if (status === STATUS_REJECTED && !String(reason || '').trim()) {
       return res.status(400).json({ error: 'reject reason is required' });
     }
 
     const updatedRecord = await updateRecordById(id, (record) => {
-      if (record.status !== '待审批') {
+      if (record.status !== STATUS_PENDING) {
         const error = new Error('approval record has already been processed');
         error.statusCode = 409;
         throw error;
       }
 
+      if (record.workflowInstance) {
+        return advanceWorkflowRecord(record, req.user, status, reason);
+      }
+
       const now = new Date().toISOString();
       record.status = status;
       record.updatedAt = now;
-      record.approver = approver;
+      record.approver = approver || req.user.name;
 
-      if (status === '已批准') {
+      if (status === STATUS_APPROVED) {
         record.approvedAt = now;
-      } else if (status === '已拒绝') {
+      } else if (status === STATUS_REJECTED) {
         record.rejectedAt = now;
         record.rejectReason = String(reason).trim();
       }
@@ -1819,9 +2208,9 @@ app.patch('/api/records/:id/status', authenticate, requireRoles('approver', 'bos
       record.logs = [
         ...(record.logs || []),
         createLog(
-          status === '已批准' ? '批准' : '拒绝',
-          approver,
-          status === '已批准' ? '审批通过' : String(reason).trim(),
+          status === STATUS_APPROVED ? '\u6279\u51c6' : '\u62d2\u7edd',
+          approver || req.user.name,
+          status === STATUS_APPROVED ? '\u5ba1\u6279\u901a\u8fc7' : String(reason).trim(),
         ),
       ];
 

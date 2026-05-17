@@ -181,34 +181,56 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
 
   if (!record) return null;
 
-  const canReview = record.status === ApprovalStatus.PENDING && !!onApprove && !!onReject;
+  const canReview = record.status === ApprovalStatus.PENDING && record.currentUserCanApprove !== false && !!onApprove && !!onReject;
   const aiSuggestion = getAiSuggestionDisplay(record);
   const aiRawText = typeof record.aiSuggestion?.rawText === 'string' ? record.aiSuggestion.rawText.trim() : '';
   const finishedAt = record.approvedAt || record.rejectedAt;
-  const approvalTimeline = [
-    {
-      title: '发起申请',
-      desc: `发起人：${record.applicant}`,
-      time: record.createdAt,
-      state: 'done',
-    },
-    {
-      title: '审批人处理',
-      desc: record.status === ApprovalStatus.PENDING ? '待审批人处理' : `审批人：${record.approver || '系统审批员'}`,
-      time: finishedAt,
-      state: record.status === ApprovalStatus.PENDING ? 'active' : 'done',
-    },
-    {
-      title: record.status === ApprovalStatus.REJECTED ? '审批驳回' : '审批通过',
-      desc: record.status === ApprovalStatus.APPROVED
-        ? '审批流程已通过'
-        : (record.status === ApprovalStatus.REJECTED ? '审批流程已被拒绝' : '等待最终审批结果'),
-      time: finishedAt,
-      state: record.status === ApprovalStatus.APPROVED
-        ? 'done'
-        : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending'),
-    },
-  ];
+  const workflowSteps = record.workflowInstance?.steps;
+  const approvalTimeline = workflowSteps?.length
+    ? [
+        {
+          title: '发起申请',
+          desc: `发起人：${record.applicant}`,
+          time: record.createdAt,
+          state: 'done',
+        },
+        ...workflowSteps.map((step) => ({
+          title: step.name,
+          desc: [
+            `审批人：${step.approvers.map((approver) => approver.name).join('、') || '未解析'}`,
+            step.actedByName ? `操作人：${step.actedByName}` : '',
+            step.comment ? `意见：${step.comment}` : '',
+          ].filter(Boolean).join(' ｜ '),
+          time: step.actedAt,
+          state: step.status === 'approved' || step.status === 'skipped'
+            ? 'done'
+            : (step.status === 'pending' ? 'active' : (step.status === 'rejected' ? 'failed' : 'pending')),
+        })),
+      ]
+    : [
+        {
+          title: '发起申请',
+          desc: `发起人：${record.applicant}`,
+          time: record.createdAt,
+          state: 'done',
+        },
+        {
+          title: '审批人处理',
+          desc: record.status === ApprovalStatus.PENDING ? '待审批人处理' : `审批人：${record.approver || '系统审批员'}`,
+          time: finishedAt,
+          state: record.status === ApprovalStatus.PENDING ? 'active' : 'done',
+        },
+        {
+          title: record.status === ApprovalStatus.REJECTED ? '审批驳回' : '审批通过',
+          desc: record.status === ApprovalStatus.APPROVED
+            ? '审批流程已通过'
+            : (record.status === ApprovalStatus.REJECTED ? '审批流程已被拒绝' : '等待最终审批结果'),
+          time: finishedAt,
+          state: record.status === ApprovalStatus.APPROVED
+            ? 'done'
+            : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending'),
+        },
+      ];
 
   const handleAttachmentDownload = async (attachment: ApprovalAttachment) => {
     try {

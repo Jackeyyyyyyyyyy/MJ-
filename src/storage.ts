@@ -9,6 +9,9 @@ import {
   ApprovalStatus,
   OrganizationDirectory,
   SystemAccount,
+  WorkflowTemplate,
+  WorkflowTemplateInput,
+  WorkflowVersion,
 } from './types';
 import { auth } from './auth';
 
@@ -132,6 +135,37 @@ export const storage = {
     return request<OrganizationDirectory>('/organization', {
       method: 'PUT',
       body: JSON.stringify(directory),
+    });
+  },
+
+  getWorkflowTemplates(): Promise<WorkflowTemplate[]> {
+    return request<WorkflowTemplate[]>('/workflow-templates');
+  },
+
+  createWorkflowTemplate(input: WorkflowTemplateInput): Promise<WorkflowTemplate> {
+    return request<WorkflowTemplate>('/workflow-templates', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateWorkflowDraft(id: string, draft: WorkflowVersion): Promise<WorkflowTemplate> {
+    return request<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(id)}/draft`, {
+      method: 'PATCH',
+      body: JSON.stringify({ draft }),
+    });
+  },
+
+  publishWorkflowTemplate(id: string): Promise<WorkflowTemplate> {
+    return request<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(id)}/publish`, {
+      method: 'POST',
+    });
+  },
+
+  setWorkflowTemplateStatus(id: string, status: WorkflowTemplate['status']): Promise<WorkflowTemplate> {
+    return request<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(id)}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
     });
   },
 

@@ -11,6 +11,8 @@ import {
   Home,
   LayoutDashboard,
   ShieldCheck,
+  Building2,
+  Workflow,
   X
 } from 'lucide-react';
 
@@ -23,6 +25,8 @@ interface SidebarProps {
   activeAdminView?: AdminView | null;
   onOpenAccountAdmin?: () => void;
   onOpenAiAssistant?: () => void;
+  onOpenOrganizationAdmin?: () => void;
+  onOpenWorkflowAdmin?: () => void;
   isOpen?: boolean;
   onClose?: () => void;
 }
@@ -36,6 +40,8 @@ export default function Sidebar({
   activeAdminView,
   onOpenAccountAdmin,
   onOpenAiAssistant,
+  onOpenOrganizationAdmin,
+  onOpenWorkflowAdmin,
   isOpen,
   onClose,
 }: SidebarProps) {
@@ -78,6 +84,18 @@ export default function Sidebar({
             label: '账号权限管理',
             icon: ShieldCheck,
             onClick: onOpenAccountAdmin,
+          },
+          {
+            id: 'organization',
+            label: '组织架构',
+            icon: Building2,
+            onClick: onOpenOrganizationAdmin,
+          },
+          {
+            id: 'workflows',
+            label: '审批流配置',
+            icon: Workflow,
+            onClick: onOpenWorkflowAdmin,
           },
         ]
       : []),

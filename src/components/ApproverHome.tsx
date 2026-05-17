@@ -48,7 +48,7 @@ export default function ApproverHome() {
 
   const loadData = async () => {
     const all = await storage.getRecords();
-    setPendingRecords(all.filter(r => r.status === ApprovalStatus.PENDING));
+    setPendingRecords(all.filter(r => r.status === ApprovalStatus.PENDING && r.currentUserCanApprove));
     setProcessedRecords(all.filter(r => r.status !== ApprovalStatus.PENDING));
   };
 
