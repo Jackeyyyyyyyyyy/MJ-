@@ -13,7 +13,6 @@ interface AppLayoutProps {
   activeAdminView?: AdminView | null;
   onOpenAccountAdmin: () => void;
   onOpenAiAssistant: () => void;
-  onOpenWorkflowDesigner: () => void;
   selectedModule?: string;
   selectedType?: string;
   onSelectType: (module: string, type: string) => void;
@@ -68,7 +67,6 @@ export default function AppLayout({
   activeAdminView,
   onOpenAccountAdmin,
   onOpenAiAssistant,
-  onOpenWorkflowDesigner,
   selectedModule,
   selectedType,
   onSelectType
@@ -99,10 +97,6 @@ export default function AppLayout({
         }}
         onOpenAiAssistant={() => {
           onOpenAiAssistant();
-          setIsSidebarOpen(false);
-        }}
-        onOpenWorkflowDesigner={() => {
-          onOpenWorkflowDesigner();
           setIsSidebarOpen(false);
         }}
         onSelectType={(m, t) => {

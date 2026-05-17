@@ -10,7 +10,6 @@ import ApprovalDetailModal from './components/ApprovalDetailModal';
 import ApprovalProgressModal from './components/ApprovalProgressModal';
 import AiPromptEditor from './components/AiPromptEditor';
 import AiAssistantHome from './components/AiAssistantHome';
-import WorkflowDesigner from './components/WorkflowDesigner';
 import { auth } from './auth';
 import { storage } from './storage';
 import { AdminView, Role, ApprovalRecord, ApprovalStatus } from './types';
@@ -61,12 +60,6 @@ export default function App() {
     setActiveAdminView('ai-assistant');
   };
 
-  const handleOpenWorkflowDesigner = () => {
-    setSelectedModule('');
-    setSelectedType('');
-    setActiveAdminView('workflow-designer');
-  };
-
   const loadDynamicRecords = async () => {
     if (selectedType) {
       const all = await storage.getRecords();
@@ -111,10 +104,6 @@ export default function App() {
 
     if (activeAdminView === 'ai-assistant' && canUseAiAssistant) {
       return <AiAssistantHome />;
-    }
-
-    if (activeAdminView === 'workflow-designer' && isSuperAdminPerspective) {
-      return <WorkflowDesigner />;
     }
 
     if (selectedType) {
@@ -182,7 +171,6 @@ export default function App() {
       activeAdminView={activeAdminView}
       onOpenAccountAdmin={handleOpenAccountAdmin}
       onOpenAiAssistant={handleOpenAiAssistant}
-      onOpenWorkflowDesigner={handleOpenWorkflowDesigner}
       selectedModule={selectedModule}
       selectedType={selectedType}
       onSelectType={handleSelectType}

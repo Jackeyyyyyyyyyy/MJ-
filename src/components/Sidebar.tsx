@@ -9,7 +9,6 @@ import {
   ChevronDown, 
   Layers, 
   Home,
-  GitBranch,
   LayoutDashboard,
   ShieldCheck,
   X
@@ -24,7 +23,6 @@ interface SidebarProps {
   activeAdminView?: AdminView | null;
   onOpenAccountAdmin?: () => void;
   onOpenAiAssistant?: () => void;
-  onOpenWorkflowDesigner?: () => void;
   isOpen?: boolean;
   onClose?: () => void;
 }
@@ -38,7 +36,6 @@ export default function Sidebar({
   activeAdminView,
   onOpenAccountAdmin,
   onOpenAiAssistant,
-  onOpenWorkflowDesigner,
   isOpen,
   onClose,
 }: SidebarProps) {
@@ -76,12 +73,6 @@ export default function Sidebar({
       : []),
     ...(isSuperAdminPerspective
       ? [
-          {
-            id: 'workflow-designer',
-            label: '审批流配置',
-            icon: GitBranch,
-            onClick: onOpenWorkflowDesigner,
-          },
           {
             id: 'accounts',
             label: '账号权限管理',

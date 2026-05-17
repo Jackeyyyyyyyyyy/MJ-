@@ -9,8 +9,6 @@ import {
   ApprovalStatus,
   OrganizationDirectory,
   SystemAccount,
-  WorkflowTemplate,
-  WorkflowVersion,
 } from './types';
 import { auth } from './auth';
 
@@ -123,27 +121,6 @@ export const storage = {
     return request<AiAssistantPromptConfig>('/ai-assistant/prompt', {
       method: 'PATCH',
       body: JSON.stringify({ prompt }),
-    });
-  },
-
-  getWorkflowTemplates(): Promise<WorkflowTemplate[]> {
-    return request<WorkflowTemplate[]>('/workflow-templates');
-  },
-
-  getWorkflowTemplate(id: string): Promise<WorkflowTemplate> {
-    return request<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(id)}`);
-  },
-
-  saveWorkflowDraft(id: string, draft: WorkflowVersion): Promise<WorkflowTemplate> {
-    return request<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(id)}/draft`, {
-      method: 'PATCH',
-      body: JSON.stringify({ draft }),
-    });
-  },
-
-  publishWorkflow(id: string): Promise<WorkflowTemplate> {
-    return request<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(id)}/publish`, {
-      method: 'POST',
     });
   },
 
