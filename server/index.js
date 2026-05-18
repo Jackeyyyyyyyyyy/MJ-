@@ -2223,12 +2223,8 @@ app.patch('/api/records/:id/status', authenticate, requireRoles('approver', 'bos
   }
 });
 
-app.delete('/api/records', authenticate, requireRoles('boss'), async (_req, res, next) => {
+app.delete('/api/records', authenticate, requireRoles('developer'), async (_req, res, next) => {
   try {
-    if (process.env.ENABLE_RECORD_DELETE !== 'true') {
-      return res.status(403).json({ error: 'record deletion is disabled' });
-    }
-
     await clearRecordFiles();
 
     res.status(204).end();

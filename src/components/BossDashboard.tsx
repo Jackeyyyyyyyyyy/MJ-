@@ -14,7 +14,9 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
-  XCircle
+  XCircle,
+  Trash2,
+  Loader2
 } from 'lucide-react';
 
 export default function BossDashboard() {
@@ -28,9 +30,13 @@ export default function BossDashboard() {
 
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+  const [isClearingRecords, setIsClearingRecords] = useState(false);
+  const [clearError, setClearError] = useState('');
   const [rejectReason, setRejectReason] = useState('');
 
   const user = auth.getCurrentUser();
+  const canClearRecords = user?.role === 'developer';
 
   const loadData = async () => {
     setAllRecords(await storage.getRecords());
@@ -73,6 +79,31 @@ export default function BossDashboard() {
     }
   };
 
+  const openClearConfirm = () => {
+    setClearError('');
+    setIsClearConfirmOpen(true);
+  };
+
+  const handleClearRecords = async () => {
+    setIsClearingRecords(true);
+    setClearError('');
+
+    try {
+      await storage.clearAll();
+      setSelectedRecord(null);
+      setShowDetail(false);
+      setShowProgress(false);
+      setSearchTerm('');
+      setFilterStatus('全部状态');
+      setIsClearConfirmOpen(false);
+      await loadData();
+    } catch (error) {
+      setClearError(error instanceof Error ? error.message : '清空审批记录失败');
+    } finally {
+      setIsClearingRecords(false);
+    }
+  };
+
   const filteredRecords = useMemo(() => {
     return allRecords.filter(r => {
       const matchSearch = r.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -112,9 +143,14 @@ export default function BossDashboard() {
 
       <div className="space-y-5">
         <div className="flex flex-col lg:flex-row gap-6 lg:items-center justify-between">
-          <h2 className="text-[20px] font-bold tracking-tight">流水明细</h2>
+          <div className="flex flex-col gap-1">
+            <h2 className="text-[20px] font-bold tracking-tight">流水明细</h2>
+            {canClearRecords && (
+              <p className="text-[12px] font-semibold text-medium-gray">超管可清空全部审批记录</p>
+            )}
+          </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <div className="relative group">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-light-silver w-3.5 h-3.5 transition-colors group-focus-within:text-black" />
               <input 
@@ -140,6 +176,18 @@ export default function BossDashboard() {
                 </button>
               ))}
             </div>
+
+            {canClearRecords && (
+              <button
+                type="button"
+                onClick={openClearConfirm}
+                disabled={stats.total === 0}
+                className="h-9 px-4 inline-flex items-center gap-2 rounded-xl bg-[#c62828] text-white text-[12px] font-bold shadow-sm transition-all hover:bg-[#a52121] disabled:cursor-not-allowed disabled:bg-light-silver disabled:text-medium-gray disabled:shadow-none"
+              >
+                <Trash2 size={15} strokeWidth={2.4} />
+                清空记录
+              </button>
+            )}
           </div>
         </div>
 
@@ -235,6 +283,59 @@ export default function BossDashboard() {
                 </button>
                 <button onClick={() => setIsRejecting(false)} className="w-full h-[44px] text-[15px] font-semibold text-medium-gray hover:text-midnight-graphite">
                   返回
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isClearConfirmOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => !isClearingRecords && setIsClearConfirmOpen(false)}
+              className="absolute inset-0 bg-midnight-graphite/45 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, y: 10 }}
+              className="bg-pure-white rounded-apple-img w-full max-w-md relative p-10 shadow-apple-xl text-center"
+            >
+              <div className="w-16 h-16 bg-[#ffebee] rounded-full flex items-center justify-center mx-auto mb-6 text-[#c62828]">
+                <Trash2 size={30} strokeWidth={2.2} />
+              </div>
+              <h3 className="text-[21px] font-bold text-midnight-graphite mb-3">清空全部审批记录</h3>
+              <p className="text-[15px] text-medium-gray mb-3 px-2 font-medium leading-relaxed">
+                将删除当前系统内所有审批流水、业务审批记录和审批进度信息。此操作完成后不可恢复。
+              </p>
+              <p className="text-[12px] font-bold text-[#c62828] mb-8">
+                当前将清空 {stats.total} 条记录
+              </p>
+              {clearError && (
+                <div className="mb-5 rounded-xl border border-[#ffcdd2] bg-[#ffebee]/70 px-4 py-3 text-left text-[13px] font-semibold text-[#c62828]">
+                  {clearError}
+                </div>
+              )}
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={handleClearRecords}
+                  disabled={isClearingRecords}
+                  className="btn-primary w-full bg-[#c62828] hover:bg-[#a52121] disabled:opacity-50"
+                >
+                  {isClearingRecords ? (
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <Loader2 size={16} className="animate-spin" />
+                      正在清空
+                    </span>
+                  ) : (
+                    '一键清空'
+                  )}
+                </button>
+                <button
+                  onClick={() => setIsClearConfirmOpen(false)}
+                  disabled={isClearingRecords}
+                  className="w-full h-[44px] text-[15px] font-semibold text-medium-gray hover:text-midnight-graphite disabled:opacity-50"
+                >
+                  取消
                 </button>
               </div>
             </motion.div>
