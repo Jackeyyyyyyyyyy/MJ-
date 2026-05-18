@@ -245,6 +245,20 @@ async function authenticate(req, res, next) {
     const authorization = req.get('authorization') || '';
     const match = authorization.match(/^Bearer\s+(.+)$/i);
     user = match ? await verifyToken(match[1]) : null;
+
+    if (user?.role === 'developer') {
+      const impersonatedUsername = String(req.get('x-mj-impersonate') || '').trim();
+      if (impersonatedUsername && impersonatedUsername !== user.username) {
+        const impersonatedUser = await findAccount(impersonatedUsername);
+        if (!impersonatedUser || impersonatedUser.role === 'developer') {
+          return res.status(403).json({ error: 'invalid impersonated account' });
+        }
+
+        req.sessionUser = user;
+        req.impersonatedUser = toPublicUser(impersonatedUser);
+        user = req.impersonatedUser;
+      }
+    }
   } catch (error) {
     return next(error);
   }
@@ -253,6 +267,7 @@ async function authenticate(req, res, next) {
     return res.status(401).json({ error: 'authentication required' });
   }
 
+  req.sessionUser = req.sessionUser || user;
   req.user = user;
   next();
 }

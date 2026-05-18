@@ -126,7 +126,7 @@ function RecordButton({ record, onOpen }: RecordButtonProps) {
 
 export default function AiAssistantHome() {
   const user = auth.getCurrentUser();
-  const isDeveloperPerspective = user?.role === 'developer' && auth.getPerspective() === 'developer';
+  const isDeveloperPerspective = auth.getSessionUser()?.role === 'developer' && auth.getPerspective() === 'developer';
   const [overview, setOverview] = useState<AiAssistantOverview | null>(null);
   const [records, setRecords] = useState<ApprovalRecord[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -459,7 +459,7 @@ export default function AiAssistantHome() {
         record={selectedRecord}
         onClose={() => setSelectedRecord(null)}
         showAiSuggestion
-        showAiRawResponse={user?.role === 'developer'}
+        showAiRawResponse={isDeveloperPerspective}
       />
     </div>
   );

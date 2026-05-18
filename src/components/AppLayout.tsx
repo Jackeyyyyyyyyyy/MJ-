@@ -1,8 +1,9 @@
 import React from 'react';
 import { auth } from '../auth';
+import { storage } from '../storage';
 import Sidebar from './Sidebar';
-import { LogOut } from 'lucide-react';
-import { AdminView, Role } from '../types';
+import { ChevronDown, LogOut, Search, ShieldCheck, UserRound } from 'lucide-react';
+import { AdminView, Role, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -20,8 +21,6 @@ interface AppLayoutProps {
   onSelectType: (module: string, type: string) => void;
 }
 
-const PERSPECTIVE_ROLES: Role[] = ['applicant', 'approver', 'boss', 'developer'];
-
 function getPerspectiveLabel(role: Role) {
   switch(role) {
     case 'applicant': return '申请';
@@ -31,40 +30,169 @@ function getPerspectiveLabel(role: Role) {
   }
 }
 
-interface PerspectiveSwitcherProps {
-  perspective: Role | null;
-  onChange: (role: Role) => void;
+interface AccountSwitcherProps {
+  activeAccount: SystemAccount | null;
+  accounts: SystemAccount[];
+  isLoading: boolean;
+  onChange: (account: SystemAccount) => void;
 }
 
-function PerspectiveSwitcher({ perspective, onChange }: PerspectiveSwitcherProps) {
+function AccountSwitcher({ activeAccount, accounts, isLoading, onChange }: AccountSwitcherProps) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [query, setQuery] = React.useState('');
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const enabledAccounts = React.useMemo(
+    () => accounts.filter((account) => account.enabled || account.isSuperAdmin),
+    [accounts],
+  );
+  const filteredAccounts = React.useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return enabledAccounts;
+
+    return enabledAccounts.filter((account) => (
+      account.name.toLowerCase().includes(keyword)
+      || account.username.toLowerCase().includes(keyword)
+      || account.roleLabel.toLowerCase().includes(keyword)
+    ));
+  }, [enabledAccounts, query]);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    const handleClick = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [isOpen]);
+
+  const selectedAccount = activeAccount || enabledAccounts.find((account) => account.isSuperAdmin) || null;
+  const selectedLabel = selectedAccount?.isSuperAdmin ? '超管端' : selectedAccount?.name || '选择账号';
+  const selectedRole = selectedAccount?.isSuperAdmin ? '独立管理入口' : selectedAccount?.roleLabel || '账号视角';
+
   return (
-    <div
-      className="grid grid-cols-4 items-center gap-1 p-1 bg-lightest-gray-background rounded-apple-btn"
-      aria-label="超管视角切换"
-    >
-      {PERSPECTIVE_ROLES.map((role) => (
-        <button
-          key={role}
-          type="button"
-          onClick={() => onChange(role)}
-          aria-pressed={perspective === role}
-          className={cn(
-            "h-10 px-3 lg:px-5 text-[13px] lg:text-[12px] font-bold rounded-apple-btn transition-all whitespace-nowrap",
-            perspective === role
-              ? "bg-pure-white text-midnight-graphite shadow-sm"
-              : "text-medium-gray hover:text-midnight-graphite"
-          )}
-        >
-          {getPerspectiveLabel(role)}
-        </button>
-      ))}
+    <div ref={rootRef} className="relative w-[260px] max-w-full">
+      <button
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        className="w-full h-11 px-3 rounded-apple-btn bg-lightest-gray-background hover:bg-white border border-transparent hover:border-border-silver transition-all flex items-center justify-between gap-3 text-left"
+        aria-expanded={isOpen}
+        aria-label="切换账号"
+      >
+        <span className="flex items-center gap-3 min-w-0">
+          <span className="w-7 h-7 rounded-full bg-white text-midnight-graphite flex items-center justify-center shrink-0 shadow-sm">
+            {selectedAccount?.isSuperAdmin ? <ShieldCheck size={15} strokeWidth={2.4} /> : <UserRound size={15} strokeWidth={2.4} />}
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[13px] font-bold text-midnight-graphite truncate">{selectedLabel}</span>
+            <span className="block text-[11px] font-semibold text-medium-gray truncate">{selectedRole}</span>
+          </span>
+        </span>
+        <ChevronDown size={16} strokeWidth={2.4} className={cn("text-medium-gray transition-transform", isOpen && "rotate-180")} />
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            transition={{ duration: 0.18 }}
+            className="absolute left-0 top-[calc(100%+8px)] z-50 w-[320px] max-w-[calc(100vw-40px)] rounded-2xl border border-border-silver bg-white shadow-apple-xl overflow-hidden"
+          >
+            <div className="p-3 border-b border-border-silver">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-light-silver w-3.5 h-3.5" />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="搜索姓名、账号或角色"
+                  className="w-full h-10 rounded-xl bg-lightest-gray-background pl-9 pr-3 text-[13px] font-semibold outline-none focus:bg-white focus:ring-1 focus:ring-border-silver"
+                />
+              </div>
+            </div>
+
+            <div className="max-h-[320px] overflow-y-auto p-2">
+              {isLoading && (
+                <div className="px-3 py-5 text-center text-[12px] font-semibold text-medium-gray">正在加载账号...</div>
+              )}
+
+              {!isLoading && filteredAccounts.length === 0 && (
+                <div className="px-3 py-5 text-center text-[12px] font-semibold text-medium-gray">没有匹配账号</div>
+              )}
+
+              {!isLoading && filteredAccounts.map((account) => (
+                <button
+                  key={account.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(account);
+                    setQuery('');
+                    setIsOpen(false);
+                  }}
+                  className={cn(
+                    "w-full min-h-[56px] px-3 py-2 rounded-xl flex items-center gap-3 text-left transition-all",
+                    selectedAccount?.username === account.username
+                      ? "bg-interactive-blue text-white"
+                      : "text-midnight-graphite hover:bg-lightest-gray-background"
+                  )}
+                >
+                  <span className={cn(
+                    "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
+                    selectedAccount?.username === account.username ? "bg-white/20" : "bg-lightest-gray-background"
+                  )}>
+                    {account.isSuperAdmin ? <ShieldCheck size={16} strokeWidth={2.4} /> : <UserRound size={16} strokeWidth={2.4} />}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[13px] font-black truncate">
+                      {account.isSuperAdmin ? '超管端' : account.name}
+                    </span>
+                    <span className={cn(
+                      "block text-[11px] font-semibold truncate",
+                      selectedAccount?.username === account.username ? "text-white/75" : "text-medium-gray"
+                    )}>
+                      {account.username} · {account.isSuperAdmin ? '独立管理入口' : account.roleLabel}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-export default function AppLayout({ 
-  children, 
-  onLogout, 
+function MobileAccountSwitcher({ activeAccount, accounts, isLoading, onChange }: AccountSwitcherProps) {
+  const enabledAccounts = accounts.filter((account) => account.enabled || account.isSuperAdmin);
+
+  return (
+    <select
+      value={activeAccount?.username || ''}
+      onChange={(event) => {
+        const account = enabledAccounts.find((item) => item.username === event.target.value);
+        if (account) onChange(account);
+      }}
+      className="w-full h-11 px-3 rounded-apple-btn bg-lightest-gray-background text-[13px] font-bold text-midnight-graphite outline-none border border-border-silver"
+      aria-label="切换账号"
+      disabled={isLoading}
+    >
+      {enabledAccounts.map((account) => (
+        <option key={account.id} value={account.username}>
+          {account.isSuperAdmin ? '超管端' : `${account.name}（${account.roleLabel}）`}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+export default function AppLayout({
+  children,
+  onLogout,
   onPerspectiveChange,
   activeAdminView,
   onOpenAccountAdmin,
@@ -76,21 +204,49 @@ export default function AppLayout({
   onSelectType
 }: AppLayoutProps) {
   const user = auth.getCurrentUser();
+  const sessionUser = auth.getSessionUser();
   const perspective = auth.getPerspective();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
+  const [accounts, setAccounts] = React.useState<SystemAccount[]>([]);
+  const [isLoadingAccounts, setIsLoadingAccounts] = React.useState(false);
 
-  const handlePerspectiveChange = (role: Role) => {
-    auth.setPerspective(role);
-    onPerspectiveChange(role);
+  React.useEffect(() => {
+    if (sessionUser?.role !== 'developer') return;
+
+    let isMounted = true;
+    setIsLoadingAccounts(true);
+    storage.getAccounts()
+      .then((nextAccounts) => {
+        if (isMounted) setAccounts(nextAccounts);
+      })
+      .catch(() => {
+        if (isMounted) setAccounts([]);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingAccounts(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [sessionUser?.role]);
+
+  const handleAccountChange = (account: SystemAccount) => {
+    auth.setActiveAccount(account);
+    onPerspectiveChange(account.role);
   };
 
   const displayRole = getPerspectiveLabel(perspective || user?.role || 'applicant');
-  const isDeveloper = user?.role === 'developer';
+  const isDeveloper = sessionUser?.role === 'developer';
+  const activeAccount = React.useMemo(() => {
+    const activeUsername = user?.username;
+    return accounts.find((account) => account.username === activeUsername) || null;
+  }, [accounts, user?.username]);
 
   return (
     <div className="flex h-screen bg-canvas-white overflow-hidden relative">
-      <Sidebar 
-        currentPerspective={perspective || 'applicant'} 
+      <Sidebar
+        currentPerspective={perspective || 'applicant'}
         selectedModule={selectedModule}
         selectedType={selectedType}
         isSuperAdmin={isDeveloper}
@@ -119,7 +275,6 @@ export default function AppLayout({
         onClose={() => setIsSidebarOpen(false)}
       />
 
-      {/* Mobile Overlay */}
       <AnimatePresence>
         {isSidebarOpen && (
           <motion.div
@@ -135,8 +290,8 @@ export default function AppLayout({
       <div className="flex-1 flex flex-col min-w-0 relative h-full overflow-hidden">
         <header className="glass grow-0 shrink-0 z-30">
           <div className="h-16 lg:h-20 flex items-center justify-between px-6 lg:px-12">
-            <div className="flex items-center gap-4 lg:gap-6">
-              <button 
+            <div className="flex items-center gap-4 lg:gap-6 min-w-0">
+              <button
                 onClick={() => setIsSidebarOpen(true)}
                 className="w-10 h-10 flex items-center justify-center lg:hidden text-midnight-graphite"
               >
@@ -147,9 +302,11 @@ export default function AppLayout({
               </button>
               {isDeveloper && (
                 <div className="hidden sm:block">
-                  <PerspectiveSwitcher
-                    perspective={perspective}
-                    onChange={handlePerspectiveChange}
+                  <AccountSwitcher
+                    activeAccount={activeAccount}
+                    accounts={accounts}
+                    isLoading={isLoadingAccounts}
+                    onChange={handleAccountChange}
                   />
                 </div>
               )}
@@ -160,7 +317,7 @@ export default function AppLayout({
                 <div className="hidden sm:flex flex-col items-end">
                   <p className="text-[14px] font-semibold text-midnight-graphite tracking-tight leading-none">{displayRole}</p>
                 </div>
-                
+
                 <div className="w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-lightest-gray-background text-midnight-graphite flex items-center justify-center font-semibold text-[14px] transition-transform group-hover:scale-95 duration-500">
                   {displayRole.charAt(0)}
                 </div>
@@ -168,7 +325,7 @@ export default function AppLayout({
 
               <div className="w-px h-4 bg-border-silver" />
 
-              <button 
+              <button
                 onClick={onLogout}
                 className="w-10 h-10 lg:w-11 lg:h-11 flex items-center justify-center text-medium-gray hover:text-interactive-blue transition-all duration-300"
                 title="退出登录"
@@ -180,9 +337,11 @@ export default function AppLayout({
 
           {isDeveloper && (
             <div className="sm:hidden px-5 pb-3">
-              <PerspectiveSwitcher
-                perspective={perspective}
-                onChange={handlePerspectiveChange}
+              <MobileAccountSwitcher
+                activeAccount={activeAccount}
+                accounts={accounts}
+                isLoading={isLoadingAccounts}
+                onChange={handleAccountChange}
               />
             </div>
           )}

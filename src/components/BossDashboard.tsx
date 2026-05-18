@@ -36,7 +36,7 @@ export default function BossDashboard() {
   const [rejectReason, setRejectReason] = useState('');
 
   const user = auth.getCurrentUser();
-  const canClearRecords = user?.role === 'developer';
+  const canClearRecords = auth.getSessionUser()?.role === 'developer' && auth.getPerspective() === 'developer';
 
   const loadData = async () => {
     setAllRecords(await storage.getRecords());
@@ -207,7 +207,7 @@ export default function BossDashboard() {
           record={selectedRecord}
           onClose={() => { if(!isRejecting && !isApproving) setSelectedRecord(null); setShowDetail(false); }}
           showAiSuggestion
-          showAiRawResponse={user?.role === 'developer'}
+          showAiRawResponse={canClearRecords}
           onApprove={selectedRecord.currentUserCanApprove ? openApproveConfirm : undefined}
           onReject={selectedRecord.currentUserCanApprove ? openRejectConfirm : undefined}
         />

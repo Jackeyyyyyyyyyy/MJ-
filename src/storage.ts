@@ -20,13 +20,19 @@ type UploadInput = Pick<ApprovalAttachment, 'name' | 'type' | 'size'> & {
   data: string;
 };
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+interface RequestOptions {
+  skipImpersonation?: boolean;
+}
+
+async function request<T>(path: string, options?: RequestInit, requestOptions?: RequestOptions): Promise<T> {
   const token = auth.getToken();
+  const impersonatedUsername = requestOptions?.skipImpersonation ? null : auth.getImpersonatedUsername();
   const response = await fetch(`/api${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(impersonatedUsername ? { 'X-MJ-Impersonate': impersonatedUsername } : {}),
       ...options?.headers,
     },
   });
@@ -72,7 +78,7 @@ export const storage = {
   },
 
   getAccounts(): Promise<SystemAccount[]> {
-    return request<SystemAccount[]>('/accounts');
+    return request<SystemAccount[]>('/accounts', undefined, { skipImpersonation: true });
   },
 
   createAccount(account: AccountInput): Promise<SystemAccount> {

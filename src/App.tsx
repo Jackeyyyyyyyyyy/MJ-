@@ -109,7 +109,7 @@ export default function App() {
   }
 
   const renderContent = () => {
-    const isSuperAdminPerspective = auth.getCurrentUser()?.role === 'developer' && perspective === 'developer';
+    const isSuperAdminPerspective = auth.getSessionUser()?.role === 'developer' && perspective === 'developer';
     const canUseAiAssistant = perspective === 'boss' || isSuperAdminPerspective;
 
     if (activeAdminView === 'accounts' && isSuperAdminPerspective) {
@@ -130,7 +130,7 @@ export default function App() {
 
     if (selectedType) {
       const canReview = perspective === 'approver' || perspective === 'boss';
-      const canSeeAiSuggestion = canReview || auth.getCurrentUser()?.role === 'developer';
+      const canSeeAiSuggestion = canReview || isSuperAdminPerspective;
 
       return (
         <div className="space-y-6">
@@ -161,7 +161,7 @@ export default function App() {
             record={selectedOne}
             onClose={() => { setSelectedOne(null); setShowD(false); }}
             showAiSuggestion={canSeeAiSuggestion}
-            showAiRawResponse={auth.getCurrentUser()?.role === 'developer'}
+            showAiRawResponse={isSuperAdminPerspective}
             onApprove={canReview && selectedOne?.currentUserCanApprove ? (record) => { setShowD(false); void handleDynamicApprove(record); } : undefined}
             onReject={canReview && selectedOne?.currentUserCanApprove ? (record) => { setShowD(false); void handleDynamicReject(record); } : undefined}
           />
