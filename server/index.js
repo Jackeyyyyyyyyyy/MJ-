@@ -1619,6 +1619,25 @@ app.get('/api/workflow-templates/:id', authenticate, requireRoles('developer'), 
   }
 });
 
+app.delete('/api/workflow-templates/:id', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    await updateWorkflowTemplates((templates) => {
+      const index = templates.findIndex((item) => item.id === req.params.id);
+
+      if (index < 0) {
+        throw createHttpError('workflow template not found', 404);
+      }
+
+      templates.splice(index, 1);
+      return null;
+    });
+
+    res.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.patch('/api/workflow-templates/:id/draft', authenticate, requireRoles('developer'), async (req, res, next) => {
   try {
     const draft = req.body?.draft;

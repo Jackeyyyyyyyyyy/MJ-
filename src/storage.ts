@@ -175,6 +175,12 @@ export const storage = {
     });
   },
 
+  deleteWorkflowTemplate(id: string): Promise<void> {
+    return request<void>(`/workflow-templates/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+
   addRecord(record: NewApprovalRecord): Promise<ApprovalRecord> {
     return request<ApprovalRecord>('/records', {
       method: 'POST',

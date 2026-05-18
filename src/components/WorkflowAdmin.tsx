@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Plus, Save, Workflow, XCircle } from 'lucide-react';
+import { CheckCircle2, Plus, Save, Trash2, Workflow, XCircle } from 'lucide-react';
 import { approvalSchema } from '../approvalSchema';
 import { storage } from '../storage';
 import { ApproverRule, OrganizationDirectory, WorkflowNode, WorkflowTemplate, WorkflowVersion } from '../types';
@@ -171,6 +171,26 @@ export default function WorkflowAdmin() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!selectedTemplate) return;
+
+    const confirmed = window.confirm(`确认删除审批流「${selectedTemplate.name}」？已发起的历史申请不会被删除。`);
+    if (!confirmed) return;
+
+    setMessage('');
+    try {
+      await storage.deleteWorkflowTemplate(selectedTemplate.id);
+      const nextTemplates = templates.filter((template) => template.id !== selectedTemplate.id);
+      const nextSelected = nextTemplates[0] || null;
+      setTemplates(nextTemplates);
+      setSelectedId(nextSelected?.id || '');
+      setDraft(nextSelected ? JSON.parse(JSON.stringify(nextSelected.draft)) : null);
+      setMessage('审批流已删除');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '删除失败');
+    }
+  };
+
   const patchDraft = (patch: Partial<WorkflowVersion>) => {
     setDraft((current) => current ? { ...current, ...patch } : current);
   };
@@ -321,6 +341,9 @@ export default function WorkflowAdmin() {
                       <XCircle size={14} />禁用
                     </button>
                   )}
+                  <button onClick={handleDelete} className="h-10 px-4 rounded-full bg-white border border-[#f1c7c7] text-[#c62828] text-[12px] font-bold flex items-center gap-2">
+                    <Trash2 size={14} />删除
+                  </button>
                 </div>
               </div>
 
