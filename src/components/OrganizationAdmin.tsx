@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, Plus, Save, Users } from 'lucide-react';
 import { storage } from '../storage';
 import { OrganizationDepartment, OrganizationDirectory, OrganizationMember, OrganizationRoleGroup, SystemAccount } from '../types';
@@ -80,10 +80,10 @@ function OrgChartNodeCard({ node }: { node: OrgChartNode }) {
   const hasWarning = node.hasMissingSupervisor || node.hasCycle || !isBound;
 
   return (
-    <div className="flex flex-col items-center">
+    <div className="flex flex-col items-center shrink-0">
       <div
         className={cn(
-          "w-[190px] min-h-[112px] rounded-2xl border bg-white p-4 shadow-sm flex flex-col gap-2",
+          "w-[210px] min-h-[118px] rounded-2xl border-2 bg-white p-4 shadow-sm flex flex-col gap-2",
           hasWarning ? "border-[#f0c36a]" : "border-border-silver",
           (node.hasMissingSupervisor || node.hasCycle) && "border-[#c62828]"
         )}
@@ -114,15 +114,99 @@ function OrgChartNodeCard({ node }: { node: OrgChartNode }) {
       </div>
 
       {node.children.length > 0 && (
-        <>
-          <div className="h-6 w-px bg-border-silver" />
-          <div className="flex items-start gap-5">
+        <div className="flex flex-col items-center">
+          <div className="h-8 w-[3px] bg-slate-300 rounded-full" />
+          <div className="relative flex items-start gap-8 pt-8">
+            {node.children.length > 1 && (
+              <div className="absolute left-[105px] right-[105px] top-0 h-[3px] bg-slate-300 rounded-full" />
+            )}
             {node.children.map((child) => (
-              <OrgChartNodeCard key={`${member.id}-${child.member.id}`} node={child} />
+              <div key={`${member.id}-${child.member.id}`} className="relative flex flex-col items-center shrink-0">
+                <div className="absolute left-1/2 top-[-32px] h-8 w-[3px] -translate-x-1/2 bg-slate-300 rounded-full" />
+                <OrgChartNodeCard node={child} />
+              </div>
             ))}
           </div>
-        </>
+        </div>
       )}
+    </div>
+  );
+}
+
+function OrgChartCanvas({ roots }: { roots: OrgChartNode[] }) {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef({
+    isDragging: false,
+    startX: 0,
+    startY: 0,
+    scrollLeft: 0,
+    scrollTop: 0,
+  });
+  const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2);
+  }, [roots]);
+
+  const beginDrag = (clientX: number, clientY: number) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    dragStateRef.current = {
+      isDragging: true,
+      startX: clientX,
+      startY: clientY,
+      scrollLeft: viewport.scrollLeft,
+      scrollTop: viewport.scrollTop,
+    };
+    setIsDragging(true);
+  };
+
+  const updateDrag = (clientX: number, clientY: number) => {
+    const viewport = viewportRef.current;
+    const dragState = dragStateRef.current;
+    if (!viewport || !dragState.isDragging) return;
+
+    viewport.scrollLeft = dragState.scrollLeft - (clientX - dragState.startX);
+    viewport.scrollTop = dragState.scrollTop - (clientY - dragState.startY);
+  };
+
+  const endDrag = () => {
+    dragStateRef.current.isDragging = false;
+    setIsDragging(false);
+  };
+
+  return (
+    <div
+      ref={viewportRef}
+      className={cn(
+        "relative h-[620px] overflow-auto bg-canvas-white px-10 py-12 select-none",
+        isDragging ? "cursor-grabbing" : "cursor-grab"
+      )}
+      onMouseDown={(event) => beginDrag(event.clientX, event.clientY)}
+      onMouseMove={(event) => updateDrag(event.clientX, event.clientY)}
+      onMouseUp={endDrag}
+      onMouseLeave={endDrag}
+      onTouchStart={(event) => {
+        const touch = event.touches[0];
+        if (touch) beginDrag(touch.clientX, touch.clientY);
+      }}
+      onTouchMove={(event) => {
+        const touch = event.touches[0];
+        if (touch) updateDrag(touch.clientX, touch.clientY);
+      }}
+      onTouchEnd={endDrag}
+    >
+      <div className="pointer-events-none absolute right-5 top-5 z-10 rounded-full bg-white/90 px-3 py-1.5 text-[11px] font-black text-medium-gray shadow-sm border border-border-silver">
+        按住拖动查看完整架构
+      </div>
+      <div className="min-w-max min-h-full flex items-start justify-center gap-12 pt-4 pb-16">
+        {roots.map((node) => (
+          <OrgChartNodeCard key={node.member.id} node={node} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -309,13 +393,7 @@ export default function OrganizationAdmin() {
             暂无成员，添加成员后会自动生成组织架构图。
           </div>
         ) : (
-          <div className="overflow-x-auto no-scrollbar bg-canvas-white px-8 py-10">
-            <div className="min-w-max flex items-start justify-center gap-8">
-              {chartRoots.map((node) => (
-                <OrgChartNodeCard key={node.member.id} node={node} />
-              ))}
-            </div>
-          </div>
+          <OrgChartCanvas roots={chartRoots} />
         )}
       </section>
 
