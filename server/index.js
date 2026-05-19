@@ -32,7 +32,7 @@ const STEP_PENDING = 'pending';
 const STEP_APPROVED = 'approved';
 const STEP_REJECTED = 'rejected';
 const STEP_SKIPPED = 'skipped';
-const managedRoles = new Set(['applicant', 'approver', 'boss']);
+const managedRoles = new Set(['employee', 'boss']);
 const defaultAiAssistantPrompt =
   '你是 MJ 审批系统的管理助手，只做只读分析。你负责总结审批风险、发现异常、解释待办优先级，并引用相关审批单。不得编造数据，不得替用户做审批决定，不得建议绕过流程。回答要先给简短结论，再列关键原因；如果涉及具体单据，请在 relatedRecordIds 中返回对应 recordId。';
 const defaultAiPromptBase =
@@ -111,25 +111,36 @@ const superAdmin = {
   isSuperAdmin: true,
 };
 
+function normalizeRole(role) {
+  const value = String(role || '').trim();
+  if (value === 'applicant' || value === 'approver' || value === 'employee') return 'employee';
+  if (value === 'boss') return 'boss';
+  if (value === 'developer') return 'developer';
+  return value;
+}
+
+function isManagedRole(role) {
+  return managedRoles.has(normalizeRole(role));
+}
+
 const roleLabels = {
-  applicant: '申请',
-  approver: '审批',
+  employee: '员工',
+  applicant: '员工',
+  approver: '员工',
   boss: '老板',
   developer: '超管',
 };
 
 const rolePermissions = {
-  applicant: [
+  employee: [
     { key: 'record:create', label: '创建申请' },
     { key: 'record:own:read', label: '查看本人申请' },
-  ],
-  approver: [
-    { key: 'record:read', label: '查看审批记录' },
-    { key: 'record:review', label: '审批处理' },
+    { key: 'record:assigned:review', label: '处理分配给自己的审批' },
   ],
   boss: [
+    { key: 'record:create', label: '创建申请' },
     { key: 'record:read:all', label: '查看全部申请' },
-    { key: 'record:review:all', label: '管理审批结果' },
+    { key: 'record:assigned:review', label: '处理分配给自己的审批' },
     { key: 'ai:assistant:read', label: '使用AI管理助手' },
   ],
   developer: [
@@ -146,9 +157,10 @@ const rolePermissions = {
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '30mb' }));
 
 function toPublicUser(user) {
+  const role = normalizeRole(user.role);
   return {
     username: user.username,
-    role: user.role,
+    role,
     name: user.name,
   };
 }
@@ -170,15 +182,16 @@ function verifyPassword(password, passwordHash) {
 }
 
 function toPublicAccount(account) {
+  const role = normalizeRole(account.role);
   return {
     id: account.id,
     username: account.username,
-    role: account.role,
+    role,
     name: account.name,
-    roleLabel: roleLabels[account.role] || account.role,
-    permissions: rolePermissions[account.role] || [],
-    canSwitchPerspective: account.role === 'developer',
-    isSuperAdmin: account.role === 'developer',
+    roleLabel: roleLabels[role] || role,
+    permissions: rolePermissions[role] || [],
+    canSwitchPerspective: role === 'developer',
+    isSuperAdmin: role === 'developer',
     enabled: account.enabled !== false,
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,
@@ -191,11 +204,12 @@ function sign(value) {
 
 function createToken(user) {
   const expiresAt = Date.now() + tokenTtlMs;
+  const publicUser = toPublicUser(user);
   const payload = Buffer.from(
     JSON.stringify({
-      sub: user.username,
-      role: user.role,
-      name: user.name,
+      sub: publicUser.username,
+      role: publicUser.role,
+      name: publicUser.name,
       exp: expiresAt,
     }),
   ).toString('base64url');
@@ -250,7 +264,7 @@ async function authenticate(req, res, next) {
       const impersonatedUsername = String(req.get('x-mj-impersonate') || '').trim();
       if (impersonatedUsername && impersonatedUsername !== user.username) {
         const impersonatedUser = await findAccount(impersonatedUsername);
-        if (!impersonatedUser || impersonatedUser.role === 'developer') {
+        if (!impersonatedUser || normalizeRole(impersonatedUser.role) === 'developer') {
           return res.status(403).json({ error: 'invalid impersonated account' });
         }
 
@@ -274,7 +288,9 @@ async function authenticate(req, res, next) {
 
 function requireRoles(...roles) {
   return (req, res, next) => {
-    if (req.user?.role === 'developer' || roles.includes(req.user?.role)) {
+    const userRole = normalizeRole(req.user?.role);
+    const allowedRoles = roles.map(normalizeRole);
+    if (userRole === 'developer' || allowedRoles.includes(userRole)) {
       return next();
     }
 
@@ -443,8 +459,8 @@ async function ensureAccountsFile() {
     await fs.access(accountsFile);
   } catch {
     const seedAccounts = [
-      createSeedAccount('applicant', 'applicant', '张申请'),
-      createSeedAccount('approver', 'approver', '李审批'),
+      createSeedAccount('applicant', 'employee', '张申请'),
+      createSeedAccount('approver', 'employee', '李审批'),
       createSeedAccount('boss', 'boss', '王老板'),
     ];
     await fs.writeFile(accountsFile, `${JSON.stringify(seedAccounts, null, 2)}\n`, 'utf8');
@@ -992,13 +1008,34 @@ function canUserApproveRecord(user, record) {
 
   const currentStep = getCurrentWorkflowStep(record);
   if (!record.workflowInstance) {
-    return ['approver', 'boss', 'developer'].includes(user.role);
+    return ['boss', 'developer'].includes(normalizeRole(user.role));
   }
 
   if (!currentStep) return false;
   return (currentStep.approvers || []).some((approver) => (
     normalizeWorkflowText(approver.accountUsername).toLowerCase() === normalizeWorkflowText(user.username).toLowerCase()
   ));
+}
+
+function hasUserHandledWorkflowRecord(user, record) {
+  if (!user || !record?.workflowInstance?.steps) return false;
+
+  return record.workflowInstance.steps.some((step) => (
+    normalizeWorkflowText(step.actedByAccountUsername).toLowerCase() === normalizeWorkflowText(user.username).toLowerCase()
+  ));
+}
+
+function canUserSeeRecord(user, record) {
+  const role = normalizeRole(user?.role);
+  if (role === 'boss' || role === 'developer') return true;
+  if (!user) return false;
+
+  return (
+    record.applicant === user.name
+    || record.approver === user.name
+    || canUserApproveRecord(user, record)
+    || hasUserHandledWorkflowRecord(user, record)
+  );
 }
 
 function appendApprovalLog(record, action, user, details, step) {
@@ -1200,6 +1237,7 @@ function toPublicRecord(record, user) {
   return {
     ...record,
     currentUserCanApprove: canUserApproveRecord(user, record),
+    currentUserHasApproved: hasUserHandledWorkflowRecord(user, record) || record.approver === user?.name,
     ...(record.aiSuggestion && user?.role !== 'developer'
       ? { aiSuggestion: (({ rawText, ...aiSuggestion }) => aiSuggestion)(record.aiSuggestion) }
       : {}),
@@ -1914,10 +1952,10 @@ app.post('/api/accounts', authenticate, requireRoles('developer'), async (req, r
   try {
     const username = String(req.body?.username || '').trim();
     const name = String(req.body?.name || '').trim();
-    const role = String(req.body?.role || '').trim();
+    const role = normalizeRole(req.body?.role);
     const password = String(req.body?.password || '123456');
 
-    if (!username || !name || !managedRoles.has(role)) {
+    if (!username || !name || !isManagedRole(role)) {
       return res.status(400).json({ error: 'missing or invalid account fields' });
     }
 
@@ -1972,9 +2010,9 @@ app.patch('/api/accounts/:id', authenticate, requireRoles('developer'), async (r
 
       const nextUsername = req.body?.username === undefined ? account.username : String(req.body.username || '').trim();
       const nextName = req.body?.name === undefined ? account.name : String(req.body.name || '').trim();
-      const nextRole = req.body?.role === undefined ? account.role : String(req.body.role || '').trim();
+      const nextRole = normalizeRole(req.body?.role === undefined ? account.role : req.body.role);
 
-      if (!nextUsername || !nextName || !managedRoles.has(nextRole)) {
+      if (!nextUsername || !nextName || !isManagedRole(nextRole)) {
         const error = new Error('missing or invalid account fields');
         error.statusCode = 400;
         throw error;
@@ -2044,7 +2082,7 @@ app.post('/api/auth/login', async (req, res, next) => {
   }
 });
 
-app.post('/api/uploads', authenticate, requireRoles('applicant'), async (req, res, next) => {
+app.post('/api/uploads', authenticate, requireRoles('employee', 'boss'), async (req, res, next) => {
   try {
     const { files } = req.body || {};
 
@@ -2141,22 +2179,15 @@ app.get('/api/uploads/:id', authenticate, async (req, res, next) => {
 app.get('/api/records', authenticate, async (req, res, next) => {
   try {
     const records = await readRecords();
+    const visibleRecords = records.filter((record) => canUserSeeRecord(req.user, record));
 
-    if (req.user.role === 'applicant') {
-      return res.json(
-        records
-          .filter((record) => record.applicant === req.user.name)
-          .map((record) => toPublicRecord(record, req.user)),
-      );
-    }
-
-    res.json(records.map((record) => toPublicRecord(record, req.user)));
+    res.json(visibleRecords.map((record) => toPublicRecord(record, req.user)));
   } catch (error) {
     next(error);
   }
 });
 
-app.post('/api/records', authenticate, requireRoles('applicant'), async (req, res, next) => {
+app.post('/api/records', authenticate, requireRoles('employee', 'boss'), async (req, res, next) => {
   try {
     const { moduleName, approvalTypeName, businessData, applicant } = req.body || {};
 
@@ -2164,7 +2195,7 @@ app.post('/api/records', authenticate, requireRoles('applicant'), async (req, re
       return res.status(400).json({ error: 'missing required approval record fields' });
     }
 
-    if (req.user.role !== 'developer' && applicant !== req.user.name) {
+    if (normalizeRole(req.user.role) !== 'developer' && applicant !== req.user.name) {
       return res.status(403).json({ error: 'applicant does not match current user' });
     }
 
@@ -2199,7 +2230,7 @@ app.post('/api/records', authenticate, requireRoles('applicant'), async (req, re
   }
 });
 
-app.patch('/api/records/:id/status', authenticate, requireRoles('approver', 'boss'), async (req, res, next) => {
+app.patch('/api/records/:id/status', authenticate, requireRoles('employee', 'boss'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const { status, approver, reason } = req.body || {};
@@ -2208,7 +2239,7 @@ app.patch('/api/records/:id/status', authenticate, requireRoles('approver', 'bos
       return res.status(400).json({ error: 'invalid approval status' });
     }
 
-    if (approver && req.user.role !== 'developer' && approver !== req.user.name) {
+    if (approver && normalizeRole(req.user.role) !== 'developer' && approver !== req.user.name) {
       return res.status(403).json({ error: 'approver does not match current user' });
     }
 

@@ -60,7 +60,7 @@ export default function Sidebar({
   const menuItems = [
     { 
       id: 'home', 
-      label: currentPerspective === 'applicant' ? '我的申请台账' : (currentPerspective === 'approver' ? '审批任务中心' : '全局数据透视'),
+      label: currentPerspective === 'boss' || isSuperAdminPerspective ? '工作台与全局数据' : '员工工作台',
       icon: currentPerspective === 'boss' ? LayoutDashboard : Home,
       onClick: () => onSelectType('', '') 
     },

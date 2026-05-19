@@ -9,6 +9,23 @@ interface AuthSession {
   expiresAt: number;
 }
 
+export function normalizeRole(role?: string | null): Role {
+  if (role === 'applicant' || role === 'approver' || role === 'employee') return 'employee';
+  if (role === 'boss') return 'boss';
+  if (role === 'developer') return 'developer';
+  return 'employee';
+}
+
+function normalizeUser(user?: Partial<User> | null): User | null {
+  if (!user?.username || !user.name || !user.role) return null;
+
+  return {
+    username: user.username,
+    name: user.name,
+    role: normalizeRole(user.role),
+  };
+}
+
 function readSession(): AuthSession | null {
   const data = localStorage.getItem(AUTH_KEY);
   if (!data) return null;
@@ -29,7 +46,18 @@ function readSession(): AuthSession | null {
       return null;
     }
 
-    return session as AuthSession;
+    const normalizedUser = normalizeUser(session.user);
+    if (!normalizedUser) {
+      localStorage.removeItem(AUTH_KEY);
+      localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+      return null;
+    }
+
+    return {
+      token: session.token,
+      expiresAt: session.expiresAt,
+      user: normalizedUser,
+    } as AuthSession;
   } catch {
     localStorage.removeItem(AUTH_KEY);
     localStorage.removeItem('mj_current_perspective');
@@ -47,12 +75,13 @@ function readActiveAccount(): User | null {
 
   try {
     const account = JSON.parse(data) as Partial<User>;
-    if (!account.username || !account.name || !account.role || account.role === 'developer') {
+    const normalizedAccount = normalizeUser(account);
+    if (!normalizedAccount || normalizedAccount.role === 'developer') {
       localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
       return null;
     }
 
-    return account as User;
+    return normalizedAccount;
   } catch {
     localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
     return null;
@@ -72,9 +101,13 @@ export const auth = {
     if (!response.ok) return null;
 
     const session = await response.json() as AuthSession;
-    localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+    const normalizedSession = {
+      ...session,
+      user: normalizeUser(session.user) || session.user,
+    };
+    localStorage.setItem(AUTH_KEY, JSON.stringify(normalizedSession));
     localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
-    return session.user;
+    return normalizedSession.user;
   },
 
   logout() {
@@ -110,7 +143,8 @@ export const auth = {
     const sessionUser = this.getSessionUser();
     if (sessionUser?.role !== 'developer') return;
 
-    if (account.role === 'developer') {
+    const role = normalizeRole(account.role);
+    if (role === 'developer') {
       localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
       localStorage.setItem('mj_current_perspective', 'developer');
       return;
@@ -118,10 +152,10 @@ export const auth = {
 
     localStorage.setItem(ACTIVE_ACCOUNT_KEY, JSON.stringify({
       username: account.username,
-      role: account.role,
+      role,
       name: account.name,
     }));
-    localStorage.setItem('mj_current_perspective', account.role);
+    localStorage.setItem('mj_current_perspective', role);
   },
 
   getImpersonatedUsername(): string | null {

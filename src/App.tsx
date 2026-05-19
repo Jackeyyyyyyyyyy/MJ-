@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import LoginPage from './components/LoginPage';
 import AppLayout from './components/AppLayout';
-import ApplicantHome from './components/ApplicantHome';
-import ApproverHome from './components/ApproverHome';
-import BossDashboard from './components/BossDashboard';
+import WorkHome from './components/WorkHome';
 import AccountPermissionAdmin from './components/AccountPermissionAdmin';
 import OrganizationAdmin from './components/OrganizationAdmin';
 import WorkflowAdmin from './components/WorkflowAdmin';
@@ -129,7 +127,7 @@ export default function App() {
     }
 
     if (selectedType) {
-      const canReview = perspective === 'approver' || perspective === 'boss';
+      const canReview = perspective === 'employee' || perspective === 'boss';
       const canSeeAiSuggestion = canReview || isSuperAdminPerspective;
 
       return (
@@ -171,15 +169,13 @@ export default function App() {
     }
 
     switch (perspective) {
-      case 'applicant':
-        return <ApplicantHome />;
-      case 'approver':
-        return <ApproverHome />;
+      case 'employee':
+        return <WorkHome />;
       case 'boss':
       case 'developer':
-        return <BossDashboard />;
+        return <WorkHome showGlobal />;
       default:
-        return <ApplicantHome />;
+        return <WorkHome />;
     }
   };
 

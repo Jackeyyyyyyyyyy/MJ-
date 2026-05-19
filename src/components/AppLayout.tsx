@@ -23,8 +23,7 @@ interface AppLayoutProps {
 
 function getPerspectiveLabel(role: Role) {
   switch(role) {
-    case 'applicant': return '申请';
-    case 'approver': return '审批';
+    case 'employee': return '员工';
     case 'boss': return '老板';
     default: return '超管';
   }
@@ -236,7 +235,7 @@ export default function AppLayout({
     onPerspectiveChange(account.role);
   };
 
-  const displayRole = getPerspectiveLabel(perspective || user?.role || 'applicant');
+  const displayRole = getPerspectiveLabel(perspective || user?.role || 'employee');
   const isDeveloper = sessionUser?.role === 'developer';
   const activeAccount = React.useMemo(() => {
     const activeUsername = user?.username;
@@ -246,7 +245,7 @@ export default function AppLayout({
   return (
     <div className="flex h-screen bg-canvas-white overflow-hidden relative">
       <Sidebar
-        currentPerspective={perspective || 'applicant'}
+        currentPerspective={perspective || 'employee'}
         selectedModule={selectedModule}
         selectedType={selectedType}
         isSuperAdmin={isDeveloper}

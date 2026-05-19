@@ -12,7 +12,7 @@ export enum ApprovalStatus {
   REJECTED = '已拒绝',
 }
 
-export type Role = 'applicant' | 'approver' | 'boss' | 'developer';
+export type Role = 'employee' | 'boss' | 'developer';
 
 export type AdminView = 'accounts' | 'ai-assistant' | 'organization' | 'workflows';
 
@@ -299,6 +299,7 @@ export interface ApprovalRecord {
   applicant: string;
   workflowInstance?: WorkflowInstance;
   currentUserCanApprove?: boolean;
+  currentUserHasApproved?: boolean;
   aiSuggestion?: AiSuggestion;
   createdAt: string;
   updatedAt: string;

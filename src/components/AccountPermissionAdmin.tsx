@@ -16,22 +16,20 @@ interface AccountDraft {
 }
 
 const roleTone: Record<string, string> = {
-  applicant: 'bg-[#eef6ff] text-[#0066cc]',
-  approver: 'bg-[#fff7e6] text-[#9a5b00]',
+  employee: 'bg-[#eef6ff] text-[#0066cc]',
   boss: 'bg-[#e8f5e9] text-[#2e7d32]',
   developer: 'bg-black text-white',
 };
 
 const roleOptions: Array<{ value: ManagedRole; label: string }> = [
-  { value: 'applicant', label: '申请' },
-  { value: 'approver', label: '审批' },
+  { value: 'employee', label: '员工' },
   { value: 'boss', label: '老板' },
 ];
 
 const defaultAccount: AccountInput = {
   username: '',
   name: '',
-  role: 'applicant',
+  role: 'employee',
   password: '123456',
   enabled: true,
 };
