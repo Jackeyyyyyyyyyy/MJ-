@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Building2, Plus, Save, Users } from 'lucide-react';
+import { AlertCircle, Building2, GitBranch, Link2, Plus, Save, Trash2, UserRound, Users } from 'lucide-react';
 import { storage } from '../storage';
 import { OrganizationDepartment, OrganizationDirectory, OrganizationMember, OrganizationRoleGroup, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
@@ -10,19 +10,96 @@ const emptyDirectory: OrganizationDirectory = {
   roleGroups: [],
 };
 
+type ChartMode = 'departments' | 'reporting';
+
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
-interface OrgChartNode {
+function readSelectedValues(event: React.ChangeEvent<HTMLSelectElement>) {
+  return Array.from(event.currentTarget.selectedOptions, (option) => (option as HTMLOptionElement).value);
+}
+
+function getDepartmentName(directory: OrganizationDirectory, departmentId?: string) {
+  return directory.departments.find((department) => department.id === departmentId)?.name || '未配置部门';
+}
+
+function getMemberName(directory: OrganizationDirectory, memberId?: string) {
+  return directory.members.find((member) => member.id === memberId)?.name || '未配置成员';
+}
+
+interface DepartmentChartNode {
+  department: OrganizationDepartment;
+  children: DepartmentChartNode[];
+  leaders: OrganizationMember[];
+  memberCount: number;
+  boundCount: number;
+  hasMissingParent: boolean;
+  hasCycle: boolean;
+}
+
+interface ReportingChartNode {
   member: OrganizationMember;
   departmentName: string;
-  children: OrgChartNode[];
+  children: ReportingChartNode[];
   hasMissingSupervisor: boolean;
   hasCycle: boolean;
 }
 
-function buildOrgChart(directory: OrganizationDirectory) {
+function buildDepartmentChart(directory: OrganizationDirectory) {
+  const departmentsById = new Map(directory.departments.map((department) => [department.id, department]));
+  const childrenByParent = new Map<string, OrganizationDepartment[]>();
+
+  directory.departments.forEach((department) => {
+    if (!department.parentId || !departmentsById.has(department.parentId)) return;
+    const children = childrenByParent.get(department.parentId) || [];
+    children.push(department);
+    childrenByParent.set(department.parentId, children);
+  });
+
+  const visited = new Set<string>();
+  const createNode = (department: OrganizationDepartment, ancestors = new Set<string>()): DepartmentChartNode => {
+    const hasCycle = ancestors.has(department.id);
+    visited.add(department.id);
+    const members = directory.members.filter((member) => member.departmentId === department.id && member.enabled !== false);
+    const leaderIds = new Set(department.leaderIds || []);
+
+    if (hasCycle) {
+      return {
+        department,
+        children: [],
+        leaders: members.filter((member) => leaderIds.has(member.id)),
+        memberCount: members.length,
+        boundCount: members.filter((member) => Boolean(member.accountUsername)).length,
+        hasMissingParent: false,
+        hasCycle: true,
+      };
+    }
+
+    const nextAncestors = new Set(ancestors);
+    nextAncestors.add(department.id);
+
+    return {
+      department,
+      children: (childrenByParent.get(department.id) || []).map((child) => createNode(child, nextAncestors)),
+      leaders: members.filter((member) => leaderIds.has(member.id)),
+      memberCount: members.length,
+      boundCount: members.filter((member) => Boolean(member.accountUsername)).length,
+      hasMissingParent: Boolean(department.parentId && !departmentsById.has(department.parentId)),
+      hasCycle: false,
+    };
+  };
+
+  const rootDepartments = directory.departments.filter((department) => !department.parentId || !departmentsById.has(department.parentId));
+  const roots = (rootDepartments.length > 0 ? rootDepartments : directory.departments.slice(0, 1)).map((department) => createNode(department));
+  const detachedRoots = directory.departments
+    .filter((department) => !visited.has(department.id))
+    .map((department) => createNode(department));
+
+  return [...roots, ...detachedRoots];
+}
+
+function buildReportingChart(directory: OrganizationDirectory) {
   const departmentNames = new Map(directory.departments.map((department) => [department.id, department.name]));
   const membersById = new Map(directory.members.map((member) => [member.id, member]));
   const childrenBySupervisor = new Map<string, OrganizationMember[]>();
@@ -35,7 +112,7 @@ function buildOrgChart(directory: OrganizationDirectory) {
   });
 
   const visited = new Set<string>();
-  const createNode = (member: OrganizationMember, ancestors = new Set<string>()): OrgChartNode => {
+  const createNode = (member: OrganizationMember, ancestors = new Set<string>()): ReportingChartNode => {
     const hasCycle = ancestors.has(member.id);
     visited.add(member.id);
 
@@ -70,70 +147,99 @@ function buildOrgChart(directory: OrganizationDirectory) {
   return [...roots, ...detachedRoots];
 }
 
-function countChartNodes(nodes: OrgChartNode[]) {
-  return nodes.reduce((total, node) => total + 1 + countChartNodes(node.children), 0);
+function countDepartmentNodes(nodes: DepartmentChartNode[]): number {
+  return nodes.reduce((total, node) => total + 1 + countDepartmentNodes(node.children), 0);
 }
 
-function OrgChartNodeCard({ node }: { node: OrgChartNode }) {
-  const member = node.member;
-  const isBound = Boolean(member.accountUsername);
-  const hasWarning = node.hasMissingSupervisor || node.hasCycle || !isBound;
-
-  return (
-    <div className="flex flex-col items-center shrink-0">
-      <div
-        className={cn(
-          "w-[210px] min-h-[118px] rounded-2xl border-2 bg-white p-4 shadow-sm flex flex-col gap-2",
-          hasWarning ? "border-[#f0c36a]" : "border-border-silver",
-          (node.hasMissingSupervisor || node.hasCycle) && "border-[#c62828]"
-        )}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="w-9 h-9 rounded-xl bg-lightest-gray-background flex items-center justify-center text-[13px] font-black text-midnight-graphite shrink-0">
-            {member.name.charAt(0) || '?'}
-          </div>
-          <span
-            className={cn(
-              "px-2 py-1 rounded-full text-[10px] font-black whitespace-nowrap",
-              isBound ? "bg-[#e8f5e9] text-[#2e7d32]" : "bg-[#fff7e6] text-[#9a5b00]"
-            )}
-          >
-            {isBound ? '已绑定账号' : '未绑定账号'}
-          </span>
-        </div>
-        <div>
-          <p className="text-[15px] font-black text-midnight-graphite truncate">{member.name}</p>
-          <p className="text-[12px] font-bold text-medium-gray truncate">{member.title || '未配置职位'}</p>
-          <p className="text-[11px] font-bold text-light-gray truncate">{node.departmentName}</p>
-        </div>
-        {(node.hasMissingSupervisor || node.hasCycle) && (
-          <p className="text-[11px] font-bold text-[#c62828]">
-            {node.hasCycle ? '上级关系存在循环' : '上级不存在'}
-          </p>
-        )}
-      </div>
-
-      {node.children.length > 0 && (
-        <div className="flex flex-col items-center">
-          <div className="h-8 w-[3px] bg-slate-300 rounded-full" />
-          <div className="relative flex items-start gap-8 pt-8">
-            {node.children.length > 1 && (
-              <div className="absolute left-[105px] right-[105px] top-0 h-[3px] bg-slate-300 rounded-full" />
-            )}
-            {node.children.map((child) => (
-              <div key={`${member.id}-${child.member.id}`} className="relative flex flex-col items-center shrink-0">
-                <div className="absolute left-1/2 top-[-32px] h-8 w-[3px] -translate-x-1/2 bg-slate-300 rounded-full" />
-                <OrgChartNodeCard node={child} />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+function countReportingNodes(nodes: ReportingChartNode[]): number {
+  return nodes.reduce((total, node) => total + 1 + countReportingNodes(node.children), 0);
 }
 
-function OrgChartCanvas({ roots }: { roots: OrgChartNode[] }) {
+function hasDepartmentCycle(directory: OrganizationDirectory, departmentId: string) {
+  const departmentsById = new Map(directory.departments.map((department) => [department.id, department]));
+  const seen = new Set<string>();
+  let current = departmentsById.get(departmentId);
+
+  while (current?.parentId) {
+    if (seen.has(current.id)) return true;
+    seen.add(current.id);
+    current = departmentsById.get(current.parentId);
+  }
+
+  return false;
+}
+
+function hasMemberCycle(directory: OrganizationDirectory, memberId: string) {
+  const membersById = new Map(directory.members.map((member) => [member.id, member]));
+  const seen = new Set<string>();
+  let current = membersById.get(memberId);
+
+  while (current?.supervisorId) {
+    if (seen.has(current.id)) return true;
+    seen.add(current.id);
+    current = membersById.get(current.supervisorId);
+  }
+
+  return false;
+}
+
+function buildHealthMessages(directory: OrganizationDirectory) {
+  const messages: Array<{ tone: 'danger' | 'warning' | 'info'; text: string }> = [];
+  const departmentIds = new Set(directory.departments.map((department) => department.id));
+  const memberIds = new Set(directory.members.map((member) => member.id));
+  const accountOwners = new Map<string, string[]>();
+
+  directory.members.forEach((member) => {
+    if (member.accountUsername) {
+      accountOwners.set(member.accountUsername, [...(accountOwners.get(member.accountUsername) || []), member.name]);
+    }
+
+    if (!member.departmentId || !departmentIds.has(member.departmentId)) {
+      messages.push({ tone: 'danger', text: `${member.name} 未归属有效部门` });
+    }
+
+    if (member.supervisorId && !memberIds.has(member.supervisorId)) {
+      messages.push({ tone: 'danger', text: `${member.name} 的直属上级不存在` });
+    }
+
+    if (hasMemberCycle(directory, member.id)) {
+      messages.push({ tone: 'danger', text: `${member.name} 的汇报链路存在循环` });
+    }
+  });
+
+  accountOwners.forEach((owners, accountUsername) => {
+    if (owners.length > 1) {
+      messages.push({ tone: 'danger', text: `账号 ${accountUsername} 被重复绑定：${owners.join('、')}` });
+    }
+  });
+
+  directory.departments.forEach((department) => {
+    if (department.parentId && !departmentIds.has(department.parentId)) {
+      messages.push({ tone: 'danger', text: `${department.name} 的上级部门不存在` });
+    }
+
+    if (hasDepartmentCycle(directory, department.id)) {
+      messages.push({ tone: 'danger', text: `${department.name} 的部门层级存在循环` });
+    }
+
+    if ((department.leaderIds || []).some((leaderId) => !memberIds.has(leaderId))) {
+      messages.push({ tone: 'danger', text: `${department.name} 配置了不存在的部门负责人` });
+    }
+  });
+
+  const unboundMembers = directory.members.filter((member) => !member.accountUsername && member.enabled !== false);
+  if (unboundMembers.length > 0) {
+    messages.push({ tone: 'warning', text: `${unboundMembers.length} 名成员未绑定登录账号，不能直接处理审批任务` });
+  }
+
+  if (messages.length === 0) {
+    messages.push({ tone: 'info', text: '组织配置完整，可用于审批人解析' });
+  }
+
+  return messages;
+}
+
+function ChartViewport({ children }: { children: React.ReactNode }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef({
     isDragging: false,
@@ -148,7 +254,7 @@ function OrgChartCanvas({ roots }: { roots: OrgChartNode[] }) {
     const viewport = viewportRef.current;
     if (!viewport) return;
     viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2);
-  }, [roots]);
+  }, [children]);
 
   const beginDrag = (clientX: number, clientY: number) => {
     const viewport = viewportRef.current;
@@ -182,7 +288,7 @@ function OrgChartCanvas({ roots }: { roots: OrgChartNode[] }) {
     <div
       ref={viewportRef}
       className={cn(
-        "relative h-[620px] overflow-auto bg-canvas-white px-10 py-12 select-none",
+        "relative h-[560px] overflow-auto bg-canvas-white px-10 py-12 select-none",
         isDragging ? "cursor-grabbing" : "cursor-grab"
       )}
       onMouseDown={(event) => beginDrag(event.clientX, event.clientY)}
@@ -200,13 +306,168 @@ function OrgChartCanvas({ roots }: { roots: OrgChartNode[] }) {
       onTouchEnd={endDrag}
     >
       <div className="pointer-events-none absolute right-5 top-5 z-10 rounded-full bg-white/90 px-3 py-1.5 text-[11px] font-black text-medium-gray shadow-sm border border-border-silver">
-        按住拖动查看完整架构
+        按住拖动查看完整结构
       </div>
       <div className="min-w-max min-h-full flex items-start justify-center gap-12 pt-4 pb-16">
-        {roots.map((node) => (
-          <OrgChartNodeCard key={node.member.id} node={node} />
-        ))}
+        {children}
       </div>
+    </div>
+  );
+}
+
+function DepartmentChartCard({ node }: { node: DepartmentChartNode; key?: React.Key }) {
+  const warning = node.hasMissingParent || node.hasCycle;
+  const unboundCount = Math.max(0, node.memberCount - node.boundCount);
+
+  return (
+    <div className="flex flex-col items-center shrink-0">
+      <div className={cn(
+        "w-[230px] min-h-[126px] rounded-2xl border-2 bg-white p-4 shadow-sm flex flex-col gap-3",
+        warning ? "border-[#c62828]" : "border-border-silver"
+      )}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="w-10 h-10 rounded-xl bg-black text-white flex items-center justify-center shrink-0">
+            <Building2 size={18} strokeWidth={2.5} />
+          </div>
+          <span className="px-2 py-1 rounded-full bg-lightest-gray-background text-[10px] font-black text-medium-gray whitespace-nowrap">
+            {node.memberCount} 人
+          </span>
+        </div>
+        <div>
+          <p className="text-[16px] font-black text-midnight-graphite truncate">{node.department.name}</p>
+          <p className="text-[12px] font-bold text-medium-gray truncate">
+            负责人：{node.leaders.map((leader) => leader.name).join('、') || '未设置'}
+          </p>
+          <p className="text-[11px] font-bold text-light-gray truncate">
+            已绑定 {node.boundCount} / 未绑定 {unboundCount}
+          </p>
+        </div>
+        {warning && (
+          <p className="text-[11px] font-bold text-[#c62828]">
+            {node.hasCycle ? '部门层级存在循环' : '上级部门不存在'}
+          </p>
+        )}
+      </div>
+
+      {node.children.length > 0 && (
+        <div className="flex flex-col items-center">
+          <div className="h-8 w-[3px] bg-slate-300 rounded-full" />
+          <div className="relative flex items-start gap-8 pt-8">
+            {node.children.length > 1 && (
+              <div className="absolute left-[115px] right-[115px] top-0 h-[3px] bg-slate-300 rounded-full" />
+            )}
+            {node.children.map((child) => (
+              <div key={`${node.department.id}-${child.department.id}`} className="relative flex flex-col items-center shrink-0">
+                <div className="absolute left-1/2 top-[-32px] h-8 w-[3px] -translate-x-1/2 bg-slate-300 rounded-full" />
+                <DepartmentChartCard node={child} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReportingChartCard({ node }: { node: ReportingChartNode; key?: React.Key }) {
+  const member = node.member;
+  const isBound = Boolean(member.accountUsername);
+  const warning = node.hasMissingSupervisor || node.hasCycle;
+
+  return (
+    <div className="flex flex-col items-center shrink-0">
+      <div className={cn(
+        "w-[220px] min-h-[120px] rounded-2xl border-2 bg-white p-4 shadow-sm flex flex-col gap-2",
+        warning ? "border-[#c62828]" : (isBound ? "border-border-silver" : "border-[#f0c36a]")
+      )}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="w-9 h-9 rounded-xl bg-lightest-gray-background flex items-center justify-center text-[13px] font-black text-midnight-graphite shrink-0">
+            {member.name.charAt(0) || '?'}
+          </div>
+          <span className={cn(
+            "px-2 py-1 rounded-full text-[10px] font-black whitespace-nowrap",
+            isBound ? "bg-[#e8f5e9] text-[#2e7d32]" : "bg-[#fff7e6] text-[#9a5b00]"
+          )}>
+            {isBound ? '已绑定账号' : '未绑定账号'}
+          </span>
+        </div>
+        <div>
+          <p className="text-[15px] font-black text-midnight-graphite truncate">{member.name}</p>
+          <p className="text-[12px] font-bold text-medium-gray truncate">{member.title || '未配置职位'}</p>
+          <p className="text-[11px] font-bold text-light-gray truncate">{node.departmentName}</p>
+        </div>
+        {warning && (
+          <p className="text-[11px] font-bold text-[#c62828]">
+            {node.hasCycle ? '上级关系存在循环' : '上级不存在'}
+          </p>
+        )}
+      </div>
+
+      {node.children.length > 0 && (
+        <div className="flex flex-col items-center">
+          <div className="h-8 w-[3px] bg-slate-300 rounded-full" />
+          <div className="relative flex items-start gap-8 pt-8">
+            {node.children.length > 1 && (
+              <div className="absolute left-[110px] right-[110px] top-0 h-[3px] bg-slate-300 rounded-full" />
+            )}
+            {node.children.map((child) => (
+              <div key={`${member.id}-${child.member.id}`} className="relative flex flex-col items-center shrink-0">
+                <div className="absolute left-1/2 top-[-32px] h-8 w-[3px] -translate-x-1/2 bg-slate-300 rounded-full" />
+                <ReportingChartCard node={child} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DepartmentTreeItem({
+  node,
+  selectedId,
+  onSelect,
+  depth = 0,
+}: {
+  node: DepartmentChartNode;
+  selectedId: string;
+  onSelect: (id: string) => void;
+  depth?: number;
+  key?: React.Key;
+}) {
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => onSelect(node.department.id)}
+        className={cn(
+          "w-full min-h-10 rounded-xl px-3 py-2 text-left text-[13px] font-bold transition-all flex items-center gap-2",
+          selectedId === node.department.id ? "bg-black text-white" : "text-midnight-graphite hover:bg-lightest-gray-background"
+        )}
+        style={{ paddingLeft: `${12 + depth * 14}px` }}
+      >
+        <Building2 size={14} strokeWidth={2.4} className="shrink-0" />
+        <span className="truncate">{node.department.name}</span>
+        <span className={cn(
+          "ml-auto text-[10px] font-black",
+          selectedId === node.department.id ? "text-white/70" : "text-light-gray"
+        )}>
+          {node.memberCount}
+        </span>
+      </button>
+      {node.children.length > 0 && (
+        <div className="mt-1 space-y-1">
+          {node.children.map((child) => (
+            <DepartmentTreeItem
+              key={child.department.id}
+              node={child}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              depth={depth + 1}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -214,6 +475,8 @@ function OrgChartCanvas({ roots }: { roots: OrgChartNode[] }) {
 export default function OrganizationAdmin() {
   const [directory, setDirectory] = useState<OrganizationDirectory>(emptyDirectory);
   const [accounts, setAccounts] = useState<SystemAccount[]>([]);
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
+  const [chartMode, setChartMode] = useState<ChartMode>('departments');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -222,12 +485,19 @@ export default function OrganizationAdmin() {
     () => accounts.filter((account) => account.role !== 'developer' && account.enabled),
     [accounts],
   );
-  const chartRoots = useMemo(() => buildOrgChart(directory), [directory]);
-  const chartMemberCount = useMemo(() => countChartNodes(chartRoots), [chartRoots]);
+  const departmentChartRoots = useMemo(() => buildDepartmentChart(directory), [directory]);
+  const reportingChartRoots = useMemo(() => buildReportingChart(directory), [directory]);
+  const healthMessages = useMemo(() => buildHealthMessages(directory), [directory]);
+  const selectedDepartment = directory.departments.find((department) => department.id === selectedDepartmentId) || null;
+  const selectedDepartmentMembers = useMemo(
+    () => directory.members.filter((member) => member.departmentId === selectedDepartmentId),
+    [directory.members, selectedDepartmentId],
+  );
   const unboundMemberCount = useMemo(
-    () => directory.members.filter((member) => !member.accountUsername).length,
+    () => directory.members.filter((member) => !member.accountUsername && member.enabled !== false).length,
     [directory.members],
   );
+  const boundMemberCount = directory.members.filter((member) => Boolean(member.accountUsername)).length;
 
   const loadData = async () => {
     setIsLoading(true);
@@ -238,6 +508,7 @@ export default function OrganizationAdmin() {
       ]);
       setDirectory(nextDirectory);
       setAccounts(nextAccounts);
+      setSelectedDepartmentId((current) => current || nextDirectory.departments[0]?.id || '');
     } finally {
       setIsLoading(false);
     }
@@ -246,6 +517,17 @@ export default function OrganizationAdmin() {
   useEffect(() => {
     void loadData();
   }, []);
+
+  useEffect(() => {
+    if (!directory.departments.length) {
+      setSelectedDepartmentId('');
+      return;
+    }
+
+    if (!directory.departments.some((department) => department.id === selectedDepartmentId)) {
+      setSelectedDepartmentId(directory.departments[0].id);
+    }
+  }, [directory.departments, selectedDepartmentId]);
 
   const updateDepartment = (id: string, patch: Partial<OrganizationDepartment>) => {
     setDirectory((current) => ({
@@ -274,25 +556,42 @@ export default function OrganizationAdmin() {
     }));
   };
 
-  const addDepartment = () => {
+  const addDepartment = (parentId?: string) => {
+    const id = createId('dept');
     setDirectory((current) => ({
       ...current,
       departments: [
         ...current.departments,
-        { id: createId('dept'), name: '新部门', leaderIds: [] },
+        { id, name: '新部门', parentId, leaderIds: [] },
       ],
+    }));
+    setSelectedDepartmentId(id);
+  };
+
+  const removeDepartment = (department: OrganizationDepartment) => {
+    const hasChildren = directory.departments.some((item) => item.parentId === department.id);
+    const hasMembers = directory.members.some((member) => member.departmentId === department.id);
+    if (hasChildren || hasMembers) {
+      window.alert('请先移走下级部门和部门成员，再删除该部门。');
+      return;
+    }
+
+    setDirectory((current) => ({
+      ...current,
+      departments: current.departments.filter((item) => item.id !== department.id),
     }));
   };
 
-  const addMember = () => {
+  const addMember = (departmentId = selectedDepartmentId) => {
+    const id = createId('member');
     setDirectory((current) => ({
       ...current,
       members: [
         ...current.members,
         {
-          id: createId('member'),
+          id,
           name: '新成员',
-          departmentId: current.departments[0]?.id || '',
+          departmentId,
           title: '成员',
           roleGroupIds: [],
           enabled: true,
@@ -301,13 +600,41 @@ export default function OrganizationAdmin() {
     }));
   };
 
+  const removeMember = (member: OrganizationMember) => {
+    setDirectory((current) => ({
+      ...current,
+      members: current.members
+        .filter((item) => item.id !== member.id)
+        .map((item) => item.supervisorId === member.id ? { ...item, supervisorId: undefined } : item),
+      departments: current.departments.map((department) => ({
+        ...department,
+        leaderIds: (department.leaderIds || []).filter((leaderId) => leaderId !== member.id),
+      })),
+      roleGroups: current.roleGroups.map((roleGroup) => ({
+        ...roleGroup,
+        memberIds: roleGroup.memberIds.filter((memberId) => memberId !== member.id),
+      })),
+    }));
+  };
+
   const addRoleGroup = () => {
     setDirectory((current) => ({
       ...current,
       roleGroups: [
         ...current.roleGroups,
-        { id: createId('role'), name: '新角色组', memberIds: [] },
+        { id: createId('role'), name: '新审批岗位组', memberIds: [] },
       ],
+    }));
+  };
+
+  const removeRoleGroup = (roleGroup: OrganizationRoleGroup) => {
+    setDirectory((current) => ({
+      ...current,
+      roleGroups: current.roleGroups.filter((item) => item.id !== roleGroup.id),
+      members: current.members.map((member) => ({
+        ...member,
+        roleGroupIds: member.roleGroupIds.filter((roleGroupId) => roleGroupId !== roleGroup.id),
+      })),
     }));
   };
 
@@ -353,7 +680,7 @@ export default function OrganizationAdmin() {
         <div>
           <p className="text-[11px] font-black text-light-gray uppercase tracking-[0.2em]">System Admin</p>
           <h1 className="text-2xl font-black text-midnight-graphite tracking-tight">组织架构</h1>
-          <p className="mt-2 text-[14px] font-medium text-medium-gray">维护部门、成员、账号绑定和审批角色组。</p>
+          <p className="mt-2 text-[14px] font-medium text-medium-gray">维护公司部门、成员通讯录、登录账号绑定和审批岗位组。</p>
         </div>
         <button
           onClick={handleSave}
@@ -371,157 +698,373 @@ export default function OrganizationAdmin() {
         </div>
       )}
 
-      <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-border-silver flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-black text-white flex items-center justify-center">
-              <Users size={18} strokeWidth={2.5} />
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {[
+          { label: '部门', value: directory.departments.length, icon: Building2 },
+          { label: '成员', value: directory.members.length, icon: Users },
+          { label: '已绑定账号', value: `${boundMemberCount}/${directory.members.length}`, icon: Link2 },
+        ].map((item) => (
+          <div key={item.label} className="rounded-2xl border border-border-silver bg-white p-5 flex items-center gap-4">
+            <div className="w-11 h-11 rounded-2xl bg-lightest-gray-background flex items-center justify-center">
+              <item.icon size={18} strokeWidth={2.4} />
             </div>
             <div>
-              <h2 className="text-[18px] font-black">自动组织架构图</h2>
-              <p className="text-[12px] font-bold text-medium-gray">根据成员的直属上级、部门和账号绑定自动生成，只读预览。</p>
+              <p className="text-[11px] font-black text-light-gray uppercase tracking-wider">{item.label}</p>
+              <p className="text-[22px] font-black text-midnight-graphite">{item.value}</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2 text-[11px] font-black">
-            <span className="px-3 py-1.5 rounded-full bg-lightest-gray-background text-medium-gray">成员 {chartMemberCount}</span>
-            <span className="px-3 py-1.5 rounded-full bg-[#fff7e6] text-[#9a5b00]">未绑定 {unboundMemberCount}</span>
+        ))}
+      </section>
+
+      <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
+        <div className="px-6 py-5 border-b border-border-silver flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-black text-white flex items-center justify-center">
+              {chartMode === 'departments' ? <Building2 size={18} strokeWidth={2.5} /> : <GitBranch size={18} strokeWidth={2.5} />}
+            </div>
+            <div>
+              <h2 className="text-[18px] font-black">{chartMode === 'departments' ? '部门组织架构图' : '人员汇报关系图'}</h2>
+              <p className="text-[12px] font-bold text-medium-gray">
+                {chartMode === 'departments'
+                  ? '按部门上下级生成，适合查看公司组织结构。'
+                  : '按成员直属上级生成，适合检查主管审批规则。'}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex p-1 bg-lightest-gray-background rounded-xl">
+              <button
+                type="button"
+                onClick={() => setChartMode('departments')}
+                className={cn(
+                  "h-9 px-4 rounded-lg text-[12px] font-black transition-all",
+                  chartMode === 'departments' ? "bg-white text-black shadow-sm" : "text-medium-gray"
+                )}
+              >
+                部门架构
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartMode('reporting')}
+                className={cn(
+                  "h-9 px-4 rounded-lg text-[12px] font-black transition-all",
+                  chartMode === 'reporting' ? "bg-white text-black shadow-sm" : "text-medium-gray"
+                )}
+              >
+                汇报关系
+              </button>
+            </div>
+            <span className="px-3 py-1.5 rounded-full bg-[#fff7e6] text-[#9a5b00] text-[11px] font-black">未绑定 {unboundMemberCount}</span>
           </div>
         </div>
 
-        {chartRoots.length === 0 ? (
-          <div className="px-8 py-16 text-center text-[14px] font-bold text-medium-gray">
-            暂无成员，添加成员后会自动生成组织架构图。
-          </div>
+        {chartMode === 'departments' ? (
+          departmentChartRoots.length === 0 ? (
+            <div className="px-8 py-16 text-center text-[14px] font-bold text-medium-gray">
+              暂无部门，添加部门后会自动生成组织架构图。
+            </div>
+          ) : (
+            <ChartViewport>
+              {departmentChartRoots.map((node) => (
+                <DepartmentChartCard key={node.department.id} node={node} />
+              ))}
+            </ChartViewport>
+          )
         ) : (
-          <OrgChartCanvas roots={chartRoots} />
+          reportingChartRoots.length === 0 ? (
+            <div className="px-8 py-16 text-center text-[14px] font-bold text-medium-gray">
+              暂无成员，添加成员后会自动生成汇报关系图。
+            </div>
+          ) : (
+            <ChartViewport>
+              {reportingChartRoots.map((node) => (
+                <ReportingChartCard key={node.member.id} node={node} />
+              ))}
+            </ChartViewport>
+          )
         )}
       </section>
 
       <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-border-silver flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Building2 size={18} />
-            <h2 className="text-[18px] font-black">部门</h2>
-          </div>
-          <button onClick={addDepartment} className="h-9 px-4 rounded-full bg-lightest-gray-background text-[12px] font-bold flex items-center gap-2">
-            <Plus size={14} />新增部门
-          </button>
+        <div className="px-6 py-5 border-b border-border-silver flex items-center gap-3">
+          <AlertCircle size={18} />
+          <h2 className="text-[18px] font-black">组织配置检查</h2>
         </div>
-        <div className="divide-y divide-border-silver">
-          {directory.departments.map((department) => (
-            <div key={department.id} className="grid gap-4 p-5 lg:grid-cols-[1fr_1fr]">
-              <input
-                className="input-field"
-                value={department.name}
-                onChange={(event) => updateDepartment(department.id, { name: event.target.value })}
-                placeholder="部门名称"
-              />
-              <select
-                className="input-field"
-                value={department.parentId || ''}
-                onChange={(event) => updateDepartment(department.id, { parentId: event.target.value || undefined })}
-              >
-                <option value="">无上级部门</option>
-                {directory.departments.filter((item) => item.id !== department.id).map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-              </select>
+        <div className="p-5 grid gap-3 lg:grid-cols-2">
+          {healthMessages.map((item, index) => (
+            <div
+              key={`${item.text}-${index}`}
+              className={cn(
+                "rounded-2xl px-4 py-3 text-[13px] font-bold",
+                item.tone === 'danger' && "bg-[#ffebee] text-[#c62828]",
+                item.tone === 'warning' && "bg-[#fff7e6] text-[#9a5b00]",
+                item.tone === 'info' && "bg-[#e8f5e9] text-[#2e7d32]"
+              )}
+            >
+              {item.text}
             </div>
           ))}
         </div>
       </section>
 
-      <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-border-silver flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Users size={18} />
-            <h2 className="text-[18px] font-black">成员与账号绑定</h2>
+      <section className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-6">
+        <aside className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden h-fit">
+          <div className="px-5 py-4 border-b border-border-silver flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Building2 size={17} />
+              <h2 className="text-[17px] font-black">部门树</h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => addDepartment()}
+              className="h-8 px-3 rounded-full bg-lightest-gray-background text-[12px] font-black flex items-center gap-1"
+            >
+              <Plus size={13} /> 根部门
+            </button>
           </div>
-          <button onClick={addMember} className="h-9 px-4 rounded-full bg-lightest-gray-background text-[12px] font-bold flex items-center gap-2">
-            <Plus size={14} />新增成员
-          </button>
-        </div>
-        <div className="divide-y divide-border-silver">
-          {directory.members.map((member) => (
-            <div key={member.id} className="grid gap-4 p-5 lg:grid-cols-[1fr_1fr_1fr_1fr]">
-              <input
-                className="input-field"
-                value={member.name}
-                onChange={(event) => updateMember(member.id, { name: event.target.value })}
-                placeholder="姓名"
-              />
-              <select
-                className="input-field"
-                value={member.accountUsername || ''}
-                onChange={(event) => updateMember(member.id, { accountUsername: event.target.value || undefined })}
-              >
-                <option value="">未绑定登录账号</option>
-                {accountOptions.map((account) => (
-                  <option key={account.username} value={account.username}>{account.name}（{account.username}）</option>
-                ))}
-              </select>
-              <select
-                className="input-field"
-                value={member.departmentId}
-                onChange={(event) => updateMember(member.id, { departmentId: event.target.value })}
-              >
-                <option value="">未选择部门</option>
-                {directory.departments.map((department) => (
-                  <option key={department.id} value={department.id}>{department.name}</option>
-                ))}
-              </select>
-              <select
-                className="input-field"
-                value={member.supervisorId || ''}
-                onChange={(event) => updateMember(member.id, { supervisorId: event.target.value || undefined })}
-              >
-                <option value="">无直属上级</option>
-                {directory.members.filter((item) => item.id !== member.id).map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-              </select>
-              <input
-                className="input-field lg:col-span-2"
-                value={member.title}
-                onChange={(event) => updateMember(member.id, { title: event.target.value })}
-                placeholder="职位"
-              />
-              <div className="lg:col-span-2 flex flex-wrap gap-2">
-                {directory.roleGroups.map((roleGroup) => (
-                  <label key={roleGroup.id} className="px-3 py-2 rounded-full bg-lightest-gray-background text-[12px] font-bold flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={member.roleGroupIds.includes(roleGroup.id)}
-                      onChange={() => toggleRoleForMember(member, roleGroup.id)}
-                    />
-                    {roleGroup.name}
-                  </label>
-                ))}
+          <div className="p-3 space-y-1 max-h-[620px] overflow-y-auto">
+            {departmentChartRoots.length === 0 ? (
+              <div className="px-3 py-8 text-center text-[13px] font-bold text-medium-gray">
+                暂无部门
               </div>
+            ) : (
+              departmentChartRoots.map((node) => (
+                <DepartmentTreeItem
+                  key={node.department.id}
+                  node={node}
+                  selectedId={selectedDepartmentId}
+                  onSelect={setSelectedDepartmentId}
+                />
+              ))
+            )}
+          </div>
+        </aside>
+
+        <div className="space-y-6">
+          <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-border-silver flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-3">
+                <Building2 size={18} />
+                <h2 className="text-[18px] font-black">{selectedDepartment?.name || '部门详情'}</h2>
+              </div>
+              {selectedDepartment && (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => addDepartment(selectedDepartment.id)}
+                    className="h-9 px-4 rounded-full bg-lightest-gray-background text-[12px] font-bold flex items-center gap-2"
+                  >
+                    <Plus size={14} /> 添加子部门
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeDepartment(selectedDepartment)}
+                    className="h-9 px-4 rounded-full bg-[#ffebee] text-[#c62828] text-[12px] font-bold flex items-center gap-2"
+                  >
+                    <Trash2 size={14} /> 删除部门
+                  </button>
+                </div>
+              )}
             </div>
-          ))}
+
+            {selectedDepartment ? (
+              <div className="p-6 grid gap-4 lg:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">部门名称</span>
+                  <input
+                    className="input-field"
+                    value={selectedDepartment.name}
+                    onChange={(event) => updateDepartment(selectedDepartment.id, { name: event.target.value })}
+                    placeholder="部门名称"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">上级部门</span>
+                  <select
+                    className="input-field"
+                    value={selectedDepartment.parentId || ''}
+                    onChange={(event) => updateDepartment(selectedDepartment.id, { parentId: event.target.value || undefined })}
+                  >
+                    <option value="">无上级部门</option>
+                    {directory.departments.filter((department) => department.id !== selectedDepartment.id).map((department) => (
+                      <option key={department.id} value={department.id}>{department.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-2 lg:col-span-2">
+                  <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">部门负责人</span>
+                  <select
+                    multiple
+                    className="input-field min-h-[112px]"
+                    value={selectedDepartment.leaderIds || []}
+                    onChange={(event) => updateDepartment(selectedDepartment.id, { leaderIds: readSelectedValues(event) })}
+                  >
+                    {directory.members.map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.name} / {member.title || '未配置职位'} / {getDepartmentName(directory, member.departmentId)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : (
+              <div className="px-8 py-16 text-center text-[14px] font-bold text-medium-gray">
+                请先添加一个部门。
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-border-silver flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-3">
+                <Users size={18} />
+                <h2 className="text-[18px] font-black">当前部门成员</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => addMember()}
+                disabled={!selectedDepartmentId}
+                className="h-9 px-4 rounded-full bg-lightest-gray-background text-[12px] font-bold flex items-center gap-2 disabled:opacity-40"
+              >
+                <Plus size={14} /> 新增成员
+              </button>
+            </div>
+
+            <div className="divide-y divide-border-silver">
+              {selectedDepartmentMembers.length === 0 ? (
+                <div className="px-8 py-12 text-center text-[14px] font-bold text-medium-gray">
+                  当前部门暂无成员。
+                </div>
+              ) : (
+                selectedDepartmentMembers.map((member) => (
+                  <article key={member.id} className="p-5 space-y-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-2xl bg-lightest-gray-background flex items-center justify-center shrink-0">
+                          <UserRound size={17} strokeWidth={2.4} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[15px] font-black text-midnight-graphite truncate">{member.name}</p>
+                          <p className="text-[12px] font-bold text-medium-gray truncate">
+                            {member.accountUsername ? `账号：${member.accountUsername}` : '未绑定登录账号'}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeMember(member)}
+                        className="h-9 px-4 rounded-full bg-[#ffebee] text-[#c62828] text-[12px] font-bold flex items-center justify-center gap-2"
+                      >
+                        <Trash2 size={14} /> 删除成员
+                      </button>
+                    </div>
+
+                    <div className="grid gap-3 lg:grid-cols-4">
+                      <input
+                        className="input-field"
+                        value={member.name}
+                        onChange={(event) => updateMember(member.id, { name: event.target.value })}
+                        placeholder="姓名"
+                      />
+                      <input
+                        className="input-field"
+                        value={member.title}
+                        onChange={(event) => updateMember(member.id, { title: event.target.value })}
+                        placeholder="岗位/职务"
+                      />
+                      <select
+                        className="input-field"
+                        value={member.accountUsername || ''}
+                        onChange={(event) => updateMember(member.id, { accountUsername: event.target.value || undefined })}
+                      >
+                        <option value="">未绑定登录账号</option>
+                        {accountOptions.map((account) => (
+                          <option key={account.username} value={account.username}>{account.name}（{account.username}）</option>
+                        ))}
+                      </select>
+                      <select
+                        className="input-field"
+                        value={member.departmentId}
+                        onChange={(event) => updateMember(member.id, { departmentId: event.target.value })}
+                      >
+                        <option value="">未选择部门</option>
+                        {directory.departments.map((department) => (
+                          <option key={department.id} value={department.id}>{department.name}</option>
+                        ))}
+                      </select>
+                      <select
+                        className="input-field lg:col-span-2"
+                        value={member.supervisorId || ''}
+                        onChange={(event) => updateMember(member.id, { supervisorId: event.target.value || undefined })}
+                      >
+                        <option value="">无直属上级</option>
+                        {directory.members.filter((item) => item.id !== member.id).map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name} / {getDepartmentName(directory, item.departmentId)}
+                          </option>
+                        ))}
+                      </select>
+                      <label className="input-field flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={member.enabled !== false}
+                          onChange={(event) => updateMember(member.id, { enabled: event.target.checked })}
+                          className="accent-black"
+                        />
+                        启用成员
+                      </label>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {directory.roleGroups.map((roleGroup) => (
+                        <label key={roleGroup.id} className="px-3 py-2 rounded-full bg-lightest-gray-background text-[12px] font-bold flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={member.roleGroupIds.includes(roleGroup.id)}
+                            onChange={() => toggleRoleForMember(member, roleGroup.id)}
+                            className="accent-black"
+                          />
+                          {roleGroup.name}
+                        </label>
+                      ))}
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
         </div>
       </section>
 
       <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
         <div className="px-6 py-5 border-b border-border-silver flex items-center justify-between">
-          <h2 className="text-[18px] font-black">角色组</h2>
+          <div>
+            <h2 className="text-[18px] font-black">审批岗位组</h2>
+            <p className="mt-1 text-[12px] font-bold text-medium-gray">审批流里的“指定角色组”会从这里取人，不等同于账号角色。</p>
+          </div>
           <button onClick={addRoleGroup} className="h-9 px-4 rounded-full bg-lightest-gray-background text-[12px] font-bold flex items-center gap-2">
-            <Plus size={14} />新增角色组
+            <Plus size={14} /> 新增岗位组
           </button>
         </div>
         <div className="divide-y divide-border-silver">
           {directory.roleGroups.map((roleGroup) => (
-            <div key={roleGroup.id} className="grid gap-4 p-5 lg:grid-cols-[1fr_2fr]">
+            <div key={roleGroup.id} className="grid gap-4 p-5 lg:grid-cols-[1fr_2fr_120px]">
               <input
                 className="input-field"
                 value={roleGroup.name}
                 onChange={(event) => updateRoleGroup(roleGroup.id, { name: event.target.value })}
-                placeholder="角色组名称"
+                placeholder="岗位组名称"
               />
               <p className="text-[13px] font-bold text-medium-gray self-center">
                 {directory.members.filter((member) => member.roleGroupIds.includes(roleGroup.id)).map((member) => member.name).join('、') || '暂无成员'}
               </p>
+              <button
+                type="button"
+                onClick={() => removeRoleGroup(roleGroup)}
+                className="h-11 px-4 rounded-lg bg-[#ffebee] text-[#c62828] text-[12px] font-bold flex items-center justify-center gap-2"
+              >
+                <Trash2 size={14} /> 删除
+              </button>
             </div>
           ))}
         </div>

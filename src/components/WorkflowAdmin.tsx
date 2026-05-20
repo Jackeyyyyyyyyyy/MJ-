@@ -400,7 +400,7 @@ export default function WorkflowAdmin() {
                           className="input-field min-h-[120px]"
                           value={rule.memberIds || []}
                           onChange={(event) => updateStepRule(step, {
-                            memberIds: Array.from(event.currentTarget.selectedOptions).map((option) => option.value),
+                            memberIds: Array.from(event.currentTarget.selectedOptions, (option) => (option as HTMLOptionElement).value),
                           })}
                         >
                           {enabledMembers.map((member) => (

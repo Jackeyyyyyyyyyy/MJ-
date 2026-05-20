@@ -797,6 +797,160 @@ async function readOrganizationDirectory() {
   return directory;
 }
 
+function assertUniqueIds(items, label) {
+  const seen = new Set();
+  items.forEach((item) => {
+    if (!item.id) {
+      throw createHttpError(`${label} id is required`, 400);
+    }
+
+    if (seen.has(item.id)) {
+      throw createHttpError(`duplicate ${label} id: ${item.id}`, 400);
+    }
+
+    seen.add(item.id);
+  });
+}
+
+function hasParentCycle(items, id, parentKey) {
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  const seen = new Set();
+  let current = itemsById.get(id);
+
+  while (current?.[parentKey]) {
+    if (seen.has(current.id)) return true;
+    seen.add(current.id);
+    current = itemsById.get(current[parentKey]);
+  }
+
+  return false;
+}
+
+function normalizeOrganizationDirectoryInput({ departments, members, roleGroups }) {
+  const normalizedDepartments = departments.map((department) => ({
+    id: normalizeWorkflowText(department?.id),
+    name: normalizeWorkflowText(department?.name),
+    ...(normalizeWorkflowText(department?.parentId) ? { parentId: normalizeWorkflowText(department.parentId) } : {}),
+    leaderIds: Array.isArray(department?.leaderIds)
+      ? department.leaderIds.map(normalizeWorkflowText).filter(Boolean)
+      : [],
+  }));
+  const normalizedMembers = members.map((member) => ({
+    id: normalizeWorkflowText(member?.id),
+    name: normalizeWorkflowText(member?.name),
+    ...(normalizeWorkflowText(member?.accountUsername) ? { accountUsername: normalizeWorkflowText(member.accountUsername) } : {}),
+    departmentId: normalizeWorkflowText(member?.departmentId),
+    title: normalizeWorkflowText(member?.title),
+    ...(normalizeWorkflowText(member?.supervisorId) ? { supervisorId: normalizeWorkflowText(member.supervisorId) } : {}),
+    roleGroupIds: Array.isArray(member?.roleGroupIds)
+      ? member.roleGroupIds.map(normalizeWorkflowText).filter(Boolean)
+      : [],
+    enabled: member?.enabled !== false,
+  }));
+  const normalizedRoleGroups = roleGroups.map((roleGroup) => ({
+    id: normalizeWorkflowText(roleGroup?.id),
+    name: normalizeWorkflowText(roleGroup?.name),
+    memberIds: Array.isArray(roleGroup?.memberIds)
+      ? roleGroup.memberIds.map(normalizeWorkflowText).filter(Boolean)
+      : [],
+  }));
+
+  const directory = {
+    departments: normalizedDepartments,
+    members: normalizedMembers,
+    roleGroups: normalizedRoleGroups,
+  };
+
+  validateOrganizationDirectory(directory);
+  return directory;
+}
+
+function validateOrganizationDirectory(directory) {
+  assertUniqueIds(directory.departments, 'department');
+  assertUniqueIds(directory.members, 'member');
+  assertUniqueIds(directory.roleGroups, 'role group');
+
+  const departmentIds = new Set(directory.departments.map((department) => department.id));
+  const memberIds = new Set(directory.members.map((member) => member.id));
+  const roleGroupIds = new Set(directory.roleGroups.map((roleGroup) => roleGroup.id));
+  const accountUsernames = new Map();
+
+  directory.departments.forEach((department) => {
+    if (!department.name) {
+      throw createHttpError('department name is required', 400);
+    }
+
+    if (department.parentId) {
+      if (!departmentIds.has(department.parentId)) {
+        throw createHttpError(`department parent does not exist: ${department.name}`, 400);
+      }
+
+      if (department.parentId === department.id || hasParentCycle(directory.departments, department.id, 'parentId')) {
+        throw createHttpError(`department hierarchy has a cycle: ${department.name}`, 400);
+      }
+    }
+
+    (department.leaderIds || []).forEach((leaderId) => {
+      if (!memberIds.has(leaderId)) {
+        throw createHttpError(`department leader does not exist: ${department.name}`, 400);
+      }
+    });
+  });
+
+  directory.members.forEach((member) => {
+    if (!member.name) {
+      throw createHttpError('member name is required', 400);
+    }
+
+    if (!departmentIds.has(member.departmentId)) {
+      throw createHttpError(`member must belong to a valid department: ${member.name}`, 400);
+    }
+
+    if (member.supervisorId) {
+      if (!memberIds.has(member.supervisorId)) {
+        throw createHttpError(`member supervisor does not exist: ${member.name}`, 400);
+      }
+
+      if (member.supervisorId === member.id || hasParentCycle(directory.members, member.id, 'supervisorId')) {
+        throw createHttpError(`member reporting line has a cycle: ${member.name}`, 400);
+      }
+    }
+
+    if (member.accountUsername) {
+      const previousOwner = accountUsernames.get(member.accountUsername);
+      if (previousOwner) {
+        throw createHttpError(`account is bound to multiple members: ${member.accountUsername}`, 400);
+      }
+      accountUsernames.set(member.accountUsername, member.id);
+    }
+
+    (member.roleGroupIds || []).forEach((roleGroupId) => {
+      if (!roleGroupIds.has(roleGroupId)) {
+        throw createHttpError(`member role group does not exist: ${member.name}`, 400);
+      }
+    });
+  });
+
+  directory.roleGroups.forEach((roleGroup) => {
+    if (!roleGroup.name) {
+      throw createHttpError('role group name is required', 400);
+    }
+
+    roleGroup.memberIds = [...new Set([
+      ...(roleGroup.memberIds || []),
+      ...directory.members
+        .filter((member) => (member.roleGroupIds || []).includes(roleGroup.id))
+        .map((member) => member.id),
+    ])];
+
+    roleGroup.memberIds.forEach((memberId) => {
+      if (!memberIds.has(memberId)) {
+        throw createHttpError(`role group member does not exist: ${roleGroup.name}`, 400);
+      }
+    });
+  });
+}
+
 function updateOrganizationDirectory(mutator) {
   const operation = organizationWriteQueue.catch(() => undefined).then(async () => {
     const directory = await readOrganizationDirectory();
@@ -1803,10 +1957,9 @@ app.put('/api/organization', authenticate, requireRoles('developer'), async (req
       return res.status(400).json({ error: 'missing organization directory' });
     }
 
+    const nextDirectory = normalizeOrganizationDirectoryInput({ departments, members, roleGroups });
     const directory = await updateOrganizationDirectory(() => ({
-      departments,
-      members,
-      roleGroups,
+      ...nextDirectory,
       updatedAt: new Date().toISOString(),
     }));
 
