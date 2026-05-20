@@ -942,7 +942,7 @@ function WorkflowFlowDesigner({
   };
 
   return (
-    <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
+    <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-visible">
       <div className="px-6 py-5 border-b border-border-silver flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-black text-white flex items-center justify-center">
@@ -979,7 +979,7 @@ function WorkflowFlowDesigner({
         </div>
       )}
 
-      <div className="grid min-h-[860px] lg:grid-cols-[minmax(640px,1fr)_360px]">
+      <div className="grid min-h-[860px] items-start lg:grid-cols-[minmax(720px,1fr)_400px]">
         <div
           ref={canvasViewportRef}
           onPointerDown={handleCanvasPointerDown}
@@ -1563,9 +1563,11 @@ function DesignerInspector({
   onRemoveStep: (branchId: string, stepId: string) => void;
   onMoveStep: (branchId: string, stepId: string, direction: -1 | 1) => void;
 }) {
+  const inspectorClassName = "border-t border-border-silver bg-white lg:sticky lg:top-24 lg:self-start lg:border-l lg:border-t-0 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto";
+
   if (selection.type === 'step' && selectedBranch && selectedStep) {
     return (
-      <aside className="border-t border-border-silver bg-white lg:border-l lg:border-t-0">
+      <aside className={inspectorClassName}>
         <StepEditor
           branch={selectedBranch}
           step={selectedStep}
@@ -1586,7 +1588,7 @@ function DesignerInspector({
     const branchIndex = branches.filter((branch) => !branch.isDefault).findIndex((branch) => branch.id === selectedBranch.id);
 
     return (
-      <aside className="border-t border-border-silver bg-white lg:border-l lg:border-t-0">
+      <aside className={inspectorClassName}>
         <InspectorHeader
           label={selectedBranch.isDefault ? '默认条件' : '条件分支'}
           title={getBranchTitle(selectedBranch)}
@@ -1697,7 +1699,7 @@ function DesignerInspector({
 
   if (selection.type === 'cc') {
     return (
-      <aside className="border-t border-border-silver bg-white lg:border-l lg:border-t-0">
+      <aside className={inspectorClassName}>
         <InspectorHeader
           label="抄送"
           title="抄送配置"
@@ -1737,7 +1739,7 @@ function DesignerInspector({
   }
 
   return (
-    <aside className="border-t border-border-silver bg-white lg:border-l lg:border-t-0">
+    <aside className={inspectorClassName}>
       <InspectorHeader
         label="提交"
         title="提交人设置"
@@ -2365,68 +2367,57 @@ export default function WorkflowAdmin() {
         </div>
       </section>
 
-      <div className="grid gap-6 2xl:grid-cols-[300px_minmax(0,1fr)]">
-        <aside className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden h-fit">
-          <div className="px-5 py-4 border-b border-border-silver flex items-center gap-3">
+      <section className="rounded-2xl border border-border-silver bg-white shadow-sm p-4">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center">
+          <div className="flex shrink-0 items-center gap-3">
             <Workflow size={17} />
             <h2 className="text-[16px] font-black">流程列表</h2>
+            <span className="rounded-full bg-lightest-gray-background px-2.5 py-1 text-[10px] font-black text-medium-gray">
+              {templates.length}
+            </span>
           </div>
-          <div className="divide-y divide-border-silver max-h-[760px] overflow-y-auto">
-            {templates.length === 0 ? (
-              <div className="p-8 text-center text-[13px] font-bold text-medium-gray">暂无审批流模板</div>
-            ) : templates.map((template) => (
-              <button
-                key={template.id}
-                type="button"
-                onClick={() => selectTemplate(template)}
-                className={cn(
-                  "w-full text-left p-5 transition-colors",
-                  selectedId === template.id ? 'bg-lightest-gray-background' : 'hover:bg-canvas-white'
-                )}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[14px] font-black text-midnight-graphite truncate">{template.name}</p>
-                    <p className="mt-1 text-[12px] font-bold text-medium-gray">
-                      {getTemplateScopeLabel(template)} · v{template.currentVersion || 1}
-                    </p>
-                    <p className="mt-1 text-[11px] font-bold text-light-gray">更新于 {formatDate(template.updatedAt)}</p>
-                  </div>
-                  <span className={cn("shrink-0 px-2.5 py-1 rounded-full text-[10px] font-black", statusClasses[template.status])}>
-                    {statusLabels[template.status]}
-                  </span>
-                </div>
-                <div className="mt-4 flex justify-end">
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void handleDuplicate(template.id);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        void handleDuplicate(template.id);
-                      }
-                    }}
-                    className="h-8 px-3 rounded-full bg-white border border-border-silver text-[11px] font-black text-medium-gray flex items-center gap-1.5"
-                  >
-                    <Copy size={13} /> 复制
-                  </span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </aside>
 
-        {!draft || !selectedTemplate ? (
-          <section className="rounded-2xl border border-border-silver bg-white shadow-sm p-12 text-center text-[14px] font-bold text-medium-gray">
-            请先选择或新建审批流。
-          </section>
-        ) : (
-          <div className="space-y-6">
+          <div className="grid flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+            <select
+              className="input-field text-[14px]"
+              value={selectedId}
+              onChange={(event) => {
+                const template = templates.find((item) => item.id === event.target.value);
+                if (template) selectTemplate(template);
+              }}
+              disabled={templates.length === 0}
+            >
+              {templates.length === 0 ? (
+                <option value="">暂无审批流模板</option>
+              ) : templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name} · {getTemplateScopeLabel(template)} · v{template.currentVersion || 1}
+                </option>
+              ))}
+            </select>
+            {selectedTemplate && (
+              <span className={cn("h-11 px-3 rounded-full text-[11px] font-black flex items-center justify-center", statusClasses[selectedTemplate.status])}>
+                {statusLabels[selectedTemplate.status]}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => selectedTemplate && void handleDuplicate(selectedTemplate.id)}
+              disabled={!selectedTemplate || isSaving}
+              className="h-11 px-4 rounded-full bg-white border border-border-silver text-[12px] font-black text-medium-gray flex items-center justify-center gap-1.5 disabled:opacity-40"
+            >
+              <Copy size={13} /> 复制当前
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {!draft || !selectedTemplate ? (
+        <section className="rounded-2xl border border-border-silver bg-white shadow-sm p-12 text-center text-[14px] font-bold text-medium-gray">
+          请先选择或新建审批流。
+        </section>
+      ) : (
+        <div className="space-y-6">
             <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
               <div className="p-6 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                 <div className="min-w-0">
@@ -2972,9 +2963,8 @@ export default function WorkflowAdmin() {
                 ))}
               </div>
             </SectionCard>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
