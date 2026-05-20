@@ -83,7 +83,7 @@ export interface SubmitPermissionRule {
   excludedMemberIds: string[];
 }
 
-export type WorkflowConditionField = 'amount' | 'category' | 'project' | 'department';
+export type WorkflowConditionField = string;
 
 export type WorkflowConditionOperator = 'lte' | 'gt' | 'between' | 'eq';
 

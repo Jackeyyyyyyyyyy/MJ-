@@ -813,8 +813,10 @@ function normalizeApprovalStep(step, index = 0) {
 }
 
 function normalizeWorkflowCondition(condition, index = 0) {
-  const field = WORKFLOW_CONDITION_FIELDS.has(condition?.field) ? condition.field : 'amount';
-  const operator = WORKFLOW_CONDITION_OPERATORS.has(condition?.operator) ? condition.operator : 'lte';
+  const field = normalizeWorkflowText(condition?.field) || 'submitter.department';
+  const operator = WORKFLOW_CONDITION_OPERATORS.has(condition?.operator)
+    ? condition.operator
+    : isNumericWorkflowConditionField(field) ? 'lte' : 'eq';
   return {
     id: normalizeWorkflowText(condition?.id) || createWorkflowId('cond'),
     field,
@@ -945,6 +947,12 @@ function normalizeWorkflowTemplate(template) {
   };
 }
 
+function isNumericWorkflowConditionField(field) {
+  const normalizedField = normalizeWorkflowText(field);
+  const label = normalizedField.startsWith('form:') ? normalizedField.slice(5) : normalizedField;
+  return normalizedField === 'amount' || /金额|价格|费用|利润|汇率|数量|总额|时长|天数|小时|修改前|修改后/.test(label);
+}
+
 function validateWorkflowDraftForPublish(draft) {
   const errors = [];
   const name = normalizeWorkflowText(draft?.basic?.name);
@@ -978,16 +986,18 @@ function validateWorkflowDraftForPublish(draft) {
           return;
         }
 
-        if (condition.field === 'amount') {
+        if (isNumericWorkflowConditionField(condition.field)) {
           if (condition.operator === 'between') {
             if (!Number.isFinite(Number(condition.amountMin)) || !Number.isFinite(Number(condition.amountMax))) {
-              errors.push(`${branchName} 金额区间必须填写有效数字`);
+              errors.push(`${branchName} 数值区间必须填写有效数字`);
             }
           } else if (condition.operator === 'lte' && !Number.isFinite(Number(condition.amountMax))) {
-            errors.push(`${branchName} 金额上限必须填写有效数字`);
+            errors.push(`${branchName} 数值上限必须填写有效数字`);
           } else if (condition.operator === 'gt' && !Number.isFinite(Number(condition.amountMin))) {
-            errors.push(`${branchName} 金额下限必须填写有效数字`);
+            errors.push(`${branchName} 数值下限必须填写有效数字`);
           }
+        } else if (!normalizeWorkflowText(condition.value)) {
+          errors.push(`${branchName} 条件值不能为空`);
         }
       });
     }
@@ -1385,18 +1395,139 @@ async function findPublishedWorkflow(moduleName, approvalTypeName) {
   }) || null;
 }
 
-function getLinearApproverNodes(version) {
-  const existingNodes = Array.isArray(version?.nodes)
+function parseWorkflowNumber(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return undefined;
+
+  const normalized = value.replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
+  if (!normalized) return undefined;
+
+  const number = Number(normalized[0]);
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function normalizeComparableText(value) {
+  return normalizeWorkflowText(value).toLowerCase();
+}
+
+function findBusinessDataValue(businessData, aliases) {
+  if (!businessData || typeof businessData !== 'object') return undefined;
+
+  const entries = Object.entries(businessData);
+  const normalizedAliases = aliases.map(normalizeComparableText).filter(Boolean);
+  const exact = entries.find(([key]) => normalizedAliases.includes(normalizeComparableText(key)));
+  if (exact) return exact[1];
+
+  const loose = entries.find(([key]) => {
+    const normalizedKey = normalizeComparableText(key);
+    return normalizedAliases.some((alias) => normalizedKey.includes(alias));
+  });
+
+  return loose?.[1];
+}
+
+function getWorkflowConditionValue(condition, context) {
+  const { businessData, applicantMember, directory } = context || {};
+  const field = normalizeWorkflowText(condition?.field);
+
+  if (field.startsWith('form:')) {
+    const formFieldName = field.slice(5);
+    return findBusinessDataValue(businessData, [formFieldName]);
+  }
+
+  if (field === 'submitter.member') {
+    return applicantMember
+      ? `${applicantMember.id || ''} ${applicantMember.name || ''} ${applicantMember.accountUsername || ''}`
+      : undefined;
+  }
+
+  if (field === 'submitter.department') {
+    const department = (directory?.departments || []).find((item) => item.id === applicantMember?.departmentId);
+    return department ? `${department.id} ${department.name}` : applicantMember?.departmentId;
+  }
+
+  if (field === 'submitter.role') {
+    const roleTexts = (applicantMember?.roleGroupIds || []).map((roleGroupId) => {
+      const roleGroup = (directory?.roleGroups || []).find((item) => item.id === roleGroupId);
+      return roleGroup ? `${roleGroup.id} ${roleGroup.name}` : roleGroupId;
+    });
+    return roleTexts.join(' ');
+  }
+
+  if (field === 'amount') {
+    return findBusinessDataValue(businessData, ['amount', '金额', '付款总额', '付款金额', '报销金额', '填写价格', '标准价格', '申请利润']);
+  }
+
+  if (field === 'category') {
+    return findBusinessDataValue(businessData, ['category', '类别', '类型', '费用类型', '审批类型', '收支类型']);
+  }
+
+  if (field === 'project') {
+    return findBusinessDataValue(businessData, ['project', '项目', '订单号', '任务单', '班列', '线路', '业务明细']);
+  }
+
+  if (field === 'department') {
+    const businessDepartment = findBusinessDataValue(businessData, ['department', '部门', '所属部门']);
+    if (businessDepartment) return businessDepartment;
+
+    const department = (directory?.departments || []).find((item) => item.id === applicantMember?.departmentId);
+    return department ? `${department.id} ${department.name}` : applicantMember?.departmentId;
+  }
+
+  return findBusinessDataValue(businessData, [field]);
+}
+
+function workflowConditionMatches(condition, context) {
+  const actualValue = getWorkflowConditionValue(condition, context);
+  const actualNumber = parseWorkflowNumber(actualValue);
+
+  if (isNumericWorkflowConditionField(condition.field) || actualNumber !== undefined) {
+    if (condition.operator === 'between') {
+      return actualNumber !== undefined
+        && actualNumber > Number(condition.amountMin)
+        && actualNumber <= Number(condition.amountMax);
+    }
+    if (condition.operator === 'gt') {
+      return actualNumber !== undefined && actualNumber > Number(condition.amountMin);
+    }
+    if (condition.operator === 'lte') {
+      return actualNumber !== undefined && actualNumber <= Number(condition.amountMax);
+    }
+  }
+
+  const expected = normalizeComparableText(condition.value);
+  const actual = normalizeComparableText(actualValue);
+  if (!expected || !actual) return false;
+
+  return condition.operator === 'eq'
+    ? actual === expected || actual.includes(expected)
+    : actual.includes(expected);
+}
+
+function selectWorkflowBranch(version, context) {
+  const branches = Array.isArray(version?.branches) ? version.branches : [];
+  if (branches.length === 0) return null;
+
+  const defaultBranch = branches.find((branch) => branch?.isDefault) || null;
+  const matchedBranch = branches.find((branch) => (
+    !branch?.isDefault
+    && Array.isArray(branch.conditions)
+    && branch.conditions.length > 0
+    && branch.conditions.every((condition) => workflowConditionMatches(condition, context))
+  ));
+
+  return matchedBranch || defaultBranch || branches[0];
+}
+
+function getLinearApproverNodes(version, context = {}) {
+  const selectedBranch = selectWorkflowBranch(version, context);
+  if (selectedBranch) {
+    return (selectedBranch.approvalSteps || []).map((step, index) => approvalStepToLegacyNode(step, index));
+  }
+
+  return Array.isArray(version?.nodes)
     ? version.nodes.filter((node) => node?.type === 'approver')
     : [];
-
-  if (existingNodes.length > 0) return existingNodes;
-
-  const defaultBranch = Array.isArray(version?.branches)
-    ? version.branches.find((branch) => branch?.isDefault)
-    : null;
-
-  return (defaultBranch?.approvalSteps || []).map((step, index) => approvalStepToLegacyNode(step, index));
 }
 
 function findMemberByAccount(directory, username) {
@@ -1505,20 +1636,20 @@ function createWorkflowStep(node, order, approvers, status = STEP_NOT_STARTED, c
   };
 }
 
-async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, applicantUsername }) {
+async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, applicantUsername, businessData }) {
   const template = await findPublishedWorkflow(moduleName, approvalTypeName);
   if (!template) {
     throw createHttpError('No published approval workflow matches this business type. Please ask an administrator to configure and publish one.', 400);
   }
 
   const version = getPublishedVersion(template);
-  const nodes = getLinearApproverNodes(version);
+  const directory = await readOrganizationDirectory();
+  const applicantMember = findMemberByAccount(directory, applicantUsername);
+  const nodes = getLinearApproverNodes(version, { businessData, directory, applicantMember });
   if (nodes.length === 0) {
     throw createHttpError('The matched approval workflow has no linear approval steps.', 400);
   }
 
-  const directory = await readOrganizationDirectory();
-  const applicantMember = findMemberByAccount(directory, applicantUsername);
   const steps = [];
 
   nodes.forEach((node, index) => {
@@ -2149,12 +2280,13 @@ app.post('/api/workflow-templates', authenticate, requireRoles('developer'), asy
     const template = await updateWorkflowTemplates((templates) => {
       const duplicated = templates.some((item) => (
         normalizeWorkflowText(item.organizationId) === organizationId &&
-        normalizeWorkflowText(item.businessType) === businessType &&
+        normalizeWorkflowText(item.moduleName || item.draft?.basic?.moduleName) === moduleName &&
+        normalizeWorkflowText(item.approvalTypeName || item.draft?.basic?.approvalTypeName) === approvalTypeName &&
         item.status === 'published'
       ));
 
       if (duplicated) {
-        throw createHttpError('published workflow template already exists for this organization and business type', 409);
+        throw createHttpError('published workflow template already exists for this organization and approval type', 409);
       }
 
       const draft = normalizeWorkflowDraft({
@@ -2313,11 +2445,12 @@ app.post('/api/workflow-templates/:id/publish', authenticate, requireRoles('deve
         item.id !== existing.id &&
         item.status === 'published' &&
         normalizeWorkflowText(item.organizationId) === normalizeWorkflowText(published.organizationId) &&
-        normalizeWorkflowText(item.businessType) === normalizeWorkflowText(published.businessType)
+        normalizeWorkflowText(item.moduleName || item.publishedVersion?.basic?.moduleName || item.draft?.basic?.moduleName) === normalizeWorkflowText(published.basic?.moduleName) &&
+        normalizeWorkflowText(item.approvalTypeName || item.publishedVersion?.basic?.approvalTypeName || item.draft?.basic?.approvalTypeName) === normalizeWorkflowText(published.basic?.approvalTypeName)
       ));
 
       if (duplicate) {
-        throw createHttpError('同一组织和业务类型已经存在已发布审批流，请先停用原流程。', 409);
+        throw createHttpError('同一组织和具体业务已经存在已发布审批流，请先停用原流程。', 409);
       }
 
       published.status = 'published';
@@ -2419,11 +2552,12 @@ app.patch('/api/workflow-templates/:id/status', authenticate, requireRoles('deve
           item.id !== existing.id &&
           item.status === 'published' &&
           normalizeWorkflowText(item.organizationId) === normalizeWorkflowText(version.organizationId) &&
-          normalizeWorkflowText(item.businessType) === normalizeWorkflowText(version.businessType)
+          normalizeWorkflowText(item.moduleName || item.publishedVersion?.basic?.moduleName || item.draft?.basic?.moduleName) === normalizeWorkflowText(version.basic?.moduleName) &&
+          normalizeWorkflowText(item.approvalTypeName || item.publishedVersion?.basic?.approvalTypeName || item.draft?.basic?.approvalTypeName) === normalizeWorkflowText(version.basic?.approvalTypeName)
         ));
 
         if (duplicate) {
-          throw createHttpError('同一组织和业务类型已经存在已发布审批流，请先停用原流程。', 409);
+          throw createHttpError('同一组织和具体业务已经存在已发布审批流，请先停用原流程。', 409);
         }
       }
 
@@ -2855,6 +2989,7 @@ app.post('/api/records', authenticate, requireRoles('employee', 'boss'), async (
       moduleName,
       approvalTypeName,
       applicantUsername: req.user.username,
+      businessData,
     });
     const record = await createBusinessRecord({
       id: `APP-${Date.now()}`,

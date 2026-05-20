@@ -2,7 +2,7 @@ import React from 'react';
 import { auth } from '../auth';
 import { storage } from '../storage';
 import Sidebar from './Sidebar';
-import { ChevronDown, LogOut, Search, ShieldCheck, UserRound } from 'lucide-react';
+import { ChevronDown, LogOut, PanelLeftClose, PanelLeftOpen, Search, ShieldCheck, UserRound } from 'lucide-react';
 import { AdminView, Role, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -206,6 +206,7 @@ export default function AppLayout({
   const sessionUser = auth.getSessionUser();
   const perspective = auth.getPerspective();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
+  const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = React.useState(false);
   const [accounts, setAccounts] = React.useState<SystemAccount[]>([]);
   const [isLoadingAccounts, setIsLoadingAccounts] = React.useState(false);
 
@@ -271,6 +272,7 @@ export default function AppLayout({
           setIsSidebarOpen(false);
         }}
         isOpen={isSidebarOpen}
+        isDesktopCollapsed={isDesktopSidebarCollapsed}
         onClose={() => setIsSidebarOpen(false)}
       />
 
@@ -290,6 +292,17 @@ export default function AppLayout({
         <header className="glass grow-0 shrink-0 z-30">
           <div className="h-16 lg:h-20 flex items-center justify-between px-6 lg:px-12">
             <div className="flex items-center gap-4 lg:gap-6 min-w-0">
+              <button
+                type="button"
+                onClick={() => setIsDesktopSidebarCollapsed((current) => !current)}
+                className="hidden lg:flex w-10 h-10 items-center justify-center rounded-full text-midnight-graphite hover:bg-lightest-gray-background transition-colors"
+                aria-label={isDesktopSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+                title={isDesktopSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+              >
+                {isDesktopSidebarCollapsed
+                  ? <PanelLeftOpen size={18} strokeWidth={2.3} />
+                  : <PanelLeftClose size={18} strokeWidth={2.3} />}
+              </button>
               <button
                 onClick={() => setIsSidebarOpen(true)}
                 className="w-10 h-10 flex items-center justify-center lg:hidden text-midnight-graphite"
@@ -347,7 +360,7 @@ export default function AppLayout({
         </header>
 
         <main className="flex-1 overflow-y-auto no-scrollbar pt-12 lg:pt-16 px-6 lg:px-20 pb-40">
-          <div className="max-w-[1400px] mx-auto min-h-full flex flex-col">
+          <div className="max-w-[1680px] mx-auto min-h-full flex flex-col">
             <AnimatePresence mode="wait">
               <motion.div
                 key={perspective}

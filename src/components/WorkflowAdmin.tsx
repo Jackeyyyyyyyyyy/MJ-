@@ -17,6 +17,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { storage } from '../storage';
+import { approvalSchema } from '../approvalSchema';
 import {
   ApprovalMode,
   ApprovalStep,
@@ -36,6 +37,26 @@ import {
 import { cn } from '../lib/utils';
 
 const DEFAULT_ORG_ID = 'default-org';
+const BUSINESS_SCOPE_SEPARATOR = '|||';
+const FORM_FIELD_PREFIX = 'form:';
+const SUBMITTER_FIELD_PREFIX = 'submitter:';
+
+interface BusinessScopeOption {
+  key: string;
+  moduleName: string;
+  approvalTypeName: string;
+  label: string;
+  businessType: WorkflowBusinessType;
+  fields: string[];
+}
+
+type ConditionFieldKind = 'number' | 'text' | 'member' | 'department' | 'role';
+
+interface ConditionFieldOption {
+  value: WorkflowConditionField;
+  label: string;
+  kind: ConditionFieldKind;
+}
 
 const businessTypeOptions: Array<{
   value: WorkflowBusinessType;
@@ -49,19 +70,26 @@ const businessTypeOptions: Array<{
   { value: 'general', label: '通用审批', moduleName: '审批流配置', approvalTypeName: 'general' },
 ];
 
-const conditionFieldOptions: Array<{ value: WorkflowConditionField; label: string }> = [
-  { value: 'amount', label: 'amount 金额' },
-  { value: 'category', label: 'category 类别' },
-  { value: 'project', label: 'project 项目' },
-  { value: 'department', label: 'department 部门' },
-];
-
 const conditionOperatorOptions: Array<{ value: WorkflowConditionOperator; label: string }> = [
   { value: 'lte', label: '<= 小于等于' },
   { value: 'gt', label: '> 大于' },
   { value: 'between', label: '区间' },
   { value: 'eq', label: '= 等于' },
 ];
+
+const businessScopeOptions: BusinessScopeOption[] = approvalSchema.modules.flatMap((module) => (
+  module.approvalTypes.map((approvalType) => {
+    const fields = approvalType.businessFields;
+    return {
+      key: `${module.name}${BUSINESS_SCOPE_SEPARATOR}${approvalType.name}`,
+      moduleName: module.name,
+      approvalTypeName: approvalType.name,
+      label: `${module.name} / ${approvalType.name}`,
+      businessType: inferBusinessTypeFromNames(module.name, approvalType.name),
+      fields: [...new Set(fields.filter(Boolean))],
+    };
+  })
+));
 
 const statusLabels: Record<WorkflowTemplate['status'], string> = {
   draft: '草稿',
@@ -83,8 +111,80 @@ function readSelectedValues(event: React.ChangeEvent<HTMLSelectElement>) {
   return Array.from(event.currentTarget.selectedOptions, (option) => (option as HTMLOptionElement).value);
 }
 
+function inferBusinessTypeFromNames(moduleName: string, approvalTypeName: string): WorkflowBusinessType {
+  const text = `${moduleName}${approvalTypeName}`;
+  if (text.includes('请假')) return 'leave';
+  if (text.includes('报销')) return 'reimbursement';
+  if (/[采购付预款费资金备用金成本收入利润价格]/.test(text)) return 'purchase';
+  return 'general';
+}
+
+function getBusinessScopeKey(moduleName?: string, approvalTypeName?: string) {
+  return `${moduleName || ''}${BUSINESS_SCOPE_SEPARATOR}${approvalTypeName || ''}`;
+}
+
+function getBusinessScopeByKey(key: string) {
+  return businessScopeOptions.find((option) => option.key === key) || businessScopeOptions[0];
+}
+
+function getBusinessScopeByNames(moduleName?: string, approvalTypeName?: string) {
+  return businessScopeOptions.find((option) => (
+    option.moduleName === moduleName && option.approvalTypeName === approvalTypeName
+  )) || null;
+}
+
+function getWorkflowScopeLabel(moduleName?: string, approvalTypeName?: string) {
+  if (moduleName && approvalTypeName) return `${moduleName} / ${approvalTypeName}`;
+  return moduleName || approvalTypeName || '未设置业务';
+}
+
+function getTemplateScopeLabel(template: WorkflowTemplate) {
+  return getWorkflowScopeLabel(
+    template.moduleName || template.draft?.basic?.moduleName,
+    template.approvalTypeName || template.draft?.basic?.approvalTypeName,
+  );
+}
+
 function getBusinessTypeMeta(type?: string) {
   return businessTypeOptions.find((item) => item.value === type) || businessTypeOptions[businessTypeOptions.length - 1];
+}
+
+function isNumericConditionFieldValue(field: string) {
+  const label = field.startsWith(FORM_FIELD_PREFIX) ? field.slice(FORM_FIELD_PREFIX.length) : field;
+  return field === 'amount' || /金额|价格|费用|利润|汇率|数量|总额|时长|天数|小时/.test(label);
+}
+
+function getConditionFieldLabel(field: string) {
+  if (field === 'amount') return '金额';
+  if (field === 'submitter.member') return '提交人';
+  if (field === 'submitter.department') return '提交人部门';
+  if (field === 'submitter.role') return '提交人角色组';
+  if (field.startsWith(FORM_FIELD_PREFIX)) return field.slice(FORM_FIELD_PREFIX.length);
+  if (field.startsWith(SUBMITTER_FIELD_PREFIX)) return field.slice(SUBMITTER_FIELD_PREFIX.length);
+  return field;
+}
+
+function getConditionFieldKind(field: string): ConditionFieldKind {
+  if (field === 'submitter.member') return 'member';
+  if (field === 'submitter.department') return 'department';
+  if (field === 'submitter.role') return 'role';
+  return isNumericConditionFieldValue(field) ? 'number' : 'text';
+}
+
+function getConditionFieldOptions(draft: WorkflowVersion | null): ConditionFieldOption[] {
+  const scope = draft ? getBusinessScopeByNames(draft.basic.moduleName, draft.basic.approvalTypeName) : null;
+  const formFieldOptions = (scope?.fields || []).map((field) => ({
+    value: `${FORM_FIELD_PREFIX}${field}`,
+    label: `表单 / ${field}`,
+    kind: isNumericConditionFieldValue(field) ? 'number' as const : 'text' as const,
+  }));
+
+  return [
+    { value: 'submitter.member', label: '提交人 / 本人', kind: 'member' },
+    { value: 'submitter.department', label: '提交人 / 部门', kind: 'department' },
+    { value: 'submitter.role', label: '提交人 / 角色组', kind: 'role' },
+    ...formFieldOptions,
+  ];
 }
 
 function defaultSubmitPermission(): SubmitPermissionRule {
@@ -105,10 +205,19 @@ function defaultCcRule(): CcRule {
   };
 }
 
-function defaultCondition(): WorkflowCondition {
+function defaultCondition(field: WorkflowConditionField = 'submitter.department'): WorkflowCondition {
+  if (!isNumericConditionFieldValue(field)) {
+    return {
+      id: createId('cond'),
+      field,
+      operator: 'eq',
+      value: '',
+    };
+  }
+
   return {
     id: createId('cond'),
-    field: 'amount',
+    field,
     operator: 'lte',
     amountMax: 1000,
   };
@@ -137,18 +246,17 @@ function defaultBranch(): WorkflowBranch {
   };
 }
 
-function createDraft(name: string, businessType: WorkflowBusinessType): WorkflowVersion {
-  const meta = getBusinessTypeMeta(businessType);
+function createDraft(name: string, scope: BusinessScopeOption): WorkflowVersion {
   return prepareDraftForSave({
     id: createId('draft'),
     version: 1,
     status: 'draft',
     organizationId: DEFAULT_ORG_ID,
-    businessType,
+    businessType: scope.businessType,
     basic: {
       name,
-      moduleName: meta.moduleName,
-      approvalTypeName: meta.approvalTypeName,
+      moduleName: scope.moduleName,
+      approvalTypeName: scope.approvalTypeName,
       visibleRange: 'all',
     },
     submitPermission: defaultSubmitPermission(),
@@ -267,12 +375,10 @@ function normalizeStep(step: Partial<ApprovalStep> | undefined, index: number): 
 }
 
 function normalizeCondition(condition: Partial<WorkflowCondition> | undefined): WorkflowCondition {
-  const field = ['amount', 'category', 'project', 'department'].includes(String(condition?.field))
-    ? condition?.field as WorkflowConditionField
-    : 'amount';
+  const field = String(condition?.field || 'submitter.department') as WorkflowConditionField;
   const operator = ['lte', 'gt', 'between', 'eq'].includes(String(condition?.operator))
     ? condition?.operator as WorkflowConditionOperator
-    : 'lte';
+    : isNumericConditionFieldValue(field) ? 'lte' : 'eq';
 
   return {
     id: condition?.id || createId('cond'),
@@ -282,6 +388,34 @@ function normalizeCondition(condition: Partial<WorkflowCondition> | undefined): 
     amountMin: Number.isFinite(Number(condition?.amountMin)) ? Number(condition?.amountMin) : undefined,
     amountMax: Number.isFinite(Number(condition?.amountMax)) ? Number(condition?.amountMax) : undefined,
     expression: condition?.expression,
+  };
+}
+
+function getAllowedConditionFields(scope: BusinessScopeOption) {
+  return new Set<WorkflowConditionField>([
+    'submitter.member',
+    'submitter.department',
+    'submitter.role',
+    ...scope.fields.map((field) => `${FORM_FIELD_PREFIX}${field}`),
+  ]);
+}
+
+function getFallbackConditionField(scope: BusinessScopeOption): WorkflowConditionField {
+  const firstNumericField = scope.fields.find((field) => isNumericConditionFieldValue(field));
+  return firstNumericField ? `${FORM_FIELD_PREFIX}${firstNumericField}` : 'submitter.department';
+}
+
+function rebaseConditionToScope(condition: WorkflowCondition, scope: BusinessScopeOption): WorkflowCondition {
+  const allowedFields = getAllowedConditionFields(scope);
+  if (allowedFields.has(condition.field)) return normalizeCondition(condition);
+
+  const nextField = condition.field === 'department'
+    ? 'submitter.department'
+    : getFallbackConditionField(scope);
+
+  return {
+    ...defaultCondition(nextField),
+    id: condition.id,
   };
 }
 
@@ -342,8 +476,17 @@ function normalizeBranches(draft: WorkflowVersion): WorkflowBranch[] {
 }
 
 function normalizeDraftForEditor(draft: WorkflowVersion): WorkflowVersion {
-  const businessType = getBusinessTypeMeta(draft.businessType).value;
-  const meta = getBusinessTypeMeta(businessType);
+  const scope = getBusinessScopeByNames(draft.basic?.moduleName, draft.basic?.approvalTypeName);
+  const fallbackScope = scope
+    || businessScopeOptions.find((option) => option.businessType === draft.businessType)
+    || businessScopeOptions[0];
+  const businessType = fallbackScope?.businessType || getBusinessTypeMeta(draft.businessType).value;
+  const branches = normalizeBranches(draft).map((branch) => (
+    branch.isDefault ? branch : {
+      ...branch,
+      conditions: branch.conditions.map((condition) => rebaseConditionToScope(condition, fallbackScope)),
+    }
+  ));
 
   return {
     ...draft,
@@ -351,8 +494,8 @@ function normalizeDraftForEditor(draft: WorkflowVersion): WorkflowVersion {
     businessType,
     basic: {
       name: draft.basic?.name || '新审批流',
-      moduleName: draft.basic?.moduleName || meta.moduleName,
-      approvalTypeName: draft.basic?.approvalTypeName || meta.approvalTypeName,
+      moduleName: scope?.moduleName || fallbackScope?.moduleName || '审批流配置',
+      approvalTypeName: scope?.approvalTypeName || fallbackScope?.approvalTypeName || '通用审批',
       visibleRange: draft.basic?.visibleRange || 'all',
     },
     submitPermission: {
@@ -362,7 +505,7 @@ function normalizeDraftForEditor(draft: WorkflowVersion): WorkflowVersion {
       departmentIds: draft.submitPermission?.departmentIds || [],
       excludedMemberIds: draft.submitPermission?.excludedMemberIds || [],
     },
-    branches: normalizeBranches(draft),
+    branches,
     ccRule: {
       ...defaultCcRule(),
       ...(draft.ccRule || {}),
@@ -451,15 +594,15 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
           return;
         }
 
-        if (condition.field === 'amount') {
+        if (isNumericConditionFieldValue(condition.field)) {
           if (condition.operator === 'between') {
             if (!Number.isFinite(Number(condition.amountMin)) || !Number.isFinite(Number(condition.amountMax))) {
-              addValidationError(state, 'branches', `${branchLabel} 金额区间必须填写有效数字`, branch.id);
+              addValidationError(state, 'branches', `${branchLabel} 数值区间必须填写有效数字`, branch.id);
             }
           } else if (condition.operator === 'lte' && !Number.isFinite(Number(condition.amountMax))) {
-            addValidationError(state, 'branches', `${branchLabel} 金额上限必须填写有效数字`, branch.id);
+            addValidationError(state, 'branches', `${branchLabel} 数值上限必须填写有效数字`, branch.id);
           } else if (condition.operator === 'gt' && !Number.isFinite(Number(condition.amountMin))) {
-            addValidationError(state, 'branches', `${branchLabel} 金额下限必须填写有效数字`, branch.id);
+            addValidationError(state, 'branches', `${branchLabel} 数值下限必须填写有效数字`, branch.id);
           } else if (condition.operator === 'eq' && !condition.value?.trim()) {
             addValidationError(state, 'branches', `${branchLabel} 条件值不能为空`, branch.id);
           }
@@ -498,16 +641,16 @@ function formatDate(value?: string) {
 }
 
 function formatCondition(condition: WorkflowCondition) {
-  const field = condition.field;
-  if (field === 'amount') {
-    if (condition.operator === 'between') return `amount > ${condition.amountMin ?? '?'} 且 <= ${condition.amountMax ?? '?'}`;
-    if (condition.operator === 'gt') return `amount > ${condition.amountMin ?? '?'}`;
-    if (condition.operator === 'lte') return `amount <= ${condition.amountMax ?? '?'}`;
-    return `amount = ${condition.value || '?'}`;
+  const fieldLabel = getConditionFieldLabel(condition.field);
+  if (isNumericConditionFieldValue(condition.field)) {
+    if (condition.operator === 'between') return `${fieldLabel} > ${condition.amountMin ?? '?'} 且 <= ${condition.amountMax ?? '?'}`;
+    if (condition.operator === 'gt') return `${fieldLabel} > ${condition.amountMin ?? '?'}`;
+    if (condition.operator === 'lte') return `${fieldLabel} <= ${condition.amountMax ?? '?'}`;
+    return `${fieldLabel} = ${condition.value || '?'}`;
   }
 
   const operator = conditionOperatorOptions.find((item) => item.value === condition.operator)?.label.split(' ')[0] || '=';
-  return `${field} ${operator} ${condition.value || '?'}`;
+  return `${fieldLabel} ${operator} ${condition.value || '?'}`;
 }
 
 function formatStepRule(step: ApprovalStep, directory: OrganizationDirectory) {
@@ -548,6 +691,1125 @@ function formatSubmitPermission(permission: SubmitPermissionRule, directory: Org
 
 function getBranchTitle(branch: WorkflowBranch) {
   return branch.isDefault ? 'Default Branch' : branch.name;
+}
+
+type DesignerSelection =
+  | { type: 'submit' }
+  | { type: 'branch'; branchId: string }
+  | { type: 'step'; branchId: string; stepId: string }
+  | { type: 'cc' };
+
+const submitDesignerSelection: DesignerSelection = { type: 'submit' };
+
+function isDesignerSelected(
+  selection: DesignerSelection,
+  type: DesignerSelection['type'],
+  branchId?: string,
+  stepId?: string,
+) {
+  if (selection.type !== type) return false;
+  if ((selection.type === 'branch' || selection.type === 'step') && selection.branchId !== branchId) return false;
+  if (selection.type === 'step' && selection.stepId !== stepId) return false;
+  return true;
+}
+
+function getApproverTypeLabel(type: ApproverRule['type']) {
+  if (type === 'department_manager') return '部门主管';
+  if (type === 'submitter_manager') return '发起人的上级';
+  if (type === 'role_based') return '指定角色';
+  return '指定成员';
+}
+
+function getApprovalModeLabel(mode: ApprovalMode) {
+  return mode === 'all_of' ? '会签：所有人通过' : '或签：任一人通过';
+}
+
+function getEmptyApproverActionLabel(action: ApprovalStep['emptyApproverAction']) {
+  return action === 'auto_pass' ? '找不到审批人时自动跳过' : '找不到审批人时报错';
+}
+
+function FlowConnector({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className={cn("flex flex-col items-center", compact ? "h-8" : "h-12")}>
+      <span className="h-full w-px bg-border-silver" />
+    </div>
+  );
+}
+
+function FlowAddButton({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="relative z-10 h-8 px-3 rounded-full bg-white border border-border-silver text-[12px] font-black text-interactive-blue shadow-sm flex items-center gap-1.5 hover:border-interactive-blue hover:bg-[#f5fbff]"
+    >
+      <Plus size={13} strokeWidth={3} />
+      {label}
+    </button>
+  );
+}
+
+function FlowNode({
+  tone,
+  kicker,
+  title,
+  subtitle,
+  meta,
+  icon,
+  selected,
+  hasError,
+  onClick,
+  children,
+}: {
+  tone: 'submit' | 'approval' | 'condition' | 'cc' | 'end';
+  kicker: string;
+  title: string;
+  subtitle: string;
+  meta?: string;
+  icon: React.ReactNode;
+  selected?: boolean;
+  hasError?: boolean;
+  onClick?: () => void;
+  children?: React.ReactNode;
+}) {
+  const toneClass = {
+    submit: 'border-[#7d89b0] bg-white',
+    approval: 'border-[#c9791b] bg-[#fffaf3]',
+    condition: 'border-[#79a87b] bg-[#fbfff7]',
+    cc: 'border-[#6697d4] bg-[#f7fbff]',
+    end: 'border-border-silver bg-white',
+  }[tone];
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "w-full rounded-lg border-2 p-0 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-sky-blue-highlight",
+        toneClass,
+        selected && "ring-2 ring-interactive-blue ring-offset-2",
+        hasError && "border-[#c62828] bg-[#fffafa]"
+      )}
+    >
+      <div className={cn(
+        "h-8 rounded-t-[6px] px-3 flex items-center justify-between text-[11px] font-black",
+        tone === 'approval' && "bg-[#c9791b] text-white",
+        tone === 'submit' && "bg-[#7d89b0] text-white",
+        tone === 'condition' && "bg-[#edf7ed] text-[#2e7d32]",
+        tone === 'cc' && "bg-[#e7f1ff] text-[#2267ad]",
+        tone === 'end' && "bg-lightest-gray-background text-medium-gray"
+      )}>
+        <span>{kicker}</span>
+        {hasError && <AlertCircle size={14} />}
+      </div>
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          <span className={cn(
+            "mt-0.5 h-9 w-9 rounded-full flex shrink-0 items-center justify-center",
+            tone === 'approval' && "bg-[#fff1df] text-[#a85e0c]",
+            tone === 'submit' && "bg-lightest-gray-background text-midnight-graphite",
+            tone === 'condition' && "bg-[#edf7ed] text-[#2e7d32]",
+            tone === 'cc' && "bg-[#e7f1ff] text-[#2267ad]",
+            tone === 'end' && "bg-lightest-gray-background text-medium-gray"
+          )}>
+            {icon}
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[15px] font-black text-midnight-graphite truncate">{title}</span>
+            <span className="mt-1 block text-[12px] font-bold text-medium-gray leading-5">{subtitle}</span>
+            {meta && <span className="mt-2 block text-[11px] font-black text-light-gray">{meta}</span>}
+          </span>
+        </div>
+        {children}
+      </div>
+    </button>
+  );
+}
+
+function WorkflowFlowDesigner({
+  draft,
+  directory,
+  submitPermission,
+  ccRule,
+  branches,
+  validation,
+  selection,
+  fieldOptions,
+  memberOptions,
+  departmentOptions,
+  roleOptions,
+  onSelect,
+  onAddBranch,
+  onRemoveBranch,
+  onUpdateBranch,
+  onAddCondition,
+  onRemoveCondition,
+  onUpdateCondition,
+  onPatchSubmitPermission,
+  onPatchCcRule,
+  onAddStep,
+  onUpdateStep,
+  onRemoveStep,
+  onMoveStep,
+}: {
+  draft: WorkflowVersion;
+  directory: OrganizationDirectory;
+  submitPermission: SubmitPermissionRule;
+  ccRule: CcRule;
+  branches: WorkflowBranch[];
+  validation: ValidationState;
+  selection: DesignerSelection;
+  fieldOptions: ConditionFieldOption[];
+  memberOptions: Array<{ value: string; label: string }>;
+  departmentOptions: Array<{ value: string; label: string }>;
+  roleOptions: Array<{ value: string; label: string }>;
+  onSelect: (selection: DesignerSelection) => void;
+  onAddBranch: () => void;
+  onRemoveBranch: (branchId: string) => void;
+  onUpdateBranch: (branchId: string, patch: Partial<WorkflowBranch>) => void;
+  onAddCondition: (branchId: string) => void;
+  onRemoveCondition: (branchId: string, conditionId: string) => void;
+  onUpdateCondition: (branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
+  onPatchSubmitPermission: (patch: Partial<SubmitPermissionRule>) => void;
+  onPatchCcRule: (patch: Partial<CcRule>) => void;
+  onAddStep: (branchId: string) => void;
+  onUpdateStep: (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => void;
+  onRemoveStep: (branchId: string, stepId: string) => void;
+  onMoveStep: (branchId: string, stepId: string, direction: -1 | 1) => void;
+}) {
+  const defaultBranch = branches.find((branch) => branch.isDefault) || branches[branches.length - 1];
+  const conditionalBranches = branches.filter((branch) => !branch.isDefault);
+  const flowBranches = conditionalBranches.length > 0
+    ? [...conditionalBranches, ...(defaultBranch ? [defaultBranch] : [])]
+    : defaultBranch ? [defaultBranch] : [];
+  const selectedBranch = selection.type === 'branch' || selection.type === 'step'
+    ? branches.find((branch) => branch.id === selection.branchId) || null
+    : null;
+  const selectedStep = selection.type === 'step'
+    ? selectedBranch?.approvalSteps.find((step) => step.id === selection.stepId) || null
+    : null;
+  const activeSelection: DesignerSelection = (
+    (selection.type === 'branch' && selectedBranch)
+    || (selection.type === 'step' && selectedStep)
+    || selection.type === 'cc'
+  ) ? selection : submitDesignerSelection;
+  const canvasViewportRef = React.useRef<HTMLDivElement | null>(null);
+  const panStartRef = React.useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const [isPanning, setIsPanning] = React.useState(false);
+  const canvasMinWidth = Math.max(1040, flowBranches.length * 340);
+
+  const handleCanvasPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+
+    const target = event.target as HTMLElement;
+    if (target.closest('button, input, select, textarea, a, [role="button"]')) return;
+
+    const viewport = canvasViewportRef.current;
+    if (!viewport) return;
+
+    panStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      left: viewport.scrollLeft,
+      top: viewport.scrollTop,
+    };
+    setIsPanning(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const handleCanvasPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const panStart = panStartRef.current;
+    const viewport = canvasViewportRef.current;
+    if (!panStart || !viewport) return;
+
+    viewport.scrollLeft = panStart.left - (event.clientX - panStart.x);
+    viewport.scrollTop = panStart.top - (event.clientY - panStart.y);
+  };
+
+  const stopCanvasPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    panStartRef.current = null;
+    setIsPanning(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
+      <div className="px-6 py-5 border-b border-border-silver flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-black text-white flex items-center justify-center">
+            <GitBranch size={18} strokeWidth={2.5} />
+          </div>
+          <div>
+            <h2 className="text-[18px] font-black">流程设计</h2>
+            <p className="mt-1 text-[12px] font-bold text-medium-gray">按飞书审批的画布方式配置提交人、条件分支、审批节点和抄送。</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onAddBranch}
+            className="h-9 px-4 rounded-full bg-lightest-gray-background text-[12px] font-bold flex items-center gap-2 hover:bg-canvas-white"
+          >
+            <GitBranch size={14} /> 添加条件
+          </button>
+          {defaultBranch && (
+            <button
+              type="button"
+              onClick={() => onAddStep(defaultBranch.id)}
+              className="h-9 px-4 rounded-full bg-black text-white text-[12px] font-bold flex items-center gap-2"
+            >
+              <Plus size={14} /> 添加审批
+            </button>
+          )}
+        </div>
+      </div>
+
+      {validation.sections.branches?.length > 0 && (
+        <div className="mx-6 mt-5 rounded-2xl bg-[#ffebee] px-4 py-3 text-[12px] font-bold text-[#c62828]">
+          {validation.sections.branches[0]}
+        </div>
+      )}
+
+      <div className="grid min-h-[860px] lg:grid-cols-[minmax(640px,1fr)_360px]">
+        <div
+          ref={canvasViewportRef}
+          onPointerDown={handleCanvasPointerDown}
+          onPointerMove={handleCanvasPointerMove}
+          onPointerUp={stopCanvasPan}
+          onPointerCancel={stopCanvasPan}
+          className={cn(
+            "overflow-auto bg-[#f7f8fa] cursor-grab select-none",
+            isPanning && "cursor-grabbing"
+          )}
+        >
+          <div
+            className="min-h-[860px] px-12 py-10"
+            style={{
+              minWidth: `${canvasMinWidth}px`,
+              backgroundImage: 'radial-gradient(#d9dde5 1px, transparent 1px)',
+              backgroundSize: '18px 18px',
+            }}
+          >
+            <div className="mx-auto flex max-w-[1480px] flex-col items-center">
+              <div className="w-[340px]">
+                <FlowNode
+                  tone="submit"
+                  kicker="提交"
+                  title="提交人"
+                  subtitle={`可提交：${formatSubmitPermission(submitPermission, directory)}`}
+                  meta={draft.formFields?.length ? `已关联 ${draft.formFields.length} 个表单字段` : '表单字段已由业务表单维护'}
+                  icon={<UserRound size={17} strokeWidth={2.5} />}
+                  selected={isDesignerSelected(activeSelection, 'submit')}
+                  hasError={Boolean(validation.sections.submit?.length)}
+                  onClick={() => onSelect({ type: 'submit' })}
+                />
+              </div>
+
+              <FlowConnector />
+              <FlowAddButton label="添加条件" onClick={onAddBranch} />
+              <FlowConnector compact />
+
+              <div className="relative w-full">
+                {flowBranches.length > 1 && (
+                  <div className="absolute left-[12%] right-[12%] top-5 h-px bg-border-silver" />
+                )}
+                <div
+                  className="relative grid gap-5"
+                  style={{ gridTemplateColumns: `repeat(${Math.max(flowBranches.length, 1)}, minmax(300px, 1fr))` }}
+                >
+                  {flowBranches.map((branch, branchIndex) => (
+                    <div key={branch.id} className="flex min-w-[300px] flex-col items-center">
+                      {flowBranches.length > 1 && <span className="h-5 w-px bg-border-silver" />}
+                      <FlowNode
+                        tone={branch.isDefault ? 'condition' : 'condition'}
+                        kicker={branch.isDefault ? '默认条件' : `条件 ${branchIndex + 1}`}
+                        title={getBranchTitle(branch)}
+                        subtitle={branch.isDefault ? '其他条件未命中时进入' : branch.conditions.map(formatCondition).join(' 且 ') || '请设置条件'}
+                        meta={branch.isDefault ? '优先级最低' : `优先级 ${branchIndex + 1}`}
+                        icon={<GitBranch size={17} strokeWidth={2.5} />}
+                        selected={isDesignerSelected(activeSelection, 'branch', branch.id)}
+                        hasError={Boolean(validation.branches[branch.id]?.length)}
+                        onClick={() => onSelect({ type: 'branch', branchId: branch.id })}
+                      />
+
+                      <FlowConnector compact />
+                      <FlowAddButton label="审批" onClick={() => onAddStep(branch.id)} />
+                      <FlowConnector compact />
+
+                      <div className="flex w-full flex-col items-center gap-0">
+                        {branch.approvalSteps.length === 0 ? (
+                          <div className="w-full rounded-lg border border-dashed border-border-silver bg-white/80 p-5 text-center text-[12px] font-bold text-medium-gray">
+                            当前分支暂无审批节点
+                          </div>
+                        ) : branch.approvalSteps.map((step, stepIndex) => (
+                          <React.Fragment key={step.id}>
+                            {stepIndex > 0 && <FlowConnector compact />}
+                            <FlowNode
+                              tone="approval"
+                              kicker={`审批 ${stepIndex + 1}`}
+                              title={step.name}
+                              subtitle={formatStepRule(step, directory)}
+                              meta={getApprovalModeLabel(step.approvalMode)}
+                              icon={<CheckCircle2 size={17} strokeWidth={2.5} />}
+                              selected={isDesignerSelected(activeSelection, 'step', branch.id, step.id)}
+                              hasError={Boolean(validation.steps[step.id]?.length)}
+                              onClick={() => onSelect({ type: 'step', branchId: branch.id, stepId: step.id })}
+                            />
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <FlowConnector />
+              <div className="w-[340px]">
+                <FlowNode
+                  tone="cc"
+                  kicker="抄送"
+                  title="抄送人"
+                  subtitle={[
+                    ccRule.memberIds.length ? `${ccRule.memberIds.length} 个成员` : '',
+                    ccRule.departmentIds.length ? `${ccRule.departmentIds.length} 个部门` : '',
+                    ccRule.roleGroupIds.length ? `${ccRule.roleGroupIds.length} 个角色` : '',
+                  ].filter(Boolean).join('、') || '流程结束后抄送，可为空'}
+                  icon={<Send size={17} strokeWidth={2.5} />}
+                  selected={isDesignerSelected(activeSelection, 'cc')}
+                  onClick={() => onSelect({ type: 'cc' })}
+                />
+              </div>
+              <FlowConnector compact />
+              <div className="w-[220px]">
+                <FlowNode
+                  tone="end"
+                  kicker="结束"
+                  title="流程完成"
+                  subtitle="所有审批节点通过后结束"
+                  icon={<CheckCircle2 size={17} strokeWidth={2.5} />}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <DesignerInspector
+          selection={activeSelection}
+          selectedBranch={selectedBranch}
+          selectedStep={selectedStep}
+          branches={branches}
+          submitPermission={submitPermission}
+          ccRule={ccRule}
+          directory={directory}
+          validation={validation}
+          memberOptions={memberOptions}
+          departmentOptions={departmentOptions}
+          roleOptions={roleOptions}
+          fieldOptions={fieldOptions}
+          onSelect={onSelect}
+          onRemoveBranch={onRemoveBranch}
+          onUpdateBranch={onUpdateBranch}
+          onAddCondition={onAddCondition}
+          onRemoveCondition={onRemoveCondition}
+          onUpdateCondition={onUpdateCondition}
+          onPatchSubmitPermission={onPatchSubmitPermission}
+          onPatchCcRule={onPatchCcRule}
+          onAddStep={onAddStep}
+          onUpdateStep={onUpdateStep}
+          onRemoveStep={onRemoveStep}
+          onMoveStep={onMoveStep}
+        />
+      </div>
+    </section>
+  );
+}
+
+function InspectorHeader({
+  label,
+  title,
+  description,
+}: {
+  label: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="border-b border-border-silver px-5 py-5">
+      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-light-gray">{label}</p>
+      <h3 className="mt-2 text-[20px] font-black text-midnight-graphite">{title}</h3>
+      <p className="mt-1 text-[12px] font-bold leading-5 text-medium-gray">{description}</p>
+    </div>
+  );
+}
+
+function SegmentedButton({
+  isActive,
+  onClick,
+  children,
+}: {
+  isActive: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "min-h-10 rounded-xl px-3 py-2 text-left text-[12px] font-black transition-all",
+        isActive ? "bg-black text-white" : "bg-lightest-gray-background text-midnight-graphite hover:bg-canvas-white"
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ConditionValueControl({
+  condition,
+  branchId,
+  memberOptions,
+  departmentOptions,
+  roleOptions,
+  onUpdateCondition,
+}: {
+  condition: WorkflowCondition;
+  branchId: string;
+  memberOptions: Array<{ value: string; label: string }>;
+  departmentOptions: Array<{ value: string; label: string }>;
+  roleOptions: Array<{ value: string; label: string }>;
+  onUpdateCondition: (branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
+}) {
+  const kind = getConditionFieldKind(condition.field);
+
+  if (kind === 'number' && condition.operator === 'between') {
+    return (
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          className="input-field text-[13px]"
+          type="number"
+          value={condition.amountMin ?? ''}
+          onChange={(event) => onUpdateCondition(branchId, condition.id, { amountMin: event.target.value === '' ? undefined : Number(event.target.value) })}
+          placeholder="下限"
+        />
+        <input
+          className="input-field text-[13px]"
+          type="number"
+          value={condition.amountMax ?? ''}
+          onChange={(event) => onUpdateCondition(branchId, condition.id, { amountMax: event.target.value === '' ? undefined : Number(event.target.value) })}
+          placeholder="上限"
+        />
+      </div>
+    );
+  }
+
+  if (kind === 'number' && condition.operator === 'gt') {
+    return (
+      <input
+        className="input-field text-[13px]"
+        type="number"
+        value={condition.amountMin ?? ''}
+        onChange={(event) => onUpdateCondition(branchId, condition.id, { amountMin: event.target.value === '' ? undefined : Number(event.target.value) })}
+        placeholder="金额下限"
+      />
+    );
+  }
+
+  if (kind === 'number' && condition.operator === 'lte') {
+    return (
+      <input
+        className="input-field text-[13px]"
+        type="number"
+        value={condition.amountMax ?? ''}
+        onChange={(event) => onUpdateCondition(branchId, condition.id, { amountMax: event.target.value === '' ? undefined : Number(event.target.value) })}
+        placeholder="金额上限"
+      />
+    );
+  }
+
+  if (kind === 'department' || kind === 'member' || kind === 'role') {
+    const options = kind === 'department' ? departmentOptions : kind === 'member' ? memberOptions : roleOptions;
+    return (
+      <select
+        className="input-field text-[13px]"
+        value={condition.value || ''}
+        onChange={(event) => onUpdateCondition(branchId, condition.id, { value: event.target.value })}
+      >
+        <option value="">请选择{getConditionFieldLabel(condition.field)}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    );
+  }
+
+  return (
+    <input
+      className="input-field text-[13px]"
+      type={kind === 'number' ? 'number' : 'text'}
+      value={condition.value || ''}
+      onChange={(event) => onUpdateCondition(branchId, condition.id, { value: event.target.value })}
+      placeholder={`${getConditionFieldLabel(condition.field)}的值`}
+    />
+  );
+}
+
+function ConditionEditor({
+  branch,
+  condition,
+  index,
+  fieldOptions,
+  memberOptions,
+  departmentOptions,
+  roleOptions,
+  onRemoveCondition,
+  onUpdateCondition,
+}: {
+  branch: WorkflowBranch;
+  condition: WorkflowCondition;
+  index: number;
+  fieldOptions: ConditionFieldOption[];
+  memberOptions: Array<{ value: string; label: string }>;
+  departmentOptions: Array<{ value: string; label: string }>;
+  roleOptions: Array<{ value: string; label: string }>;
+  onRemoveCondition: (branchId: string, conditionId: string) => void;
+  onUpdateCondition: (branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
+}) {
+  const fieldKind = getConditionFieldKind(condition.field);
+  const operatorOptions = fieldKind === 'number'
+    ? conditionOperatorOptions
+    : conditionOperatorOptions.filter((option) => option.value === 'eq');
+
+  return (
+    <div className="rounded-2xl border border-border-silver bg-white p-4 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[12px] font-black text-midnight-graphite">条件 {index + 1}</p>
+        {branch.conditions.length > 1 && (
+          <button
+            type="button"
+            onClick={() => onRemoveCondition(branch.id, condition.id)}
+            className="h-7 px-2 rounded-full bg-[#ffebee] text-[11px] font-black text-[#c62828]"
+          >
+            删除
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <select
+          className="input-field text-[13px]"
+          value={condition.field}
+          onChange={(event) => {
+            const nextField = event.target.value as WorkflowConditionField;
+            onUpdateCondition(branch.id, condition.id, { ...defaultCondition(nextField), id: condition.id });
+          }}
+        >
+          {fieldOptions.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+        <select
+          className="input-field text-[13px]"
+          value={condition.operator}
+          onChange={(event) => onUpdateCondition(branch.id, condition.id, { operator: event.target.value as WorkflowConditionOperator })}
+        >
+          {operatorOptions.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </div>
+      <ConditionValueControl
+        condition={condition}
+        branchId={branch.id}
+        memberOptions={memberOptions}
+        departmentOptions={departmentOptions}
+        roleOptions={roleOptions}
+        onUpdateCondition={onUpdateCondition}
+      />
+      <div className="rounded-xl bg-canvas-white px-3 py-2 text-[11px] font-bold text-medium-gray">
+        当前规则：{formatCondition(condition)}
+      </div>
+    </div>
+  );
+}
+
+function StepEditor({
+  branch,
+  step,
+  stepIndex,
+  memberOptions,
+  roleOptions,
+  validation,
+  onSelect,
+  onUpdateStep,
+  onRemoveStep,
+  onMoveStep,
+}: {
+  branch: WorkflowBranch;
+  step: ApprovalStep;
+  stepIndex: number;
+  memberOptions: Array<{ value: string; label: string }>;
+  roleOptions: Array<{ value: string; label: string }>;
+  validation: ValidationState;
+  onSelect: (selection: DesignerSelection) => void;
+  onUpdateStep: (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => void;
+  onRemoveStep: (branchId: string, stepId: string) => void;
+  onMoveStep: (branchId: string, stepId: string, direction: -1 | 1) => void;
+}) {
+  return (
+    <>
+      <InspectorHeader
+        label="审批节点"
+        title={step.name || `审批 ${stepIndex + 1}`}
+        description={`位于 ${getBranchTitle(branch)}，用于配置审批人、会签方式和找不到审批人时的动作。`}
+      />
+      <div className="space-y-5 p-5">
+        {validation.steps[step.id]?.length > 0 && (
+          <div className="rounded-2xl bg-[#ffebee] px-4 py-3 text-[12px] font-bold text-[#c62828]">
+            {validation.steps[step.id][0]}
+          </div>
+        )}
+
+        <label className="block space-y-2">
+          <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">节点名称</span>
+          <input
+            className="input-field text-[14px]"
+            value={step.name}
+            onChange={(event) => onUpdateStep(branch.id, step.id, { name: event.target.value })}
+            placeholder="节点名称"
+          />
+        </label>
+
+        <div className="space-y-2">
+          <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">审批人类型</span>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { value: 'specific_members', label: '指定成员' },
+              { value: 'department_manager', label: '部门主管' },
+              { value: 'submitter_manager', label: '发起人上级' },
+              { value: 'role_based', label: '指定角色' },
+            ].map((item) => (
+              <React.Fragment key={item.value}>
+                <SegmentedButton
+                  isActive={step.approverRule.type === item.value}
+                  onClick={() => onUpdateStep(branch.id, step.id, {
+                    approverRule: {
+                      type: item.value as ApproverRule['type'],
+                      memberIds: [],
+                      departmentIds: [],
+                      roleGroupIds: [],
+                      roleGroupId: '',
+                    },
+                  })}
+                >
+                  {item.label}
+                </SegmentedButton>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+
+        {step.approverRule.type === 'specific_members' && (
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">指定成员</span>
+            <MultiSelect
+              value={step.approverRule.memberIds || []}
+              options={memberOptions}
+              onChange={(memberIds) => onUpdateStep(branch.id, step.id, {
+                approverRule: { ...step.approverRule, memberIds },
+              })}
+              emptyText="暂无成员"
+            />
+          </label>
+        )}
+
+        {step.approverRule.type === 'role_based' && (
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">角色组</span>
+            <select
+              className="input-field text-[13px]"
+              value={step.approverRule.roleGroupId || ''}
+              onChange={(event) => onUpdateStep(branch.id, step.id, {
+                approverRule: { ...step.approverRule, roleGroupId: event.target.value },
+              })}
+            >
+              <option value="">选择角色组</option>
+              {roleOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <label className="block space-y-2">
+          <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">通过方式</span>
+          <select
+            className="input-field text-[13px]"
+            value={step.approvalMode}
+            onChange={(event) => onUpdateStep(branch.id, step.id, { approvalMode: event.target.value as ApprovalMode })}
+          >
+            <option value="one_of">多人任意一人通过</option>
+            <option value="all_of">所有人都要通过</option>
+          </select>
+        </label>
+
+        <label className="block space-y-2">
+          <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">找不到审批人</span>
+          <select
+            className="input-field text-[13px]"
+            value={step.emptyApproverAction}
+            onChange={(event) => onUpdateStep(branch.id, step.id, {
+              emptyApproverAction: event.target.value as ApprovalStep['emptyApproverAction'],
+            })}
+          >
+            <option value="block_submit">找不到审批人时报错</option>
+            <option value="auto_pass">找不到审批人时自动跳过</option>
+          </select>
+        </label>
+
+        <div className="rounded-2xl bg-canvas-white px-4 py-3 text-[12px] font-bold leading-5 text-medium-gray">
+          {getApproverTypeLabel(step.approverRule.type)} · {getApprovalModeLabel(step.approvalMode)} · {getEmptyApproverActionLabel(step.emptyApproverAction)}
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => onMoveStep(branch.id, step.id, -1)}
+            disabled={stepIndex === 0}
+            className="h-10 rounded-full bg-lightest-gray-background text-[12px] font-black disabled:opacity-40"
+          >
+            上移
+          </button>
+          <button
+            type="button"
+            onClick={() => onMoveStep(branch.id, step.id, 1)}
+            disabled={stepIndex === branch.approvalSteps.length - 1}
+            className="h-10 rounded-full bg-lightest-gray-background text-[12px] font-black disabled:opacity-40"
+          >
+            下移
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onRemoveStep(branch.id, step.id);
+              onSelect({ type: 'branch', branchId: branch.id });
+            }}
+            className="h-10 rounded-full bg-[#ffebee] text-[12px] font-black text-[#c62828]"
+          >
+            删除
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function DesignerInspector({
+  selection,
+  selectedBranch,
+  selectedStep,
+  branches,
+  submitPermission,
+  ccRule,
+  directory,
+  validation,
+  memberOptions,
+  departmentOptions,
+  roleOptions,
+  fieldOptions,
+  onSelect,
+  onRemoveBranch,
+  onUpdateBranch,
+  onAddCondition,
+  onRemoveCondition,
+  onUpdateCondition,
+  onPatchSubmitPermission,
+  onPatchCcRule,
+  onAddStep,
+  onUpdateStep,
+  onRemoveStep,
+  onMoveStep,
+}: {
+  selection: DesignerSelection;
+  selectedBranch: WorkflowBranch | null;
+  selectedStep: ApprovalStep | null;
+  branches: WorkflowBranch[];
+  submitPermission: SubmitPermissionRule;
+  ccRule: CcRule;
+  directory: OrganizationDirectory;
+  validation: ValidationState;
+  memberOptions: Array<{ value: string; label: string }>;
+  departmentOptions: Array<{ value: string; label: string }>;
+  roleOptions: Array<{ value: string; label: string }>;
+  fieldOptions: ConditionFieldOption[];
+  onSelect: (selection: DesignerSelection) => void;
+  onRemoveBranch: (branchId: string) => void;
+  onUpdateBranch: (branchId: string, patch: Partial<WorkflowBranch>) => void;
+  onAddCondition: (branchId: string) => void;
+  onRemoveCondition: (branchId: string, conditionId: string) => void;
+  onUpdateCondition: (branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
+  onPatchSubmitPermission: (patch: Partial<SubmitPermissionRule>) => void;
+  onPatchCcRule: (patch: Partial<CcRule>) => void;
+  onAddStep: (branchId: string) => void;
+  onUpdateStep: (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => void;
+  onRemoveStep: (branchId: string, stepId: string) => void;
+  onMoveStep: (branchId: string, stepId: string, direction: -1 | 1) => void;
+}) {
+  if (selection.type === 'step' && selectedBranch && selectedStep) {
+    return (
+      <aside className="border-t border-border-silver bg-white lg:border-l lg:border-t-0">
+        <StepEditor
+          branch={selectedBranch}
+          step={selectedStep}
+          stepIndex={selectedBranch.approvalSteps.findIndex((step) => step.id === selectedStep.id)}
+          memberOptions={memberOptions}
+          roleOptions={roleOptions}
+          validation={validation}
+          onSelect={onSelect}
+          onUpdateStep={onUpdateStep}
+          onRemoveStep={onRemoveStep}
+          onMoveStep={onMoveStep}
+        />
+      </aside>
+    );
+  }
+
+  if (selection.type === 'branch' && selectedBranch) {
+    const branchIndex = branches.filter((branch) => !branch.isDefault).findIndex((branch) => branch.id === selectedBranch.id);
+
+    return (
+      <aside className="border-t border-border-silver bg-white lg:border-l lg:border-t-0">
+        <InspectorHeader
+          label={selectedBranch.isDefault ? '默认条件' : '条件分支'}
+          title={getBranchTitle(selectedBranch)}
+          description={selectedBranch.isDefault
+            ? '当所有条件都不命中时，系统进入默认分支。'
+            : '多个条件按“且”关系判断；分支在画布中从左到右表示优先级。'}
+        />
+        <div className="space-y-5 p-5">
+          {validation.branches[selectedBranch.id]?.length > 0 && (
+            <div className="rounded-2xl bg-[#ffebee] px-4 py-3 text-[12px] font-bold text-[#c62828]">
+              {validation.branches[selectedBranch.id][0]}
+            </div>
+          )}
+
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">分支名称</span>
+            <input
+              className="input-field text-[14px]"
+              value={getBranchTitle(selectedBranch)}
+              readOnly={selectedBranch.isDefault}
+              onChange={(event) => onUpdateBranch(selectedBranch.id, { name: event.target.value })}
+            />
+          </label>
+
+          <div className="rounded-2xl bg-canvas-white px-4 py-3 text-[12px] font-bold leading-5 text-medium-gray">
+            {selectedBranch.isDefault ? '默认分支会排在最后。' : `当前优先级：${branchIndex + 1}`}
+          </div>
+
+          {!selectedBranch.isDefault && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-[13px] font-black text-midnight-graphite">进入条件</h4>
+                <button
+                  type="button"
+                  onClick={() => onAddCondition(selectedBranch.id)}
+                  className="h-8 px-3 rounded-full bg-lightest-gray-background text-[12px] font-black text-interactive-blue"
+                >
+                  添加条件
+                </button>
+              </div>
+              {selectedBranch.conditions.map((condition, index) => (
+                <React.Fragment key={condition.id}>
+                  <ConditionEditor
+                    branch={selectedBranch}
+                    condition={condition}
+                    index={index}
+                    fieldOptions={fieldOptions}
+                    memberOptions={memberOptions}
+                    departmentOptions={departmentOptions}
+                    roleOptions={roleOptions}
+                    onRemoveCondition={onRemoveCondition}
+                    onUpdateCondition={onUpdateCondition}
+                  />
+                </React.Fragment>
+              ))}
+            </div>
+          )}
+
+          {selectedBranch.isDefault && (
+            <div className="rounded-2xl border border-border-silver bg-white p-4 text-[12px] font-bold leading-5 text-medium-gray">
+              默认分支不需要设置条件，适合兜底审批人，例如直属上级或财务负责人。
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-[13px] font-black text-midnight-graphite">审批节点</h4>
+              <button
+                type="button"
+                onClick={() => onAddStep(selectedBranch.id)}
+                className="h-8 px-3 rounded-full bg-black text-[12px] font-black text-white"
+              >
+                添加审批
+              </button>
+            </div>
+            <div className="space-y-2">
+              {selectedBranch.approvalSteps.length === 0 ? (
+                <div className="rounded-2xl bg-canvas-white p-4 text-center text-[12px] font-bold text-medium-gray">
+                  当前分支暂无审批节点。
+                </div>
+              ) : selectedBranch.approvalSteps.map((step, index) => (
+                <button
+                  key={step.id}
+                  type="button"
+                  onClick={() => onSelect({ type: 'step', branchId: selectedBranch.id, stepId: step.id })}
+                  className="w-full rounded-2xl border border-border-silver bg-white px-4 py-3 text-left hover:bg-canvas-white"
+                >
+                  <span className="block text-[13px] font-black text-midnight-graphite">{index + 1}. {step.name}</span>
+                  <span className="mt-1 block text-[11px] font-bold text-medium-gray">{getApproverTypeLabel(step.approverRule.type)} · {getApprovalModeLabel(step.approvalMode)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {!selectedBranch.isDefault && (
+            <button
+              type="button"
+              onClick={() => onRemoveBranch(selectedBranch.id)}
+              className="h-11 w-full rounded-full bg-[#ffebee] text-[13px] font-black text-[#c62828]"
+            >
+              删除分支
+            </button>
+          )}
+        </div>
+      </aside>
+    );
+  }
+
+  if (selection.type === 'cc') {
+    return (
+      <aside className="border-t border-border-silver bg-white lg:border-l lg:border-t-0">
+        <InspectorHeader
+          label="抄送"
+          title="抄送配置"
+          description="审批流程完成后，把结果同步给相关成员、部门或角色组。"
+        />
+        <div className="space-y-5 p-5">
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">抄送成员</span>
+            <MultiSelect
+              value={ccRule.memberIds}
+              options={memberOptions}
+              onChange={(memberIds) => onPatchCcRule({ memberIds })}
+              emptyText="暂无成员"
+            />
+          </label>
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">抄送部门</span>
+            <MultiSelect
+              value={ccRule.departmentIds}
+              options={departmentOptions}
+              onChange={(departmentIds) => onPatchCcRule({ departmentIds })}
+              emptyText="暂无部门"
+            />
+          </label>
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">抄送角色</span>
+            <MultiSelect
+              value={ccRule.roleGroupIds}
+              options={roleOptions}
+              onChange={(roleGroupIds) => onPatchCcRule({ roleGroupIds })}
+              emptyText="暂无角色"
+            />
+          </label>
+        </div>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="border-t border-border-silver bg-white lg:border-l lg:border-t-0">
+      <InspectorHeader
+        label="提交"
+        title="提交人设置"
+        description="设置谁可以发起这个审批流。表单字段和组织架构会在这里作为条件和审批人来源。"
+      />
+      <div className="space-y-5 p-5">
+        {validation.sections.submit?.length > 0 && (
+          <div className="rounded-2xl bg-[#ffebee] px-4 py-3 text-[12px] font-bold text-[#c62828]">
+            {validation.sections.submit[0]}
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">可提交范围</span>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { value: 'all_members', label: '全部' },
+              { value: 'members', label: '成员' },
+              { value: 'departments', label: '部门' },
+            ].map((item) => (
+              <React.Fragment key={item.value}>
+                <SegmentedButton
+                  isActive={submitPermission.type === item.value}
+                  onClick={() => onPatchSubmitPermission({ type: item.value as SubmitPermissionRule['type'] })}
+                >
+                  {item.label}
+                </SegmentedButton>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+
+        {submitPermission.type === 'members' && (
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">可提交成员</span>
+            <MultiSelect
+              value={submitPermission.memberIds}
+              options={memberOptions}
+              onChange={(memberIds) => onPatchSubmitPermission({ memberIds })}
+              emptyText="暂无成员"
+            />
+          </label>
+        )}
+
+        {submitPermission.type === 'departments' && (
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">可提交部门</span>
+            <MultiSelect
+              value={submitPermission.departmentIds}
+              options={departmentOptions}
+              onChange={(departmentIds) => onPatchSubmitPermission({ departmentIds })}
+              emptyText="暂无部门"
+            />
+          </label>
+        )}
+
+        <label className="block space-y-2">
+          <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">排除成员</span>
+          <MultiSelect
+            value={submitPermission.excludedMemberIds}
+            options={memberOptions}
+            onChange={(excludedMemberIds) => onPatchSubmitPermission({ excludedMemberIds })}
+            emptyText="暂无成员"
+          />
+        </label>
+
+        <div className="rounded-2xl bg-canvas-white px-4 py-3 text-[12px] font-bold leading-5 text-medium-gray">
+          当前可提交：{formatSubmitPermission(submitPermission, directory)}
+        </div>
+      </div>
+    </aside>
+  );
 }
 
 function SectionCard({
@@ -618,12 +1880,13 @@ export default function WorkflowAdmin() {
   const [directory, setDirectory] = useState<OrganizationDirectory>({ departments: [], members: [], roleGroups: [] });
   const [selectedId, setSelectedId] = useState('');
   const [draft, setDraft] = useState<WorkflowVersion | null>(null);
-  const [createBusinessType, setCreateBusinessType] = useState<WorkflowBusinessType>('general');
+  const [createBusinessKey, setCreateBusinessKey] = useState(businessScopeOptions[0]?.key || '');
   const [createName, setCreateName] = useState('');
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [validation, setValidation] = useState<ValidationState>(createValidationState());
+  const [designerSelection, setDesignerSelection] = useState<DesignerSelection>(submitDesignerSelection);
 
   const selectedTemplate = templates.find((template) => template.id === selectedId) || null;
   const enabledMembers = useMemo(
@@ -644,6 +1907,10 @@ export default function WorkflowAdmin() {
   const roleOptions = useMemo(
     () => directory.roleGroups.map((roleGroup) => ({ value: roleGroup.id, label: roleGroup.name })),
     [directory.roleGroups],
+  );
+  const conditionFieldOptionsForDraft = useMemo(
+    () => getConditionFieldOptions(draft),
+    [draft?.basic.moduleName, draft?.basic.approvalTypeName],
   );
   const summaryLines = useMemo(() => {
     if (!draft) return [];
@@ -675,6 +1942,7 @@ export default function WorkflowAdmin() {
       setSelectedId(nextSelected?.id || '');
       setDraft(nextSelected ? normalizeDraftForEditor(JSON.parse(JSON.stringify(nextSelected.draft))) : null);
       setValidation(createValidationState());
+      setDesignerSelection(submitDesignerSelection);
     } finally {
       setIsLoading(false);
     }
@@ -689,6 +1957,7 @@ export default function WorkflowAdmin() {
     setDraft(normalizeDraftForEditor(JSON.parse(JSON.stringify(template.draft))));
     setMessage('');
     setValidation(createValidationState());
+    setDesignerSelection(submitDesignerSelection);
   };
 
   const patchDraft = (updater: (current: WorkflowVersion) => WorkflowVersion) => {
@@ -750,16 +2019,41 @@ export default function WorkflowAdmin() {
     }));
   };
 
+  const addCondition = (branchId: string) => {
+    const defaultField = conditionFieldOptionsForDraft[0]?.value || 'submitter.department';
+    patchDraft((current) => ({
+      ...current,
+      branches: (current.branches || []).map((branch) => (
+        branch.id === branchId
+          ? { ...branch, conditions: [...branch.conditions, defaultCondition(defaultField)] }
+          : branch
+      )),
+    }));
+  };
+
+  const removeCondition = (branchId: string, conditionId: string) => {
+    patchDraft((current) => ({
+      ...current,
+      branches: (current.branches || []).map((branch) => (
+        branch.id === branchId
+          ? { ...branch, conditions: branch.conditions.filter((condition) => condition.id !== conditionId) }
+          : branch
+      )),
+    }));
+  };
+
   const addBranch = () => {
+    const branchId = createId('branch');
+    const defaultField = conditionFieldOptionsForDraft[0]?.value || 'submitter.department';
     patchDraft((current) => {
       const branchCount = (current.branches || []).filter((branch) => !branch.isDefault).length + 1;
       const branches = current.branches || [defaultBranch()];
       const defaultIndex = branches.findIndex((branch) => branch.isDefault);
       const nextBranch: WorkflowBranch = {
-        id: createId('branch'),
+        id: branchId,
         name: `Branch ${branchCount}`,
         isDefault: false,
-        conditions: [defaultCondition()],
+        conditions: [defaultCondition(defaultField)],
         approvalSteps: [defaultStep(1)],
       };
 
@@ -776,6 +2070,7 @@ export default function WorkflowAdmin() {
         ],
       };
     });
+    setDesignerSelection({ type: 'branch', branchId });
   };
 
   const removeBranch = (branchId: string) => {
@@ -783,17 +2078,24 @@ export default function WorkflowAdmin() {
       ...current,
       branches: (current.branches || []).filter((branch) => branch.isDefault || branch.id !== branchId),
     }));
+    setDesignerSelection((current) => (
+      (current.type === 'branch' || current.type === 'step') && current.branchId === branchId
+        ? submitDesignerSelection
+        : current
+    ));
   };
 
   const addStep = (branchId: string) => {
+    const stepId = createId('step');
     patchDraft((current) => ({
       ...current,
       branches: (current.branches || []).map((branch) => (
         branch.id === branchId
-          ? { ...branch, approvalSteps: [...branch.approvalSteps, defaultStep(branch.approvalSteps.length + 1)] }
+          ? { ...branch, approvalSteps: [...branch.approvalSteps, { ...defaultStep(branch.approvalSteps.length + 1), id: stepId }] }
           : branch
       )),
     }));
+    setDesignerSelection({ type: 'step', branchId, stepId });
   };
 
   const updateStep = (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => {
@@ -821,6 +2123,11 @@ export default function WorkflowAdmin() {
           : branch
       )),
     }));
+    setDesignerSelection((current) => (
+      current.type === 'step' && current.branchId === branchId && current.stepId === stepId
+        ? { type: 'branch', branchId }
+        : current
+    ));
   };
 
   const moveStep = (branchId: string, stepId: string, direction: -1 | 1) => {
@@ -854,19 +2161,19 @@ export default function WorkflowAdmin() {
   };
 
   const handleCreate = async () => {
-    const name = createName.trim() || `${getBusinessTypeMeta(createBusinessType).label}`;
+    const scope = getBusinessScopeByKey(createBusinessKey);
+    const name = createName.trim() || `${scope.approvalTypeName}审批流`;
     setIsSaving(true);
     setMessage('');
     try {
-      const meta = getBusinessTypeMeta(createBusinessType);
       const created = await storage.createWorkflowTemplate({
         name,
-        businessType: createBusinessType,
+        businessType: scope.businessType,
         organizationId: DEFAULT_ORG_ID,
-        moduleName: meta.moduleName,
-        approvalTypeName: meta.approvalTypeName,
+        moduleName: scope.moduleName,
+        approvalTypeName: scope.approvalTypeName,
       });
-      const nextDraft = createDraft(name, createBusinessType);
+      const nextDraft = createDraft(name, scope);
       const updated = await storage.updateWorkflowDraft(created.id, nextDraft);
       const normalized = {
         ...updated,
@@ -878,6 +2185,7 @@ export default function WorkflowAdmin() {
       setDraft(JSON.parse(JSON.stringify(normalized.draft)));
       setCreateName('');
       setValidation(validateDraft(normalized.draft));
+      setDesignerSelection(submitDesignerSelection);
       setMessage('审批流已创建');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '创建失败');
@@ -964,6 +2272,7 @@ export default function WorkflowAdmin() {
       setTemplates((current) => [normalized, ...current]);
       setSelectedId(normalized.id);
       setDraft(JSON.parse(JSON.stringify(normalized.draft)));
+      setDesignerSelection(submitDesignerSelection);
       setMessage('审批流副本已创建');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '复制失败');
@@ -987,6 +2296,7 @@ export default function WorkflowAdmin() {
       setSelectedId(nextSelected?.id || '');
       setDraft(nextSelected ? JSON.parse(JSON.stringify(nextSelected.draft)) : null);
       setValidation(createValidationState());
+      setDesignerSelection(submitDesignerSelection);
       setMessage('审批流已删除');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '删除失败');
@@ -1031,11 +2341,11 @@ export default function WorkflowAdmin() {
         <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
           <select
             className="input-field text-[15px]"
-            value={createBusinessType}
-            onChange={(event) => setCreateBusinessType(event.target.value as WorkflowBusinessType)}
+            value={createBusinessKey}
+            onChange={(event) => setCreateBusinessKey(event.target.value)}
           >
-            {businessTypeOptions.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
+            {businessScopeOptions.map((option) => (
+              <option key={option.key} value={option.key}>{option.label}</option>
             ))}
           </select>
           <input
@@ -1055,7 +2365,7 @@ export default function WorkflowAdmin() {
         </div>
       </section>
 
-      <div className="grid gap-6 xl:grid-cols-[340px_1fr]">
+      <div className="grid gap-6 2xl:grid-cols-[300px_minmax(0,1fr)]">
         <aside className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden h-fit">
           <div className="px-5 py-4 border-b border-border-silver flex items-center gap-3">
             <Workflow size={17} />
@@ -1078,7 +2388,7 @@ export default function WorkflowAdmin() {
                   <div className="min-w-0">
                     <p className="text-[14px] font-black text-midnight-graphite truncate">{template.name}</p>
                     <p className="mt-1 text-[12px] font-bold text-medium-gray">
-                      {getBusinessTypeMeta(template.businessType).label} · v{template.currentVersion || 1}
+                      {getTemplateScopeLabel(template)} · v{template.currentVersion || 1}
                     </p>
                     <p className="mt-1 text-[11px] font-bold text-light-gray">更新于 {formatDate(template.updatedAt)}</p>
                   </div>
@@ -1125,12 +2435,12 @@ export default function WorkflowAdmin() {
                       {statusLabels[selectedTemplate.status]}
                     </span>
                     <span className="px-2.5 py-1 rounded-full bg-lightest-gray-background text-[10px] font-black text-medium-gray">
-                      {getBusinessTypeMeta(draft.businessType).label}
+                      {getWorkflowScopeLabel(draft.basic.moduleName, draft.basic.approvalTypeName)}
                     </span>
                   </div>
                   <h2 className="mt-3 text-[24px] font-black text-midnight-graphite tracking-tight truncate">{draft.basic.name}</h2>
                   <p className="mt-1 text-[12px] font-bold text-medium-gray">
-                    当前版本 v{draft.version || 1} · {draft.organizationId || DEFAULT_ORG_ID}
+                    当前版本 v{draft.version || 1}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-3">
@@ -1203,7 +2513,7 @@ export default function WorkflowAdmin() {
               icon={<Workflow size={18} strokeWidth={2.5} />}
               errors={validation.sections.basic}
             >
-              <div className="grid gap-4 lg:grid-cols-2">
+              <div className="grid gap-4 lg:grid-cols-[1fr_1.2fr_180px]">
                 <label className="space-y-2">
                   <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">审批流名称</span>
                   <input
@@ -1217,29 +2527,30 @@ export default function WorkflowAdmin() {
                   <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">适用业务类型</span>
                   <select
                     className="input-field text-[15px]"
-                    value={draft.businessType || 'general'}
+                    value={getBusinessScopeKey(draft.basic.moduleName, draft.basic.approvalTypeName)}
                     onChange={(event) => {
-                      const businessType = event.target.value as WorkflowBusinessType;
-                      const meta = getBusinessTypeMeta(businessType);
+                      const scope = getBusinessScopeByKey(event.target.value);
                       patchDraft((current) => ({
                         ...current,
-                        businessType,
+                        businessType: scope.businessType,
                         basic: {
                           ...current.basic,
-                          moduleName: meta.moduleName,
-                          approvalTypeName: meta.approvalTypeName,
+                          moduleName: scope.moduleName,
+                          approvalTypeName: scope.approvalTypeName,
                         },
+                        branches: (current.branches || []).map((branch) => (
+                          branch.isDefault ? branch : {
+                            ...branch,
+                            conditions: branch.conditions.map((condition) => rebaseConditionToScope(condition, scope)),
+                          }
+                        )),
                       }));
                     }}
                   >
-                    {businessTypeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
+                    {businessScopeOptions.map((option) => (
+                      <option key={option.key} value={option.key}>{option.label}</option>
                     ))}
                   </select>
-                </label>
-                <label className="space-y-2">
-                  <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">所属组织</span>
-                  <input className="input-field text-[15px]" value="当前公司组织（default-org）" readOnly />
                 </label>
                 <label className="space-y-2">
                   <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">版本状态</span>
@@ -1248,6 +2559,34 @@ export default function WorkflowAdmin() {
               </div>
             </SectionCard>
 
+            <WorkflowFlowDesigner
+              draft={draft}
+              directory={directory}
+              submitPermission={submitPermission}
+              ccRule={ccRule}
+              branches={branches}
+              validation={validation}
+              selection={designerSelection}
+              fieldOptions={conditionFieldOptionsForDraft}
+              memberOptions={memberOptions}
+              departmentOptions={departmentOptions}
+              roleOptions={roleOptions}
+              onSelect={setDesignerSelection}
+              onAddBranch={addBranch}
+              onRemoveBranch={removeBranch}
+              onUpdateBranch={updateBranch}
+              onAddCondition={addCondition}
+              onRemoveCondition={removeCondition}
+              onUpdateCondition={updateCondition}
+              onPatchSubmitPermission={patchSubmitPermission}
+              onPatchCcRule={patchCcRule}
+              onAddStep={addStep}
+              onUpdateStep={updateStep}
+              onRemoveStep={removeStep}
+              onMoveStep={moveStep}
+            />
+
+            <div className="hidden">
             <SectionCard
               title="提交权限"
               icon={<Users size={18} strokeWidth={2.5} />}
@@ -1369,9 +2708,12 @@ export default function WorkflowAdmin() {
                         <select
                           className="input-field text-[13px]"
                           value={condition.field}
-                          onChange={(event) => updateCondition(branch.id, condition.id, { field: event.target.value as WorkflowConditionField })}
+                          onChange={(event) => {
+                            const nextField = event.target.value as WorkflowConditionField;
+                            updateCondition(branch.id, condition.id, { ...defaultCondition(nextField), id: condition.id });
+                          }}
                         >
-                          {conditionFieldOptions.map((option) => (
+                          {conditionFieldOptionsForDraft.map((option) => (
                             <option key={option.value} value={option.value}>{option.label}</option>
                           ))}
                         </select>
@@ -1384,7 +2726,7 @@ export default function WorkflowAdmin() {
                             <option key={option.value} value={option.value}>{option.label}</option>
                           ))}
                         </select>
-                        {condition.field === 'amount' && condition.operator === 'between' ? (
+                        {isNumericConditionFieldValue(condition.field) && condition.operator === 'between' ? (
                           <>
                             <input
                               className="input-field text-[13px]"
@@ -1401,7 +2743,7 @@ export default function WorkflowAdmin() {
                               placeholder="上限"
                             />
                           </>
-                        ) : condition.field === 'amount' && condition.operator === 'gt' ? (
+                        ) : isNumericConditionFieldValue(condition.field) && condition.operator === 'gt' ? (
                           <input
                             className="input-field text-[13px] lg:col-span-2"
                             type="number"
@@ -1409,7 +2751,7 @@ export default function WorkflowAdmin() {
                             onChange={(event) => updateCondition(branch.id, condition.id, { amountMin: event.target.value === '' ? undefined : Number(event.target.value) })}
                             placeholder="金额下限"
                           />
-                        ) : condition.field === 'amount' && condition.operator === 'lte' ? (
+                        ) : isNumericConditionFieldValue(condition.field) && condition.operator === 'lte' ? (
                           <input
                             className="input-field text-[13px] lg:col-span-2"
                             type="number"
@@ -1616,6 +2958,7 @@ export default function WorkflowAdmin() {
                 </label>
               </div>
             </SectionCard>
+            </div>
 
             <SectionCard
               title="流程摘要"

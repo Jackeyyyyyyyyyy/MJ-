@@ -28,6 +28,7 @@ interface SidebarProps {
   onOpenOrganizationAdmin?: () => void;
   onOpenWorkflowAdmin?: () => void;
   isOpen?: boolean;
+  isDesktopCollapsed?: boolean;
   onClose?: () => void;
 }
 
@@ -43,6 +44,7 @@ export default function Sidebar({
   onOpenOrganizationAdmin,
   onOpenWorkflowAdmin,
   isOpen,
+  isDesktopCollapsed,
   onClose,
 }: SidebarProps) {
   const isSuperAdminPerspective = Boolean(isSuperAdmin && currentPerspective === 'developer');
@@ -103,8 +105,9 @@ export default function Sidebar({
 
   return (
     <div className={cn(
-      "fixed lg:relative inset-y-0 left-0 w-[240px] bg-canvas-white border-r border-border-silver flex flex-col h-full shrink-0 z-50 transition-transform duration-500 lg:translate-x-0",
-      isOpen ? "translate-x-0 shadow-apple-xl" : "-translate-x-full"
+      "fixed lg:relative inset-y-0 left-0 w-[240px] bg-canvas-white border-r border-border-silver flex flex-col h-full shrink-0 z-50 transition-transform duration-500",
+      isOpen ? "translate-x-0 shadow-apple-xl" : "-translate-x-full",
+      isDesktopCollapsed ? "lg:absolute lg:-translate-x-full lg:pointer-events-none" : "lg:translate-x-0"
     )}>
       <div className="h-16 lg:h-20 flex items-center justify-between px-8">
         <div className="flex items-center gap-3">
