@@ -32,6 +32,12 @@ const STEP_PENDING = 'pending';
 const STEP_APPROVED = 'approved';
 const STEP_REJECTED = 'rejected';
 const STEP_SKIPPED = 'skipped';
+const DEFAULT_ORGANIZATION_ID = 'default-org';
+const WORKFLOW_BUSINESS_TYPES = new Set(['reimbursement', 'purchase', 'leave', 'general']);
+const WORKFLOW_CONDITION_FIELDS = new Set(['amount', 'category', 'project', 'department']);
+const WORKFLOW_CONDITION_OPERATORS = new Set(['lte', 'gt', 'between', 'eq']);
+const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'department_manager', 'submitter_manager', 'role_based']);
+const WORKFLOW_APPROVAL_MODES = new Set(['one_of', 'all_of']);
 const managedRoles = new Set(['employee', 'boss']);
 const defaultAiAssistantPrompt =
   '你是 MJ 审批系统的管理助手，只做只读分析。你负责总结审批风险、发现异常、解释待办优先级，并引用相关审批单。不得编造数据，不得替用户做审批决定，不得建议绕过流程。回答要先给简短结论，再列关键原因；如果涉及具体单据，请在 relatedRecordIds 中返回对应 recordId。';
@@ -650,6 +656,358 @@ function createDefaultOrganizationDirectory() {
   };
 }
 
+function createWorkflowId(prefix) {
+  return `${prefix}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+}
+
+function createDefaultSubmitPermission() {
+  return {
+    type: 'all_members',
+    memberIds: [],
+    departmentIds: [],
+    excludedMemberIds: [],
+  };
+}
+
+function createDefaultCcRule() {
+  return {
+    timing: 'workflow_completed',
+    memberIds: [],
+    departmentIds: [],
+    roleGroupIds: [],
+  };
+}
+
+function createDefaultApprovalStep(index = 1) {
+  return {
+    id: createWorkflowId('step'),
+    name: `审批节点 ${index}`,
+    approverRule: {
+      type: 'specific_members',
+      memberIds: [],
+    },
+    approvalMode: 'one_of',
+    emptyApproverAction: 'block_submit',
+  };
+}
+
+function createDefaultWorkflowBranch() {
+  return {
+    id: 'branch-default',
+    name: 'Default Branch',
+    isDefault: true,
+    conditions: [],
+    approvalSteps: [createDefaultApprovalStep(1)],
+  };
+}
+
+function inferWorkflowBusinessType(value) {
+  const normalized = normalizeWorkflowText(value).toLowerCase();
+  return WORKFLOW_BUSINESS_TYPES.has(normalized) ? normalized : 'general';
+}
+
+function legacyRuleToApprovalStep(node, index = 0) {
+  const rule = node?.rule || {};
+  let approverRule = { type: 'specific_members', memberIds: [] };
+
+  if (rule.type === 'specified') {
+    approverRule = { type: 'specific_members', memberIds: Array.isArray(rule.memberIds) ? rule.memberIds : [] };
+  } else if (rule.type === 'role') {
+    approverRule = { type: 'role_based', roleGroupId: rule.roleGroupId || '' };
+  } else if (rule.type === 'direct_supervisor') {
+    approverRule = { type: 'submitter_manager' };
+  } else if (rule.type === 'nth_supervisor' || rule.type === 'multi_supervisor') {
+    approverRule = { type: 'submitter_manager' };
+  }
+
+  return {
+    id: node?.id || createWorkflowId('step'),
+    name: node?.title || `审批节点 ${index + 1}`,
+    approverRule,
+    approvalMode: 'one_of',
+    emptyApproverAction: rule.emptyApproverAction === 'auto_pass' ? 'auto_pass' : 'block_submit',
+  };
+}
+
+function approvalStepToLegacyNode(step, index = 0) {
+  const rule = step?.approverRule || {};
+  let legacyRule = { type: 'specified', memberIds: [], emptyApproverAction: step?.emptyApproverAction || 'block_submit' };
+
+  if (rule.type === 'specific_members') {
+    legacyRule = {
+      type: 'specified',
+      memberIds: Array.isArray(rule.memberIds) ? rule.memberIds : [],
+      emptyApproverAction: step?.emptyApproverAction || 'block_submit',
+    };
+  } else if (rule.type === 'role_based') {
+    legacyRule = {
+      type: 'role',
+      roleGroupId: rule.roleGroupId || '',
+      emptyApproverAction: step?.emptyApproverAction || 'block_submit',
+    };
+  } else if (rule.type === 'submitter_manager' || rule.type === 'department_manager') {
+    legacyRule = {
+      type: 'direct_supervisor',
+      emptyApproverAction: step?.emptyApproverAction || 'block_submit',
+    };
+  }
+
+  return {
+    id: step?.id || createWorkflowId('node'),
+    type: 'approver',
+    title: step?.name || `审批节点 ${index + 1}`,
+    subtitle: step?.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
+    rule: legacyRule,
+  };
+}
+
+function parseLegacyConditionExpression(expression, index = 0) {
+  const text = normalizeWorkflowText(expression);
+  const numbers = (text.match(/\d+(?:\.\d+)?/g) || []).map(Number);
+
+  if (numbers.length >= 2) {
+    return {
+      id: createWorkflowId('cond'),
+      field: 'amount',
+      operator: 'between',
+      amountMin: Math.min(numbers[0], numbers[1]),
+      amountMax: Math.max(numbers[0], numbers[1]),
+      expression: text,
+    };
+  }
+
+  if (numbers.length === 1) {
+    return {
+      id: createWorkflowId('cond'),
+      field: 'amount',
+      operator: text.includes('>') ? 'gt' : 'lte',
+      ...(text.includes('>') ? { amountMin: numbers[0] } : { amountMax: numbers[0] }),
+      expression: text,
+    };
+  }
+
+  return {
+    id: createWorkflowId('cond'),
+    field: 'amount',
+    operator: index === 0 ? 'lte' : 'gt',
+    expression: text,
+  };
+}
+
+function normalizeApprovalStep(step, index = 0) {
+  const rule = step?.approverRule || {};
+  const ruleType = WORKFLOW_APPROVER_TYPES.has(rule.type) ? rule.type : 'specific_members';
+  return {
+    id: normalizeWorkflowText(step?.id) || createWorkflowId('step'),
+    name: normalizeWorkflowText(step?.name) || `审批节点 ${index + 1}`,
+    approverRule: {
+      ...rule,
+      type: ruleType,
+      memberIds: Array.isArray(rule.memberIds) ? rule.memberIds : [],
+      departmentIds: Array.isArray(rule.departmentIds) ? rule.departmentIds : [],
+      roleGroupIds: Array.isArray(rule.roleGroupIds) ? rule.roleGroupIds : [],
+    },
+    approvalMode: WORKFLOW_APPROVAL_MODES.has(step?.approvalMode) ? step.approvalMode : 'one_of',
+    emptyApproverAction: step?.emptyApproverAction === 'auto_pass' ? 'auto_pass' : 'block_submit',
+  };
+}
+
+function normalizeWorkflowCondition(condition, index = 0) {
+  const field = WORKFLOW_CONDITION_FIELDS.has(condition?.field) ? condition.field : 'amount';
+  const operator = WORKFLOW_CONDITION_OPERATORS.has(condition?.operator) ? condition.operator : 'lte';
+  return {
+    id: normalizeWorkflowText(condition?.id) || createWorkflowId('cond'),
+    field,
+    operator,
+    ...(condition?.value ? { value: String(condition.value) } : {}),
+    ...(Number.isFinite(Number(condition?.amountMin)) ? { amountMin: Number(condition.amountMin) } : {}),
+    ...(Number.isFinite(Number(condition?.amountMax)) ? { amountMax: Number(condition.amountMax) } : {}),
+    ...(condition?.expression ? { expression: String(condition.expression) } : {}),
+  };
+}
+
+function normalizeWorkflowBranches(version) {
+  if (Array.isArray(version?.branches) && version.branches.length > 0) {
+    const branches = version.branches.map((branch, index) => ({
+      id: normalizeWorkflowText(branch?.id) || createWorkflowId('branch'),
+      name: normalizeWorkflowText(branch?.name) || (branch?.isDefault ? 'Default Branch' : `Branch ${index + 1}`),
+      isDefault: Boolean(branch?.isDefault),
+      conditions: Array.isArray(branch?.conditions)
+        ? branch.conditions.map((condition, conditionIndex) => normalizeWorkflowCondition(condition, conditionIndex))
+        : [],
+      approvalSteps: Array.isArray(branch?.approvalSteps)
+        ? branch.approvalSteps.map((step, stepIndex) => normalizeApprovalStep(step, stepIndex))
+        : [],
+    }));
+
+    if (!branches.some((branch) => branch.isDefault)) {
+      branches.push(createDefaultWorkflowBranch());
+    }
+
+    return branches;
+  }
+
+  const nodes = Array.isArray(version?.nodes) ? version.nodes : [];
+  const branches = [];
+  nodes
+    .filter((node) => node?.type === 'condition')
+    .flatMap((node) => Array.isArray(node.conditions) ? node.conditions : [])
+    .forEach((condition, index) => {
+      branches.push({
+        id: normalizeWorkflowText(condition.id) || createWorkflowId('branch'),
+        name: normalizeWorkflowText(condition.title) || `Branch ${index + 1}`,
+        isDefault: false,
+        conditions: [parseLegacyConditionExpression(condition.expression, index)],
+        approvalSteps: (Array.isArray(condition.nodes) ? condition.nodes : [])
+          .filter((node) => node?.type === 'approver')
+          .map((node, stepIndex) => legacyRuleToApprovalStep(node, stepIndex)),
+      });
+    });
+
+  const linearSteps = nodes
+    .filter((node) => node?.type === 'approver')
+    .map((node, index) => legacyRuleToApprovalStep(node, index));
+
+  branches.push({
+    id: 'branch-default',
+    name: 'Default Branch',
+    isDefault: true,
+    conditions: [],
+    approvalSteps: linearSteps.length > 0 ? linearSteps : [createDefaultApprovalStep(1)],
+  });
+
+  return branches;
+}
+
+function normalizeWorkflowDraft(draft) {
+  const nextDraft = JSON.parse(JSON.stringify(draft || {}));
+  const name = normalizeWorkflowText(nextDraft.basic?.name || nextDraft.name || '新审批流');
+  const businessType = inferWorkflowBusinessType(nextDraft.businessType);
+  const branches = normalizeWorkflowBranches(nextDraft);
+  const defaultBranch = branches.find((branch) => branch.isDefault) || branches[branches.length - 1];
+  const legacyNodes = [
+    { id: 'node-start', type: 'start', title: '发起人', subtitle: 'Applicant' },
+    ...((defaultBranch?.approvalSteps || []).map((step, index) => approvalStepToLegacyNode(step, index))),
+  ];
+
+  return {
+    ...nextDraft,
+    id: normalizeWorkflowText(nextDraft.id) || createWorkflowId('draft'),
+    version: Number(nextDraft.version || 1),
+    status: nextDraft.status || 'draft',
+    organizationId: normalizeWorkflowText(nextDraft.organizationId) || DEFAULT_ORGANIZATION_ID,
+    businessType,
+    basic: {
+      name,
+      moduleName: normalizeWorkflowText(nextDraft.basic?.moduleName || nextDraft.moduleName || '审批流配置'),
+      approvalTypeName: normalizeWorkflowText(nextDraft.basic?.approvalTypeName || nextDraft.approvalTypeName || businessType),
+      visibleRange: normalizeWorkflowText(nextDraft.basic?.visibleRange || 'all'),
+    },
+    submitPermission: {
+      ...createDefaultSubmitPermission(),
+      ...(nextDraft.submitPermission || {}),
+      memberIds: Array.isArray(nextDraft.submitPermission?.memberIds) ? nextDraft.submitPermission.memberIds : [],
+      departmentIds: Array.isArray(nextDraft.submitPermission?.departmentIds) ? nextDraft.submitPermission.departmentIds : [],
+      excludedMemberIds: Array.isArray(nextDraft.submitPermission?.excludedMemberIds) ? nextDraft.submitPermission.excludedMemberIds : [],
+    },
+    branches,
+    ccRule: {
+      ...createDefaultCcRule(),
+      ...(nextDraft.ccRule || {}),
+      memberIds: Array.isArray(nextDraft.ccRule?.memberIds) ? nextDraft.ccRule.memberIds : [],
+      departmentIds: Array.isArray(nextDraft.ccRule?.departmentIds) ? nextDraft.ccRule.departmentIds : [],
+      roleGroupIds: Array.isArray(nextDraft.ccRule?.roleGroupIds) ? nextDraft.ccRule.roleGroupIds : [],
+      timing: 'workflow_completed',
+    },
+    formFields: Array.isArray(nextDraft.formFields) ? nextDraft.formFields : [],
+    nodes: legacyNodes,
+  };
+}
+
+function normalizeWorkflowTemplate(template) {
+  const draft = normalizeWorkflowDraft(template?.draft || createDefaultWorkflowVersion('draft'));
+  const publishedVersion = template?.publishedVersion ? normalizeWorkflowDraft(template.publishedVersion) : undefined;
+  const organizationId = normalizeWorkflowText(template?.organizationId || draft.organizationId) || DEFAULT_ORGANIZATION_ID;
+  const businessType = inferWorkflowBusinessType(template?.businessType || draft.businessType);
+
+  return {
+    ...template,
+    id: normalizeWorkflowText(template?.id) || createWorkflowId('workflow'),
+    name: normalizeWorkflowText(template?.name || draft.basic.name) || '新审批流',
+    organizationId,
+    businessType,
+    moduleName: normalizeWorkflowText(template?.moduleName || draft.basic.moduleName) || '审批流配置',
+    approvalTypeName: normalizeWorkflowText(template?.approvalTypeName || draft.basic.approvalTypeName) || businessType,
+    status: ['draft', 'published', 'disabled'].includes(template?.status) ? template.status : 'draft',
+    currentVersion: Number(template?.currentVersion || publishedVersion?.version || draft.version || 1),
+    draft,
+    ...(publishedVersion ? { publishedVersion } : {}),
+  };
+}
+
+function validateWorkflowDraftForPublish(draft) {
+  const errors = [];
+  const name = normalizeWorkflowText(draft?.basic?.name);
+  const submitPermission = draft?.submitPermission || {};
+  const branches = Array.isArray(draft?.branches) ? draft.branches : [];
+  const defaultBranch = branches.find((branch) => branch?.isDefault);
+
+  if (!name) errors.push('审批流名称不能为空');
+
+  const permissionType = submitPermission.type;
+  const hasSubmitScope = permissionType === 'all_members' ||
+    (permissionType === 'members' && Array.isArray(submitPermission.memberIds) && submitPermission.memberIds.length > 0) ||
+    (permissionType === 'departments' && Array.isArray(submitPermission.departmentIds) && submitPermission.departmentIds.length > 0);
+  if (!hasSubmitScope) errors.push('至少配置一个提交权限范围');
+  if (!defaultBranch) errors.push('必须包含 default branch');
+
+  branches.forEach((branch, branchIndex) => {
+    const branchName = branch?.name || `Branch ${branchIndex + 1}`;
+    if (!Array.isArray(branch.approvalSteps) || branch.approvalSteps.length === 0) {
+      errors.push(`${branchName} 至少需要一个审批节点`);
+    }
+
+    if (!branch.isDefault) {
+      if (!Array.isArray(branch.conditions) || branch.conditions.length === 0) {
+        errors.push(`${branchName} 必须配置条件`);
+      }
+
+      (branch.conditions || []).forEach((condition) => {
+        if (!condition?.field || !condition?.operator) {
+          errors.push(`${branchName} 条件不完整`);
+          return;
+        }
+
+        if (condition.field === 'amount') {
+          if (condition.operator === 'between') {
+            if (!Number.isFinite(Number(condition.amountMin)) || !Number.isFinite(Number(condition.amountMax))) {
+              errors.push(`${branchName} 金额区间必须填写有效数字`);
+            }
+          } else if (condition.operator === 'lte' && !Number.isFinite(Number(condition.amountMax))) {
+            errors.push(`${branchName} 金额上限必须填写有效数字`);
+          } else if (condition.operator === 'gt' && !Number.isFinite(Number(condition.amountMin))) {
+            errors.push(`${branchName} 金额下限必须填写有效数字`);
+          }
+        }
+      });
+    }
+
+    (branch.approvalSteps || []).forEach((step, stepIndex) => {
+      const stepLabel = `${branchName} / Step ${stepIndex + 1}`;
+      const rule = step?.approverRule || {};
+      if (!WORKFLOW_APPROVER_TYPES.has(rule.type)) {
+        errors.push(`${stepLabel} 必须配置审批人规则`);
+      } else if (rule.type === 'specific_members' && (!Array.isArray(rule.memberIds) || rule.memberIds.length === 0)) {
+        errors.push(`${stepLabel} 必须选择指定成员`);
+      } else if (rule.type === 'role_based' && !normalizeWorkflowText(rule.roleGroupId)) {
+        errors.push(`${stepLabel} 必须选择角色组`);
+      }
+    });
+  });
+
+  return errors;
+}
+
 function createDefaultWorkflowVersion(status = 'draft') {
   const baseNodes = [
     {
@@ -693,11 +1051,47 @@ function createDefaultWorkflowVersion(status = 'draft') {
     id: `version-${status}-1`,
     version: 1,
     status,
+    organizationId: DEFAULT_ORGANIZATION_ID,
+    businessType: 'purchase',
     basic: {
       name: '预付款申请',
       moduleName: '资金',
       approvalTypeName: '预付款申请',
       visibleRange: '全公司',
+    },
+    submitPermission: createDefaultSubmitPermission(),
+    branches: [
+      ...branchRanges.map(([id, title, expression], index) => ({
+        id,
+        name: title,
+        isDefault: false,
+        conditions: [parseLegacyConditionExpression(expression, index)],
+        approvalSteps: baseNodes.map((node, stepIndex) => legacyRuleToApprovalStep({
+          ...node,
+          id: `${node.id}-${index + 1}`,
+        }, stepIndex)),
+      })),
+      {
+        id: 'branch-default',
+        name: 'Default Branch',
+        isDefault: true,
+        conditions: [],
+        approvalSteps: [
+          legacyRuleToApprovalStep({
+            id: 'node-chairman',
+            type: 'approver',
+            title: '董事长',
+            subtitle: '董事长会签',
+            rule: { type: 'role', roleGroupId: 'role-board', emptyApproverAction: 'block_submit' },
+          }, 0),
+        ],
+      },
+    ],
+    ccRule: {
+      timing: 'workflow_completed',
+      memberIds: ['qin-sheng', 'wang-tumiao', 'jiang-hua', 'qian-lin'],
+      departmentIds: [],
+      roleGroupIds: [],
     },
     formFields: [
       { id: 'field-vendor', label: '供应商', type: 'text', required: true },
@@ -754,6 +1148,8 @@ function createDefaultWorkflowTemplate() {
   return {
     id: 'workflow-prepayment',
     name: draft.basic.name,
+    organizationId: draft.organizationId,
+    businessType: draft.businessType,
     moduleName: draft.basic.moduleName,
     approvalTypeName: draft.basic.approvalTypeName,
     status: 'draft',
@@ -765,7 +1161,7 @@ function createDefaultWorkflowTemplate() {
 
 async function readWorkflowTemplates() {
   const templates = await readJsonArrayFile(workflowTemplatesFile, 'workflow templates', { optional: true });
-  return templates.length > 0 ? templates : [createDefaultWorkflowTemplate()];
+  return (templates.length > 0 ? templates : [createDefaultWorkflowTemplate()]).map(normalizeWorkflowTemplate);
 }
 
 async function writeWorkflowTemplates(templates) {
@@ -990,9 +1386,17 @@ async function findPublishedWorkflow(moduleName, approvalTypeName) {
 }
 
 function getLinearApproverNodes(version) {
-  return Array.isArray(version?.nodes)
+  const existingNodes = Array.isArray(version?.nodes)
     ? version.nodes.filter((node) => node?.type === 'approver')
     : [];
+
+  if (existingNodes.length > 0) return existingNodes;
+
+  const defaultBranch = Array.isArray(version?.branches)
+    ? version.branches.find((branch) => branch?.isDefault)
+    : null;
+
+  return (defaultBranch?.approvalSteps || []).map((step, index) => approvalStepToLegacyNode(step, index));
 }
 
 function findMemberByAccount(directory, username) {
@@ -1732,35 +2136,42 @@ app.get('/api/workflow-templates', authenticate, requireRoles('developer'), asyn
 app.post('/api/workflow-templates', authenticate, requireRoles('developer'), async (req, res, next) => {
   try {
     const name = normalizeWorkflowText(req.body?.name);
-    const moduleName = normalizeWorkflowText(req.body?.moduleName);
-    const approvalTypeName = normalizeWorkflowText(req.body?.approvalTypeName);
+    const organizationId = normalizeWorkflowText(req.body?.organizationId) || DEFAULT_ORGANIZATION_ID;
+    const businessType = inferWorkflowBusinessType(req.body?.businessType);
+    const moduleName = normalizeWorkflowText(req.body?.moduleName) || '审批流配置';
+    const approvalTypeName = normalizeWorkflowText(req.body?.approvalTypeName) || businessType;
 
-    if (!name || !moduleName || !approvalTypeName) {
+    if (!name || !businessType) {
       return res.status(400).json({ error: 'missing workflow template fields' });
     }
 
     const now = new Date().toISOString();
     const template = await updateWorkflowTemplates((templates) => {
       const duplicated = templates.some((item) => (
-        normalizeWorkflowText(item.moduleName) === moduleName &&
-        normalizeWorkflowText(item.approvalTypeName) === approvalTypeName &&
-        item.status !== 'disabled'
+        normalizeWorkflowText(item.organizationId) === organizationId &&
+        normalizeWorkflowText(item.businessType) === businessType &&
+        item.status === 'published'
       ));
 
       if (duplicated) {
-        throw createHttpError('workflow template already exists for this business type', 409);
+        throw createHttpError('published workflow template already exists for this organization and business type', 409);
       }
 
-      const draft = {
+      const draft = normalizeWorkflowDraft({
         id: `draft-${Date.now()}`,
         version: 1,
         status: 'draft',
+        organizationId,
+        businessType,
         basic: {
           name,
           moduleName,
           approvalTypeName,
           visibleRange: 'all',
         },
+        submitPermission: createDefaultSubmitPermission(),
+        branches: [createDefaultWorkflowBranch()],
+        ccRule: createDefaultCcRule(),
         formFields: [],
         nodes: [
           {
@@ -1772,16 +2183,19 @@ app.post('/api/workflow-templates', authenticate, requireRoles('developer'), asy
         ],
         savedAt: now,
         savedBy: req.user.name,
-      };
+      });
 
       const nextTemplate = {
         id: `workflow-${Date.now()}`,
         name,
+        organizationId,
+        businessType,
         moduleName,
         approvalTypeName,
         status: 'draft',
         currentVersion: 1,
         draft,
+        createdAt: now,
         updatedAt: now,
         updatedBy: req.user.name,
       };
@@ -1848,7 +2262,7 @@ app.patch('/api/workflow-templates/:id/draft', authenticate, requireRoles('devel
         throw error;
       }
 
-      const nextDraft = JSON.parse(JSON.stringify(draft));
+      const nextDraft = normalizeWorkflowDraft(draft);
       const publishedVersion = Number(existing.publishedVersion?.version || 0);
       const draftVersion = Number(nextDraft.version || 1);
 
@@ -1859,6 +2273,8 @@ app.patch('/api/workflow-templates/:id/draft', authenticate, requireRoles('devel
       nextDraft.savedBy = req.user.name;
 
       existing.name = String(nextDraft.basic.name || existing.name);
+      existing.organizationId = String(nextDraft.organizationId || existing.organizationId || DEFAULT_ORGANIZATION_ID);
+      existing.businessType = inferWorkflowBusinessType(nextDraft.businessType || existing.businessType);
       existing.moduleName = String(nextDraft.basic.moduleName || existing.moduleName);
       existing.approvalTypeName = String(nextDraft.basic.approvalTypeName || existing.approvalTypeName);
       existing.status = 'draft';
@@ -1887,10 +2303,23 @@ app.post('/api/workflow-templates/:id/publish', authenticate, requireRoles('deve
         throw error;
       }
 
-      const published = JSON.parse(JSON.stringify(existing.draft));
-      if (getLinearApproverNodes(published).length === 0) {
-        throw createHttpError('workflow must contain at least one linear approval step before publishing', 400);
+      const published = normalizeWorkflowDraft(existing.draft);
+      const validationErrors = validateWorkflowDraftForPublish(published);
+      if (validationErrors.length > 0) {
+        throw createHttpError(validationErrors.join('；'), 400);
       }
+
+      const duplicate = templates.find((item) => (
+        item.id !== existing.id &&
+        item.status === 'published' &&
+        normalizeWorkflowText(item.organizationId) === normalizeWorkflowText(published.organizationId) &&
+        normalizeWorkflowText(item.businessType) === normalizeWorkflowText(published.businessType)
+      ));
+
+      if (duplicate) {
+        throw createHttpError('同一组织和业务类型已经存在已发布审批流，请先停用原流程。', 409);
+      }
+
       published.status = 'published';
       published.publishedAt = now;
       published.savedAt = existing.draft.savedAt || now;
@@ -1898,6 +2327,11 @@ app.post('/api/workflow-templates/:id/publish', authenticate, requireRoles('deve
 
       existing.publishedVersion = published;
       existing.status = 'published';
+      existing.name = published.basic.name;
+      existing.organizationId = published.organizationId;
+      existing.businessType = published.businessType;
+      existing.moduleName = published.basic.moduleName;
+      existing.approvalTypeName = published.basic.approvalTypeName;
       existing.currentVersion = Number(published.version || existing.currentVersion || 1);
       existing.updatedAt = now;
       existing.updatedBy = req.user.name;
@@ -1906,6 +2340,56 @@ app.post('/api/workflow-templates/:id/publish', authenticate, requireRoles('deve
     });
 
     res.json(template);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/workflow-templates/:id/duplicate', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const now = new Date().toISOString();
+    const template = await updateWorkflowTemplates((templates) => {
+      const existing = templates.find((item) => item.id === req.params.id);
+
+      if (!existing) {
+        throw createHttpError('workflow template not found', 404);
+      }
+
+      const sourceDraft = normalizeWorkflowDraft(existing.draft || existing.publishedVersion);
+      const name = `${existing.name || sourceDraft.basic.name} 副本`;
+      const draft = normalizeWorkflowDraft({
+        ...sourceDraft,
+        id: createWorkflowId('draft'),
+        version: 1,
+        status: 'draft',
+        basic: {
+          ...sourceDraft.basic,
+          name,
+        },
+        savedAt: now,
+        savedBy: req.user.name,
+      });
+
+      const copy = {
+        id: createWorkflowId('workflow'),
+        name,
+        organizationId: draft.organizationId || DEFAULT_ORGANIZATION_ID,
+        businessType: draft.businessType || 'general',
+        moduleName: draft.basic.moduleName,
+        approvalTypeName: draft.basic.approvalTypeName,
+        status: 'draft',
+        currentVersion: 1,
+        draft,
+        createdAt: now,
+        updatedAt: now,
+        updatedBy: req.user.name,
+      };
+
+      templates.unshift(copy);
+      return copy;
+    });
+
+    res.status(201).json(template);
   } catch (error) {
     next(error);
   }
@@ -1927,6 +2411,20 @@ app.patch('/api/workflow-templates/:id/status', authenticate, requireRoles('deve
 
       if (status === 'published' && !existing.publishedVersion) {
         throw createHttpError('workflow must be published before it can be enabled', 400);
+      }
+
+      if (status === 'published') {
+        const version = normalizeWorkflowDraft(existing.publishedVersion);
+        const duplicate = templates.find((item) => (
+          item.id !== existing.id &&
+          item.status === 'published' &&
+          normalizeWorkflowText(item.organizationId) === normalizeWorkflowText(version.organizationId) &&
+          normalizeWorkflowText(item.businessType) === normalizeWorkflowText(version.businessType)
+        ));
+
+        if (duplicate) {
+          throw createHttpError('同一组织和业务类型已经存在已发布审批流，请先停用原流程。', 409);
+        }
       }
 
       existing.status = status;

@@ -17,6 +17,10 @@ export type Role = 'employee' | 'boss' | 'developer';
 export type AdminView = 'accounts' | 'ai-assistant' | 'organization' | 'workflows';
 
 export type ApproverRuleType =
+  | 'specific_members'
+  | 'department_manager'
+  | 'submitter_manager'
+  | 'role_based'
   | 'specified'
   | 'direct_supervisor'
   | 'nth_supervisor'
@@ -58,10 +62,64 @@ export interface OrganizationDirectory {
 export interface ApproverRule {
   type: ApproverRuleType;
   memberIds?: string[];
+  departmentIds?: string[];
   roleGroupId?: string;
+  roleGroupIds?: string[];
   supervisorLevel?: number;
   supervisorDepth?: number;
   emptyApproverAction?: 'auto_pass' | 'block_submit';
+}
+
+export type WorkflowTemplateStatus = 'draft' | 'published' | 'disabled';
+
+export type WorkflowBusinessType = 'reimbursement' | 'purchase' | 'leave' | 'general';
+
+export type SubmitPermissionType = 'all_members' | 'members' | 'departments';
+
+export interface SubmitPermissionRule {
+  type: SubmitPermissionType;
+  memberIds: string[];
+  departmentIds: string[];
+  excludedMemberIds: string[];
+}
+
+export type WorkflowConditionField = 'amount' | 'category' | 'project' | 'department';
+
+export type WorkflowConditionOperator = 'lte' | 'gt' | 'between' | 'eq';
+
+export interface WorkflowCondition {
+  id: string;
+  field: WorkflowConditionField;
+  operator: WorkflowConditionOperator;
+  value?: string;
+  amountMin?: number;
+  amountMax?: number;
+  expression?: string;
+}
+
+export type ApprovalMode = 'one_of' | 'all_of';
+
+export interface ApprovalStep {
+  id: string;
+  name: string;
+  approverRule: ApproverRule;
+  approvalMode: ApprovalMode;
+  emptyApproverAction: 'auto_pass' | 'block_submit';
+}
+
+export interface WorkflowBranch {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  conditions: WorkflowCondition[];
+  approvalSteps: ApprovalStep[];
+}
+
+export interface CcRule {
+  timing: 'workflow_completed';
+  memberIds: string[];
+  departmentIds: string[];
+  roleGroupIds: string[];
 }
 
 export type WorkflowStepStatus = 'not_started' | 'pending' | 'approved' | 'rejected' | 'skipped';
@@ -118,13 +176,18 @@ export interface WorkflowNode {
 export interface WorkflowVersion {
   id: string;
   version: number;
-  status: 'draft' | 'published' | 'disabled';
+  status: WorkflowTemplateStatus;
+  organizationId?: string;
+  businessType?: WorkflowBusinessType;
   basic: {
     name: string;
     moduleName: string;
     approvalTypeName: string;
     visibleRange?: string;
   };
+  submitPermission?: SubmitPermissionRule;
+  branches?: WorkflowBranch[];
+  ccRule?: CcRule;
   formFields?: WorkflowFormField[];
   nodes: WorkflowNode[];
   savedAt?: string;
@@ -132,20 +195,31 @@ export interface WorkflowVersion {
   publishedAt?: string;
 }
 
-export interface WorkflowTemplate {
+export interface ApprovalWorkflowTemplate {
   id: string;
   name: string;
+  organizationId?: string;
+  businessType?: WorkflowBusinessType;
   moduleName: string;
   approvalTypeName: string;
-  status: 'draft' | 'published' | 'disabled';
+  status: WorkflowTemplateStatus;
   currentVersion: number;
   draft: WorkflowVersion;
   publishedVersion?: WorkflowVersion;
+  createdAt?: string;
   updatedAt?: string;
   updatedBy?: string;
 }
 
-export type WorkflowTemplateInput = Pick<WorkflowTemplate, 'name' | 'moduleName' | 'approvalTypeName'>;
+export interface WorkflowTemplate extends ApprovalWorkflowTemplate {}
+
+export interface WorkflowTemplateInput {
+  name: string;
+  businessType: WorkflowBusinessType;
+  organizationId?: string;
+  moduleName?: string;
+  approvalTypeName?: string;
+}
 
 export interface User {
   username: string;

@@ -168,6 +168,12 @@ export const storage = {
     });
   },
 
+  duplicateWorkflowTemplate(id: string): Promise<WorkflowTemplate> {
+    return request<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(id)}/duplicate`, {
+      method: 'POST',
+    });
+  },
+
   setWorkflowTemplateStatus(id: string, status: WorkflowTemplate['status']): Promise<WorkflowTemplate> {
     return request<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(id)}/status`, {
       method: 'PATCH',
