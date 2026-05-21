@@ -904,8 +904,6 @@ function FlowConnector({ compact = false }: { compact?: boolean }) {
 }
 
 function FlowBranchRail({ count }: { count: number }) {
-  const arrowId = React.useId();
-
   if (count <= 1) return null;
 
   const firstCenter = 50 / count;
@@ -913,31 +911,37 @@ function FlowBranchRail({ count }: { count: number }) {
   const branchCenters = Array.from({ length: count }, (_, index) => ((index + 0.5) / count) * 100);
 
   return (
-    <svg
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-x-0 top-0 h-16 w-full overflow-visible"
-      preserveAspectRatio="none"
-      viewBox="0 0 100 64"
-    >
-      <defs>
-        <marker id={arrowId} markerHeight="7" markerWidth="7" orient="auto" refX="3.5" refY="3.5">
-          <path d="M 0 0 L 7 3.5 L 0 7 Z" fill="#c8d1df" />
-        </marker>
-      </defs>
-      <g
-        fill="none"
-        stroke="#c8d1df"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.5"
-        vectorEffect="non-scaling-stroke"
+    <div className="pointer-events-none absolute inset-x-0 top-0 h-16">
+      <svg
+        aria-hidden="true"
+        className="h-full w-full overflow-visible"
+        preserveAspectRatio="none"
+        viewBox="0 0 100 64"
       >
-        <path d={`M 50 0 V 28 M ${firstCenter} 28 H ${lastCenter}`} />
+        <g
+          fill="none"
+          stroke="#c8d1df"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.5"
+          vectorEffect="non-scaling-stroke"
+        >
+          <path d={`M 50 0 V 28 M ${firstCenter} 28 H ${lastCenter}`} />
+          {branchCenters.map((center) => (
+            <path key={center} d={`M ${center} 28 V 54`} />
+          ))}
+        </g>
+      </svg>
+      <div className="absolute inset-x-0 top-[54px]">
         {branchCenters.map((center) => (
-          <path key={center} d={`M ${center} 28 V 58`} markerEnd={`url(#${arrowId})`} />
+          <span
+            key={center}
+            className="absolute h-0 w-0 -translate-x-1/2 border-x-[5px] border-t-[7px] border-x-transparent border-t-[#c8d1df]"
+            style={{ left: `${center}%` }}
+          />
         ))}
-      </g>
-    </svg>
+      </div>
+    </div>
   );
 }
 
@@ -983,34 +987,30 @@ const FlowBranchLane: React.FC<{
 };
 
 function FlowMergeRail({ count }: { count: number }) {
-  const arrowId = React.useId();
-
   if (count <= 1) return <FlowConnector />;
 
   return (
-    <svg
-      aria-hidden="true"
-      className="pointer-events-none h-16 w-full overflow-visible"
-      preserveAspectRatio="none"
-      viewBox="0 0 100 64"
-    >
-      <defs>
-        <marker id={arrowId} markerHeight="7" markerWidth="7" orient="auto" refX="3.5" refY="3.5">
-          <path d="M 0 0 L 7 3.5 L 0 7 Z" fill="#c8d1df" />
-        </marker>
-      </defs>
-      <g
-        fill="none"
-        stroke="#c8d1df"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.5"
-        vectorEffect="non-scaling-stroke"
+    <div className="pointer-events-none relative h-16 w-full">
+      <svg
+        aria-hidden="true"
+        className="h-full w-full overflow-visible"
+        preserveAspectRatio="none"
+        viewBox="0 0 100 64"
       >
-        <path d={`M ${50 / count} 0 H ${100 - 50 / count}`} />
-        <path d="M 50 0 V 58" markerEnd={`url(#${arrowId})`} />
-      </g>
-    </svg>
+        <g
+          fill="none"
+          stroke="#c8d1df"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.5"
+          vectorEffect="non-scaling-stroke"
+        >
+          <path d={`M ${50 / count} 0 H ${100 - 50 / count}`} />
+          <path d="M 50 0 V 54" />
+        </g>
+      </svg>
+      <span className="absolute left-1/2 top-[54px] h-0 w-0 -translate-x-1/2 border-x-[5px] border-t-[7px] border-x-transparent border-t-[#c8d1df]" />
+    </div>
   );
 }
 
