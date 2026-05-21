@@ -6,14 +6,24 @@ import BossDashboard from './BossDashboard';
 import CcHome from './CcHome';
 import { cn } from '../lib/utils';
 
-type WorkTab = 'requests' | 'approvals' | 'cc' | 'global';
+export type WorkTab = 'requests' | 'approvals' | 'cc' | 'global';
 
 interface WorkHomeProps {
   showGlobal?: boolean;
+  activeTab?: WorkTab;
+  onTabChange?: (tab: WorkTab) => void;
 }
 
-export default function WorkHome({ showGlobal = false }: WorkHomeProps) {
-  const [activeTab, setActiveTab] = React.useState<WorkTab>(showGlobal ? 'global' : 'requests');
+export default function WorkHome({ showGlobal = false, activeTab: controlledTab, onTabChange }: WorkHomeProps) {
+  const [internalTab, setInternalTab] = React.useState<WorkTab>(showGlobal ? 'global' : 'requests');
+  const activeTab = controlledTab ?? internalTab;
+
+  const setActiveTab = (tab: WorkTab) => {
+    if (controlledTab === undefined) {
+      setInternalTab(tab);
+    }
+    onTabChange?.(tab);
+  };
 
   React.useEffect(() => {
     if (!showGlobal && activeTab === 'global') {

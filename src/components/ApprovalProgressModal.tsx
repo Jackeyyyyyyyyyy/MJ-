@@ -10,7 +10,18 @@ interface ApprovalProgressModalProps {
   onClose: () => void;
 }
 
-function getCcProgressStep(record: ApprovalRecord) {
+type ProgressStepStatus = 'completed' | 'current' | 'failed' | 'pending';
+
+interface ProgressStep {
+  title: string;
+  desc: string;
+  time?: string;
+  status: ProgressStepStatus;
+  approvers?: WorkflowApproverSnapshot[];
+  isFinal?: boolean;
+}
+
+function getCcProgressStep(record: ApprovalRecord): ProgressStep | null {
   const recipients = record.ccRecipients || [];
   if (recipients.length === 0) return null;
 
@@ -42,7 +53,7 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
 
   const workflowSteps = record.workflowInstance?.steps;
   const ccProgressStep = getCcProgressStep(record);
-  const steps = workflowSteps?.length
+  const steps: ProgressStep[] = workflowSteps?.length
     ? [
         {
           title: '发起申请',
@@ -50,7 +61,7 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
           time: record.createdAt,
           status: 'completed'
         },
-        ...workflowSteps.map((step) => ({
+        ...workflowSteps.map((step): ProgressStep => ({
           title: step.name,
           desc: [
             `审批人：${step.approvers.map((approver) => approver.name).join('、') || '未解析'}`,

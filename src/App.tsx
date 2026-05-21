@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import LoginPage from './components/LoginPage';
 import AppLayout from './components/AppLayout';
-import WorkHome from './components/WorkHome';
+import WorkHome, { WorkTab } from './components/WorkHome';
 import AccountPermissionAdmin from './components/AccountPermissionAdmin';
 import OrganizationAdmin from './components/OrganizationAdmin';
 import WorkflowAdmin from './components/WorkflowAdmin';
@@ -15,13 +15,83 @@ import { storage } from './storage';
 import { AdminView, Role, ApprovalRecord, ApprovalStatus } from './types';
 import { approvalSchema } from './approvalSchema';
 
+type AppRoute =
+  | { kind: 'work'; tab: WorkTab }
+  | { kind: 'admin'; view: AdminView }
+  | { kind: 'module'; moduleName: string; typeName: string };
+
+const adminRouteViews: AdminView[] = ['accounts', 'ai-assistant', 'organization', 'workflows'];
+const workRouteTabs: WorkTab[] = ['requests', 'approvals', 'cc', 'global'];
+
+function decodeRoutePart(part?: string) {
+  if (!part) return '';
+
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    return part;
+  }
+}
+
+function parseRoute(pathname = window.location.pathname): AppRoute {
+  const parts = pathname.split('/').filter(Boolean).map(decodeRoutePart);
+  const [section, first, second] = parts;
+
+  if (section === 'admin' && adminRouteViews.includes(first as AdminView)) {
+    return { kind: 'admin', view: first as AdminView };
+  }
+
+  if (section === 'module' && first && second) {
+    const matchedModule = approvalSchema.modules.find((module) => module.name === first);
+    const matchedType = matchedModule?.approvalTypes.find((type) => type.name === second);
+
+    if (matchedModule && matchedType) {
+      return { kind: 'module', moduleName: matchedModule.name, typeName: matchedType.name };
+    }
+  }
+
+  if (section === 'work' && workRouteTabs.includes(first as WorkTab)) {
+    return { kind: 'work', tab: first as WorkTab };
+  }
+
+  return { kind: 'work', tab: 'requests' };
+}
+
+function routeToPath(route: AppRoute) {
+  if (route.kind === 'admin') {
+    return `/admin/${route.view}`;
+  }
+
+  if (route.kind === 'module') {
+    return `/module/${encodeURIComponent(route.moduleName)}/${encodeURIComponent(route.typeName)}`;
+  }
+
+  return `/work/${route.tab}`;
+}
+
+function pushRoute(route: AppRoute) {
+  const nextPath = routeToPath(route);
+  if (window.location.pathname !== nextPath) {
+    window.history.pushState(null, '', nextPath);
+  }
+}
+
+function replaceRoute(route: AppRoute) {
+  const nextPath = routeToPath(route);
+  if (window.location.pathname !== nextPath) {
+    window.history.replaceState(null, '', nextPath);
+  }
+}
+
 export default function App() {
+  const initialRoute = parseRoute();
   const [isAuthenticated, setIsAuthenticated] = useState(!!auth.getCurrentUser());
   const [perspective, setPerspective] = useState<Role | null>(auth.getPerspective());
   const [activeUsername, setActiveUsername] = useState(auth.getCurrentUser()?.username || '');
-  const [selectedModule, setSelectedModule] = useState<string>('');
-  const [selectedType, setSelectedType] = useState<string>('');
-  const [activeAdminView, setActiveAdminView] = useState<AdminView | null>(null);
+  const [selectedModule, setSelectedModule] = useState<string>(initialRoute.kind === 'module' ? initialRoute.moduleName : '');
+  const [selectedType, setSelectedType] = useState<string>(initialRoute.kind === 'module' ? initialRoute.typeName : '');
+  const [activeAdminView, setActiveAdminView] = useState<AdminView | null>(initialRoute.kind === 'admin' ? initialRoute.view : null);
+  const [activeWorkTab, setActiveWorkTab] = useState<WorkTab>(initialRoute.kind === 'work' ? initialRoute.tab : 'requests');
   
   // Dynamic list state
   const [dynamicRecords, setDynamicRecords] = useState<ApprovalRecord[]>([]);
@@ -30,16 +100,17 @@ export default function App() {
   const [showP, setShowP] = useState(false);
 
   const handleLogin = () => {
+    const route = parseRoute();
     setIsAuthenticated(true);
     setPerspective(auth.getPerspective());
     setActiveUsername(auth.getCurrentUser()?.username || '');
-    setSelectedModule('');
-    setSelectedType('');
-    setActiveAdminView(null);
+    applyRoute(route);
+    replaceRoute(route);
   };
 
   const handleLogout = () => {
     auth.logout();
+    window.history.pushState(null, '', '/');
     setIsAuthenticated(false);
     setPerspective(null);
     setActiveUsername('');
@@ -48,38 +119,68 @@ export default function App() {
   const handlePerspectiveChange = (nextPerspective: Role) => {
     setPerspective(nextPerspective);
     setActiveUsername(auth.getCurrentUser()?.username || '');
-    setActiveAdminView(null);
+    applyRoute({ kind: 'work', tab: nextPerspective === 'boss' || nextPerspective === 'developer' ? 'global' : 'requests' });
+    pushRoute({ kind: 'work', tab: nextPerspective === 'boss' || nextPerspective === 'developer' ? 'global' : 'requests' });
   };
 
   const handleSelectType = (moduleName: string, typeName: string) => {
     setSelectedModule(moduleName);
     setSelectedType(typeName);
     setActiveAdminView(null);
+    const nextRoute: AppRoute = moduleName && typeName
+      ? { kind: 'module', moduleName, typeName }
+      : { kind: 'work', tab: activeWorkTab };
+    pushRoute(nextRoute);
   };
 
   const handleOpenAccountAdmin = () => {
-    setSelectedModule('');
-    setSelectedType('');
-    setActiveAdminView('accounts');
+    applyRoute({ kind: 'admin', view: 'accounts' });
+    pushRoute({ kind: 'admin', view: 'accounts' });
   };
 
   const handleOpenAiAssistant = () => {
-    setSelectedModule('');
-    setSelectedType('');
-    setActiveAdminView('ai-assistant');
+    applyRoute({ kind: 'admin', view: 'ai-assistant' });
+    pushRoute({ kind: 'admin', view: 'ai-assistant' });
   };
 
   const handleOpenOrganizationAdmin = () => {
-    setSelectedModule('');
-    setSelectedType('');
-    setActiveAdminView('organization');
+    applyRoute({ kind: 'admin', view: 'organization' });
+    pushRoute({ kind: 'admin', view: 'organization' });
   };
 
   const handleOpenWorkflowAdmin = () => {
+    applyRoute({ kind: 'admin', view: 'workflows' });
+    pushRoute({ kind: 'admin', view: 'workflows' });
+  };
+
+  const handleWorkTabChange = (tab: WorkTab) => {
     setSelectedModule('');
     setSelectedType('');
-    setActiveAdminView('workflows');
+    setActiveAdminView(null);
+    setActiveWorkTab(tab);
+    pushRoute({ kind: 'work', tab });
   };
+
+  function applyRoute(route: AppRoute) {
+    if (route.kind === 'admin') {
+      setSelectedModule('');
+      setSelectedType('');
+      setActiveAdminView(route.view);
+      return;
+    }
+
+    if (route.kind === 'module') {
+      setSelectedModule(route.moduleName);
+      setSelectedType(route.typeName);
+      setActiveAdminView(null);
+      return;
+    }
+
+    setSelectedModule('');
+    setSelectedType('');
+    setActiveAdminView(null);
+    setActiveWorkTab(route.tab);
+  }
 
   const loadDynamicRecords = async () => {
     if (selectedType) {
@@ -110,6 +211,30 @@ export default function App() {
   useEffect(() => {
     loadDynamicRecords();
   }, [selectedModule, selectedType, activeUsername]);
+
+  useEffect(() => {
+    const handlePopState = () => applyRoute(parseRoute());
+    window.addEventListener('popstate', handlePopState);
+    const route = parseRoute();
+    applyRoute(route);
+    if (isAuthenticated) replaceRoute(route);
+
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated || !activeAdminView) return;
+
+    const isSuperAdminPerspective = auth.getSessionUser()?.role === 'developer' && perspective === 'developer';
+    const canUseAiAssistant = perspective === 'boss' || isSuperAdminPerspective;
+    const canAccessAdminView = activeAdminView === 'ai-assistant' ? canUseAiAssistant : isSuperAdminPerspective;
+
+    if (!canAccessAdminView) {
+      const fallbackRoute: AppRoute = { kind: 'work', tab: perspective === 'boss' || perspective === 'developer' ? 'global' : 'requests' };
+      applyRoute(fallbackRoute);
+      replaceRoute(fallbackRoute);
+    }
+  }, [isAuthenticated, activeAdminView, perspective]);
 
   if (!isAuthenticated) {
     return <LoginPage onLogin={handleLogin} />;
@@ -179,12 +304,12 @@ export default function App() {
 
     switch (perspective) {
       case 'employee':
-        return <WorkHome />;
+        return <WorkHome activeTab={activeWorkTab} onTabChange={handleWorkTabChange} />;
       case 'boss':
       case 'developer':
-        return <WorkHome showGlobal />;
+        return <WorkHome showGlobal activeTab={activeWorkTab} onTabChange={handleWorkTabChange} />;
       default:
-        return <WorkHome />;
+        return <WorkHome activeTab={activeWorkTab} onTabChange={handleWorkTabChange} />;
     }
   };
 

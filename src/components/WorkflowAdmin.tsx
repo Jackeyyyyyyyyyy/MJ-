@@ -876,7 +876,7 @@ function getEmptyApproverActionLabel(action: ApprovalStep['emptyApproverAction']
 function FlowConnector({ compact = false }: { compact?: boolean }) {
   return (
     <div className={cn("flex flex-col items-center", compact ? "h-8" : "h-12")}>
-      <span className="h-full w-px bg-[#bfc7d5]" />
+      <span className="h-full w-px bg-[#d6dde8]" />
     </div>
   );
 }
@@ -912,22 +912,22 @@ function FlowBranchRail({ count }: { count: number }) {
   );
 }
 
-function FlowBranchLane({
-  showBottomConnector,
-  children,
-}: {
+const FlowBranchLane: React.FC<{
   showBottomConnector: boolean;
   children: React.ReactNode;
-}) {
+}> = ({
+  showBottomConnector,
+  children,
+}) => {
   return (
     <div className="relative mx-auto flex h-full w-[300px] min-w-[300px] flex-col items-center">
       <div className="relative z-10 flex w-full flex-col items-center">
         {children}
       </div>
-      {showBottomConnector && <span className="min-h-10 flex-1 w-px bg-[#bfc7d5]" />}
+      {showBottomConnector && <span className="min-h-10 flex-1 w-px bg-[#d6dde8]" />}
     </div>
   );
-}
+};
 
 function FlowMergeRail({ count }: { count: number }) {
   if (count <= 1) return <FlowConnector />;
@@ -936,8 +936,8 @@ function FlowMergeRail({ count }: { count: number }) {
 
   return (
     <div className="pointer-events-none relative h-16 w-full">
-      <span className="absolute top-0 h-px bg-[#c8d0dc]" style={{ left: edgeInset, right: edgeInset }} />
-      <span className="absolute left-1/2 top-0 h-16 w-px -translate-x-1/2 bg-[#bfc7d5]" />
+      <span className="absolute top-0 h-px bg-[#d6dde8]" style={{ left: edgeInset, right: edgeInset }} />
+      <span className="absolute left-1/2 top-0 h-16 w-px -translate-x-1/2 bg-[#d6dde8]" />
     </div>
   );
 }
