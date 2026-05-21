@@ -6,12 +6,15 @@ import {
   Building2,
   CheckCircle2,
   GitBranch,
+  Maximize2,
+  Minus,
   Plus,
   Save,
   Send,
   Trash2,
   UserRound,
   Users,
+  ZoomIn,
 } from 'lucide-react';
 import { storage } from '../storage';
 import { approvalSchema } from '../approvalSchema';
@@ -1284,10 +1287,13 @@ function WorkflowFlowDesigner({
     || (selection.type === 'step' && selectedStep)
     || selection.type === 'cc'
   ) ? selection : submitDesignerSelection;
-  const canvasViewportRef = React.useRef<HTMLDivElement | null>(null);
   const panStartRef = React.useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [isPanning, setIsPanning] = React.useState(false);
   const canvasMinWidth = Math.max(1080, branchFlowWidth + 160);
+  const canvasContentHeight = 980;
+  const canvasFrameRef = React.useRef<HTMLDivElement | null>(null);
+  const canvasContentRef = React.useRef<HTMLDivElement | null>(null);
+  const [canvasView, setCanvasView] = React.useState({ scale: 1, x: 0, y: 0 });
   const eligibleSubmitters = React.useMemo(
     () => getEligibleSubmitterMembers(submitPermission, directory),
     [submitPermission, directory],
@@ -1303,20 +1309,63 @@ function WorkflowFlowDesigner({
     }
   }, [eligibleSubmitters, previewSubmitterId]);
 
+  const fitWorkflowCanvas = React.useCallback(() => {
+    const frame = canvasFrameRef.current;
+    const content = canvasContentRef.current;
+    if (!frame || !content) return;
+
+    const contentWidth = content.offsetWidth;
+    const contentHeight = content.offsetHeight;
+    if (!contentWidth || !contentHeight) return;
+
+    const scale = Math.min(
+      1,
+      Math.max(0.36, Math.min((frame.clientWidth - 96) / contentWidth, (frame.clientHeight - 96) / contentHeight)),
+    );
+
+    setCanvasView({
+      scale,
+      x: (frame.clientWidth - contentWidth * scale) / 2,
+      y: Math.max(32, (frame.clientHeight - contentHeight * scale) / 2),
+    });
+  }, []);
+
+  React.useEffect(() => {
+    const frame = window.requestAnimationFrame(fitWorkflowCanvas);
+    return () => window.cancelAnimationFrame(frame);
+  }, [fitWorkflowCanvas, canvasMinWidth, flowBranches.length, branches.length]);
+
+  const zoomWorkflowCanvas = (nextScale: number, clientX?: number, clientY?: number) => {
+    const frame = canvasFrameRef.current;
+    if (!frame) return;
+
+    setCanvasView((current) => {
+      const scale = Math.min(1.65, Math.max(0.35, nextScale));
+      const rect = frame.getBoundingClientRect();
+      const originX = (clientX ?? rect.left + rect.width / 2) - rect.left;
+      const originY = (clientY ?? rect.top + rect.height / 2) - rect.top;
+      const contentX = (originX - current.x) / current.scale;
+      const contentY = (originY - current.y) / current.scale;
+
+      return {
+        scale,
+        x: originX - contentX * scale,
+        y: originY - contentY * scale,
+      };
+    });
+  };
+
   const handleCanvasPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
 
     const target = event.target as HTMLElement;
     if (target.closest('button, input, select, textarea, a, [role="button"]')) return;
 
-    const viewport = canvasViewportRef.current;
-    if (!viewport) return;
-
     panStartRef.current = {
       x: event.clientX,
       y: event.clientY,
-      left: viewport.scrollLeft,
-      top: viewport.scrollTop,
+      left: canvasView.x,
+      top: canvasView.y,
     };
     setIsPanning(true);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1325,11 +1374,13 @@ function WorkflowFlowDesigner({
 
   const handleCanvasPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const panStart = panStartRef.current;
-    const viewport = canvasViewportRef.current;
-    if (!panStart || !viewport) return;
+    if (!panStart) return;
 
-    viewport.scrollLeft = panStart.left - (event.clientX - panStart.x);
-    viewport.scrollTop = panStart.top - (event.clientY - panStart.y);
+    setCanvasView((current) => ({
+      ...current,
+      x: panStart.left + event.clientX - panStart.x,
+      y: panStart.top + event.clientY - panStart.y,
+    }));
   };
 
   const stopCanvasPan = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -1419,22 +1470,42 @@ function WorkflowFlowDesigner({
 
       <div className="grid min-h-[680px] items-start lg:grid-cols-[minmax(720px,1fr)_360px]">
         <div
-          ref={canvasViewportRef}
+          ref={canvasFrameRef}
           onPointerDown={handleCanvasPointerDown}
           onPointerMove={handleCanvasPointerMove}
           onPointerUp={stopCanvasPan}
           onPointerCancel={stopCanvasPan}
+          onWheel={(event) => {
+            event.preventDefault();
+            zoomWorkflowCanvas(canvasView.scale * (event.deltaY > 0 ? 0.9 : 1.1), event.clientX, event.clientY);
+          }}
           className={cn(
-            "overflow-auto bg-[#f7f8fa] cursor-grab select-none",
+            "relative min-h-[680px] overflow-hidden bg-[#f7f8fa] cursor-grab select-none touch-none",
             isPanning && "cursor-grabbing"
           )}
         >
+          <div className="absolute right-5 top-5 z-20 flex items-center gap-1 rounded-full border border-border-silver bg-white/95 p-1 shadow-sm">
+            <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={() => zoomWorkflowCanvas(canvasView.scale * 0.88)}>
+              <Minus size={14} />
+            </button>
+            <span className="min-w-12 text-center text-[11px] font-black text-medium-gray">{Math.round(canvasView.scale * 100)}%</span>
+            <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={() => zoomWorkflowCanvas(canvasView.scale * 1.12)}>
+              <ZoomIn size={14} />
+            </button>
+            <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={fitWorkflowCanvas}>
+              <Maximize2 size={14} />
+            </button>
+          </div>
           <div
-            className="min-h-[680px] px-10 py-8"
+            ref={canvasContentRef}
+            className="absolute left-0 top-0 px-10 py-8"
             style={{
+              minHeight: `${canvasContentHeight}px`,
               minWidth: `${canvasMinWidth}px`,
               backgroundImage: 'radial-gradient(#d9dde5 1px, transparent 1px)',
               backgroundSize: '18px 18px',
+              transform: `translate3d(${canvasView.x}px, ${canvasView.y}px, 0) scale(${canvasView.scale})`,
+              transformOrigin: '0 0',
             }}
           >
             <div className="mx-auto flex max-w-[1480px] flex-col items-center">

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Building2, GitBranch, Link2, Plus, Save, Trash2, UserRound, Users } from 'lucide-react';
+import { AlertCircle, Building2, GitBranch, Link2, Maximize2, Minus, Plus, Save, Trash2, UserRound, Users, ZoomIn } from 'lucide-react';
 import { storage } from '../storage';
 import { OrganizationDepartment, OrganizationDirectory, OrganizationMember, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
@@ -325,75 +325,134 @@ function buildHealthMessages(directory: OrganizationDirectory) {
 
 function ChartViewport({ children }: { children: React.ReactNode }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
   const dragStateRef = useRef({
     isDragging: false,
     startX: 0,
     startY: 0,
-    scrollLeft: 0,
-    scrollTop: 0,
+    x: 0,
+    y: 0,
   });
   const [isDragging, setIsDragging] = useState(false);
 
-  useEffect(() => {
+  const fitToView = () => {
     const viewport = viewportRef.current;
-    if (!viewport) return;
-    viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2);
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+
+    const contentWidth = content.offsetWidth;
+    const contentHeight = content.offsetHeight;
+    if (!contentWidth || !contentHeight) return;
+
+    const scale = Math.min(
+      1,
+      Math.max(0.38, Math.min((viewport.clientWidth - 80) / contentWidth, (viewport.clientHeight - 88) / contentHeight)),
+    );
+
+    setView({
+      scale,
+      x: (viewport.clientWidth - contentWidth * scale) / 2,
+      y: Math.max(36, (viewport.clientHeight - contentHeight * scale) / 2),
+    });
+  };
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(fitToView);
+    return () => window.cancelAnimationFrame(frame);
   }, [children]);
 
-  const beginDrag = (clientX: number, clientY: number) => {
+  const zoomAt = (nextScale: number, clientX?: number, clientY?: number) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
+
+    setView((current) => {
+      const scale = Math.min(1.6, Math.max(0.35, nextScale));
+      const rect = viewport.getBoundingClientRect();
+      const originX = (clientX ?? rect.left + rect.width / 2) - rect.left;
+      const originY = (clientY ?? rect.top + rect.height / 2) - rect.top;
+      const contentX = (originX - current.x) / current.scale;
+      const contentY = (originY - current.y) / current.scale;
+
+      return {
+        scale,
+        x: originX - contentX * scale,
+        y: originY - contentY * scale,
+      };
+    });
+  };
+
+  const beginDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    if ((event.target as HTMLElement).closest('button')) return;
 
     dragStateRef.current = {
       isDragging: true,
-      startX: clientX,
-      startY: clientY,
-      scrollLeft: viewport.scrollLeft,
-      scrollTop: viewport.scrollTop,
+      startX: event.clientX,
+      startY: event.clientY,
+      x: view.x,
+      y: view.y,
     };
     setIsDragging(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  const updateDrag = (clientX: number, clientY: number) => {
-    const viewport = viewportRef.current;
+  const updateDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     const dragState = dragStateRef.current;
-    if (!viewport || !dragState.isDragging) return;
+    if (!dragState.isDragging) return;
 
-    viewport.scrollLeft = dragState.scrollLeft - (clientX - dragState.startX);
-    viewport.scrollTop = dragState.scrollTop - (clientY - dragState.startY);
+    setView((current) => ({
+      ...current,
+      x: dragState.x + event.clientX - dragState.startX,
+      y: dragState.y + event.clientY - dragState.startY,
+    }));
   };
 
-  const endDrag = () => {
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     dragStateRef.current.isDragging = false;
     setIsDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   return (
     <div
       ref={viewportRef}
       className={cn(
-        "relative h-[560px] overflow-auto bg-canvas-white px-10 py-12 select-none",
+        "relative h-[560px] overflow-hidden bg-canvas-white select-none touch-none",
         isDragging ? "cursor-grabbing" : "cursor-grab"
       )}
-      onMouseDown={(event) => beginDrag(event.clientX, event.clientY)}
-      onMouseMove={(event) => updateDrag(event.clientX, event.clientY)}
-      onMouseUp={endDrag}
-      onMouseLeave={endDrag}
-      onTouchStart={(event) => {
-        const touch = event.touches[0];
-        if (touch) beginDrag(touch.clientX, touch.clientY);
+      onPointerDown={beginDrag}
+      onPointerMove={updateDrag}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onWheel={(event) => {
+        event.preventDefault();
+        zoomAt(view.scale * (event.deltaY > 0 ? 0.9 : 1.1), event.clientX, event.clientY);
       }}
-      onTouchMove={(event) => {
-        const touch = event.touches[0];
-        if (touch) updateDrag(touch.clientX, touch.clientY);
-      }}
-      onTouchEnd={endDrag}
     >
-      <div className="pointer-events-none absolute right-5 top-5 z-10 rounded-full bg-white/90 px-3 py-1.5 text-[11px] font-black text-medium-gray shadow-sm border border-border-silver">
-        按住拖动查看完整结构
+      <div className="absolute right-5 top-5 z-20 flex items-center gap-1 rounded-full border border-border-silver bg-white/95 p-1 shadow-sm">
+        <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={() => zoomAt(view.scale * 0.88)}>
+          <Minus size={14} />
+        </button>
+        <span className="min-w-12 text-center text-[11px] font-black text-medium-gray">{Math.round(view.scale * 100)}%</span>
+        <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={() => zoomAt(view.scale * 1.12)}>
+          <ZoomIn size={14} />
+        </button>
+        <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={fitToView}>
+          <Maximize2 size={14} />
+        </button>
       </div>
-      <div className="min-w-max min-h-full flex items-start justify-center gap-12 pt-4 pb-16">
-        {children}
+      <div
+        ref={contentRef}
+        className="absolute left-0 top-0 flex min-w-max items-start justify-center gap-12 px-10 py-12 pb-16"
+        style={{
+          transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`,
+          transformOrigin: '0 0',
+        }}
+      >
+        <div className="flex items-start justify-center gap-12">{children}</div>
       </div>
     </div>
   );
