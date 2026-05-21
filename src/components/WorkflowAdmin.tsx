@@ -785,7 +785,7 @@ function FlowNode({
 }) {
   const toneClass = {
     submit: 'border-[#7d89b0] bg-white',
-    approval: 'border-[#c9791b] bg-[#fffaf3]',
+    approval: 'border-[#e2b56c] bg-white',
     condition: 'border-[#79a87b] bg-[#fbfff7]',
     cc: 'border-[#6697d4] bg-[#f7fbff]',
     end: 'border-border-silver bg-white',
@@ -796,15 +796,15 @@ function FlowNode({
       type="button"
       onClick={onClick}
       className={cn(
-        "w-full rounded-lg border-2 p-0 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-sky-blue-highlight",
+        "w-full rounded-lg border p-0 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-sky-blue-highlight",
         toneClass,
         selected && "ring-2 ring-interactive-blue ring-offset-2",
         hasError && "border-[#c62828] bg-[#fffafa]"
       )}
     >
       <div className={cn(
-        "h-8 rounded-t-[6px] px-3 flex items-center justify-between text-[11px] font-black",
-        tone === 'approval' && "bg-[#c9791b] text-white",
+        "h-7 rounded-t-[6px] px-3 flex items-center justify-between text-[11px] font-black",
+        tone === 'approval' && "bg-[#fff7e6] text-[#8a5a12]",
         tone === 'submit' && "bg-[#7d89b0] text-white",
         tone === 'condition' && "bg-[#edf7ed] text-[#2e7d32]",
         tone === 'cc' && "bg-[#e7f1ff] text-[#2267ad]",
@@ -813,11 +813,11 @@ function FlowNode({
         <span>{kicker}</span>
         {hasError && <AlertCircle size={14} />}
       </div>
-      <div className="p-4">
-        <div className="flex items-start gap-3">
+      <div className="p-3">
+        <div className="flex items-start gap-2.5">
           <span className={cn(
-            "mt-0.5 h-9 w-9 rounded-full flex shrink-0 items-center justify-center",
-            tone === 'approval' && "bg-[#fff1df] text-[#a85e0c]",
+            "mt-0.5 h-8 w-8 rounded-full flex shrink-0 items-center justify-center",
+            tone === 'approval' && "bg-[#fff7e6] text-[#8a5a12]",
             tone === 'submit' && "bg-lightest-gray-background text-midnight-graphite",
             tone === 'condition' && "bg-[#edf7ed] text-[#2e7d32]",
             tone === 'cc' && "bg-[#e7f1ff] text-[#2267ad]",
@@ -826,9 +826,9 @@ function FlowNode({
             {icon}
           </span>
           <span className="min-w-0">
-            <span className="block text-[15px] font-black text-midnight-graphite truncate">{title}</span>
-            <span className="mt-1 block text-[12px] font-bold text-medium-gray leading-5">{subtitle}</span>
-            {meta && <span className="mt-2 block text-[11px] font-black text-light-gray">{meta}</span>}
+            <span className="block text-[14px] font-black text-midnight-graphite truncate">{title}</span>
+            <span className="mt-1 block text-[11px] font-bold text-medium-gray leading-5">{subtitle}</span>
+            {meta && <span className="hidden">{meta}</span>}
           </span>
         </div>
         {children}
@@ -905,7 +905,7 @@ function WorkflowFlowDesigner({
   const canvasViewportRef = React.useRef<HTMLDivElement | null>(null);
   const panStartRef = React.useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [isPanning, setIsPanning] = React.useState(false);
-  const canvasMinWidth = Math.max(1040, flowBranches.length * 340);
+  const canvasMinWidth = Math.max(960, flowBranches.length * 312);
 
   const handleCanvasPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -945,15 +945,15 @@ function WorkflowFlowDesigner({
   };
 
   return (
-    <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-visible">
-      <div className="px-6 py-5 border-b border-border-silver flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <section className="rounded-xl border border-border-silver bg-white shadow-sm overflow-visible">
+      <div className="px-5 py-4 border-b border-border-silver flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-black text-white flex items-center justify-center">
             <GitBranch size={18} strokeWidth={2.5} />
           </div>
           <div>
             <h2 className="text-[18px] font-black">流程设计</h2>
-            <p className="mt-1 text-[12px] font-bold text-medium-gray">按飞书审批的画布方式配置提交人、条件分支、审批节点和抄送。</p>
+            <p className="hidden">按飞书审批的画布方式配置提交人、条件分支、审批节点和抄送。</p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -982,7 +982,7 @@ function WorkflowFlowDesigner({
         </div>
       )}
 
-      <div className="grid min-h-[860px] items-start lg:grid-cols-[minmax(720px,1fr)_400px]">
+      <div className="grid min-h-[680px] items-start lg:grid-cols-[minmax(720px,1fr)_360px]">
         <div
           ref={canvasViewportRef}
           onPointerDown={handleCanvasPointerDown}
@@ -995,7 +995,7 @@ function WorkflowFlowDesigner({
           )}
         >
           <div
-            className="min-h-[860px] px-12 py-10"
+            className="min-h-[680px] px-10 py-8"
             style={{
               minWidth: `${canvasMinWidth}px`,
               backgroundImage: 'radial-gradient(#d9dde5 1px, transparent 1px)',
@@ -1003,7 +1003,7 @@ function WorkflowFlowDesigner({
             }}
           >
             <div className="mx-auto flex max-w-[1480px] flex-col items-center">
-              <div className="w-[340px]">
+              <div className="w-[300px]">
                 <FlowNode
                   tone="submit"
                   kicker="提交"
@@ -1030,13 +1030,13 @@ function WorkflowFlowDesigner({
                   style={{ gridTemplateColumns: `repeat(${Math.max(flowBranches.length, 1)}, minmax(300px, 1fr))` }}
                 >
                   {flowBranches.map((branch, branchIndex) => (
-                    <div key={branch.id} className="flex min-w-[300px] flex-col items-center">
+                    <div key={branch.id} className="mx-auto flex w-[300px] min-w-[300px] flex-col items-center">
                       {flowBranches.length > 1 && <span className="h-5 w-px bg-border-silver" />}
                       <FlowNode
                         tone={branch.isDefault ? 'condition' : 'condition'}
                         kicker={branch.isDefault ? '默认条件' : `条件 ${branchIndex + 1}`}
                         title={getBranchTitle(branch)}
-                        subtitle={branch.isDefault ? '其他条件未命中时进入' : branch.conditions.map(formatCondition).join(' 且 ') || '请设置条件'}
+                        subtitle={branch.isDefault ? '默认兜底' : branch.conditions.map(formatCondition).join(' 且 ') || '未设置条件'}
                         meta={branch.isDefault ? '优先级最低' : `优先级 ${branchIndex + 1}`}
                         icon={<GitBranch size={17} strokeWidth={2.5} />}
                         selected={isDesignerSelected(activeSelection, 'branch', branch.id)}
@@ -1076,7 +1076,7 @@ function WorkflowFlowDesigner({
               </div>
 
               <FlowConnector />
-              <div className="w-[340px]">
+              <div className="w-[300px]">
                 <FlowNode
                   tone="cc"
                   kicker="抄送"
@@ -1091,12 +1091,12 @@ function WorkflowFlowDesigner({
                 />
               </div>
               <FlowConnector compact />
-              <div className="w-[220px]">
+              <div className="w-[180px]">
                 <FlowNode
                   tone="end"
                   kicker="结束"
                   title="流程完成"
-                  subtitle="所有审批节点通过后结束"
+                  subtitle="完成"
                   icon={<CheckCircle2 size={17} strokeWidth={2.5} />}
                 />
               </div>
@@ -1144,10 +1144,10 @@ function InspectorHeader({
   description: string;
 }) {
   return (
-    <div className="border-b border-border-silver px-5 py-5">
+    <div className="border-b border-border-silver px-4 py-4">
       <p className="text-[11px] font-black uppercase tracking-[0.18em] text-light-gray">{label}</p>
-      <h3 className="mt-2 text-[20px] font-black text-midnight-graphite">{title}</h3>
-      <p className="mt-1 text-[12px] font-bold leading-5 text-medium-gray">{description}</p>
+      <h3 className="mt-1 text-[17px] font-black text-midnight-graphite">{title}</h3>
+      <p className="hidden">{description}</p>
     </div>
   );
 }
@@ -1533,7 +1533,7 @@ function DesignerInspector({
   onRemoveStep: (branchId: string, stepId: string) => void;
   onMoveStep: (branchId: string, stepId: string, direction: -1 | 1) => void;
 }) {
-  const inspectorClassName = "border-t border-border-silver bg-white lg:sticky lg:top-24 lg:self-start lg:border-l lg:border-t-0 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto";
+  const inspectorClassName = "border-t border-border-silver bg-white lg:sticky lg:top-20 lg:self-start lg:border-l lg:border-t-0 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto";
 
   if (selection.type === 'step' && selectedBranch && selectedStep) {
     return (
@@ -2271,14 +2271,14 @@ export default function WorkflowAdmin() {
   const branches = draft?.branches || [];
 
   return (
-    <div className="space-y-8 pb-32 animate-in fade-in duration-500">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="space-y-4 pb-16 animate-in fade-in duration-500">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-[11px] font-black text-light-gray uppercase tracking-[0.2em]">Workflow Config</p>
           <h1 className="text-2xl font-black text-midnight-graphite tracking-tight">审批流配置</h1>
-          <p className="mt-2 text-[14px] font-medium text-medium-gray">配置模板、提交范围、条件分支、审批节点与抄送规则。</p>
+          <p className="hidden">配置模板、提交范围、条件分支、审批节点与抄送规则。</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="hidden">
           <span className="px-3 py-1.5 rounded-full bg-white border border-border-silver text-[11px] font-black text-medium-gray">
             {templates.length} 个模板
           </span>
@@ -2294,10 +2294,10 @@ export default function WorkflowAdmin() {
         </div>
       )}
 
-      <section className="rounded-2xl border border-border-silver bg-white shadow-sm p-5">
+      <section className="rounded-xl border border-border-silver bg-white shadow-sm p-3">
         <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
           <select
-            className="input-field text-[15px]"
+            className="input-field text-[13px]"
             value={createBusinessKey}
             onChange={(event) => setCreateBusinessKey(event.target.value)}
           >
@@ -2306,7 +2306,7 @@ export default function WorkflowAdmin() {
             ))}
           </select>
           <input
-            className="input-field text-[15px]"
+            className="input-field text-[13px]"
             value={createName}
             onChange={(event) => setCreateName(event.target.value)}
             placeholder="新审批流名称"
@@ -2315,15 +2315,15 @@ export default function WorkflowAdmin() {
             type="button"
             onClick={handleCreate}
             disabled={isSaving}
-            className="h-11 px-5 rounded-full bg-black text-white text-[13px] font-bold flex items-center justify-center gap-2 disabled:opacity-40"
+            className="h-10 px-4 rounded-full bg-black text-white text-[12px] font-bold flex items-center justify-center gap-2 disabled:opacity-40"
           >
             <Plus size={15} strokeWidth={3} /> 新建
           </button>
         </div>
       </section>
 
-      <section className="rounded-2xl border border-border-silver bg-white shadow-sm p-4">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center">
+      <section className="rounded-xl border border-border-silver bg-white shadow-sm p-3">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
           <div className="flex shrink-0 items-center gap-3">
             <Workflow size={17} />
             <h2 className="text-[16px] font-black">流程列表</h2>
