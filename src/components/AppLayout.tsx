@@ -11,6 +11,7 @@ interface AppLayoutProps {
   children: React.ReactNode;
   onLogout: () => void;
   onPerspectiveChange: (role: Role) => void;
+  activeUsername?: string;
   activeAdminView?: AdminView | null;
   onOpenAccountAdmin: () => void;
   onOpenAiAssistant: () => void;
@@ -193,6 +194,7 @@ export default function AppLayout({
   children,
   onLogout,
   onPerspectiveChange,
+  activeUsername,
   activeAdminView,
   onOpenAccountAdmin,
   onOpenAiAssistant,
@@ -205,6 +207,7 @@ export default function AppLayout({
   const user = auth.getCurrentUser();
   const sessionUser = auth.getSessionUser();
   const perspective = auth.getPerspective();
+  const currentUsername = activeUsername || user?.username || '';
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = React.useState(false);
   const [accounts, setAccounts] = React.useState<SystemAccount[]>([]);
@@ -233,15 +236,14 @@ export default function AppLayout({
 
   const handleAccountChange = (account: SystemAccount) => {
     auth.setActiveAccount(account);
-    onPerspectiveChange(account.role);
+    onPerspectiveChange(auth.getCurrentUser()?.role || account.role);
   };
 
   const displayRole = getPerspectiveLabel(perspective || user?.role || 'employee');
   const isDeveloper = sessionUser?.role === 'developer';
   const activeAccount = React.useMemo(() => {
-    const activeUsername = user?.username;
-    return accounts.find((account) => account.username === activeUsername) || null;
-  }, [accounts, user?.username]);
+    return accounts.find((account) => account.username === currentUsername) || null;
+  }, [accounts, currentUsername]);
 
   return (
     <div className="flex h-screen bg-canvas-white overflow-hidden relative">
@@ -363,7 +365,7 @@ export default function AppLayout({
           <div className="max-w-[1680px] mx-auto min-h-full flex flex-col">
             <AnimatePresence mode="wait">
               <motion.div
-                key={perspective}
+                key={`${perspective || 'employee'}:${currentUsername}`}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}

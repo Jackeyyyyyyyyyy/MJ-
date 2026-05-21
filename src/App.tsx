@@ -18,6 +18,7 @@ import { approvalSchema } from './approvalSchema';
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!auth.getCurrentUser());
   const [perspective, setPerspective] = useState<Role | null>(auth.getPerspective());
+  const [activeUsername, setActiveUsername] = useState(auth.getCurrentUser()?.username || '');
   const [selectedModule, setSelectedModule] = useState<string>('');
   const [selectedType, setSelectedType] = useState<string>('');
   const [activeAdminView, setActiveAdminView] = useState<AdminView | null>(null);
@@ -31,6 +32,7 @@ export default function App() {
   const handleLogin = () => {
     setIsAuthenticated(true);
     setPerspective(auth.getPerspective());
+    setActiveUsername(auth.getCurrentUser()?.username || '');
     setSelectedModule('');
     setSelectedType('');
     setActiveAdminView(null);
@@ -40,6 +42,13 @@ export default function App() {
     auth.logout();
     setIsAuthenticated(false);
     setPerspective(null);
+    setActiveUsername('');
+  };
+
+  const handlePerspectiveChange = (nextPerspective: Role) => {
+    setPerspective(nextPerspective);
+    setActiveUsername(auth.getCurrentUser()?.username || '');
+    setActiveAdminView(null);
   };
 
   const handleSelectType = (moduleName: string, typeName: string) => {
@@ -100,7 +109,7 @@ export default function App() {
 
   useEffect(() => {
     loadDynamicRecords();
-  }, [selectedModule, selectedType]);
+  }, [selectedModule, selectedType, activeUsername]);
 
   if (!isAuthenticated) {
     return <LoginPage onLogin={handleLogin} />;
@@ -182,10 +191,8 @@ export default function App() {
   return (
     <AppLayout 
       onLogout={handleLogout} 
-      onPerspectiveChange={(p) => {
-        setPerspective(p);
-        setActiveAdminView(null);
-      }}
+      onPerspectiveChange={handlePerspectiveChange}
+      activeUsername={activeUsername}
       activeAdminView={activeAdminView}
       onOpenAccountAdmin={handleOpenAccountAdmin}
       onOpenAiAssistant={handleOpenAiAssistant}
