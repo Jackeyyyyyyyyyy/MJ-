@@ -9,8 +9,6 @@ const emptyDirectory: OrganizationDirectory = {
   members: [],
 };
 
-type ChartMode = 'departments' | 'reporting';
-
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -401,58 +399,7 @@ function ChartViewport({ children }: { children: React.ReactNode }) {
   );
 }
 
-function DepartmentChartCard({ node }: { node: DepartmentChartNode; key?: React.Key }) {
-  const warning = node.hasMissingParent || node.hasCycle;
-  const unboundCount = Math.max(0, node.memberCount - node.boundCount);
-
-  return (
-    <div className="flex flex-col items-center shrink-0">
-      <div className={cn(
-        "w-[230px] min-h-[126px] rounded-2xl border-2 bg-white p-4 shadow-sm flex flex-col gap-3",
-        warning ? "border-[#c62828]" : "border-border-silver"
-      )}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="w-10 h-10 rounded-xl bg-black text-white flex items-center justify-center shrink-0">
-            <Building2 size={18} strokeWidth={2.5} />
-          </div>
-          <span className="px-2 py-1 rounded-full bg-lightest-gray-background text-[10px] font-black text-medium-gray whitespace-nowrap">
-            {node.memberCount} 人
-          </span>
-        </div>
-        <div>
-          <p className="text-[16px] font-black text-midnight-graphite truncate">{node.department.name}</p>
-          <p className="text-[11px] font-bold text-light-gray truncate">
-            已绑定 {node.boundCount} / 未绑定 {unboundCount}
-          </p>
-        </div>
-        {warning && (
-          <p className="text-[11px] font-bold text-[#c62828]">
-            {node.hasCycle ? '部门层级存在循环' : '上级部门不存在'}
-          </p>
-        )}
-      </div>
-
-      {node.children.length > 0 && (
-        <div className="flex flex-col items-center">
-          <div className="h-8 w-[3px] bg-slate-300 rounded-full" />
-          <div className="relative flex items-start gap-8 pt-8">
-            {node.children.length > 1 && (
-              <div className="absolute left-[115px] right-[115px] top-0 h-[3px] bg-slate-300 rounded-full" />
-            )}
-            {node.children.map((child) => (
-              <div key={`${node.department.id}-${child.department.id}`} className="relative flex flex-col items-center shrink-0">
-                <div className="absolute left-1/2 top-[-32px] h-8 w-[3px] -translate-x-1/2 bg-slate-300 rounded-full" />
-                <DepartmentChartCard node={child} />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ReportingMemberTree({ node, directory }: { node: ReportingMemberNode; directory: OrganizationDirectory }) {
+function ReportingMemberTree({ node, directory }: { node: ReportingMemberNode; directory: OrganizationDirectory; key?: React.Key }) {
   const member = node.member;
 
   return (
@@ -590,7 +537,6 @@ export default function OrganizationAdmin() {
   const [directory, setDirectory] = useState<OrganizationDirectory>(emptyDirectory);
   const [accounts, setAccounts] = useState<SystemAccount[]>([]);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
-  const [chartMode, setChartMode] = useState<ChartMode>('departments');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -777,68 +723,30 @@ export default function OrganizationAdmin() {
         <div className="px-6 py-5 border-b border-border-silver flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-black text-white flex items-center justify-center">
-              {chartMode === 'departments' ? <Building2 size={18} strokeWidth={2.5} /> : <GitBranch size={18} strokeWidth={2.5} />}
+              <GitBranch size={18} strokeWidth={2.5} />
             </div>
             <div>
-              <h2 className="text-[18px] font-black">{chartMode === 'departments' ? '部门组织架构图' : '人员汇报关系图'}</h2>
+              <h2 className="text-[18px] font-black">人员汇报关系图</h2>
               <p className="text-[12px] font-bold text-medium-gray">
-                {chartMode === 'departments'
-                  ? '按部门上下级生成，适合查看公司组织结构。'
-                  : '按成员直属上级生成，适合检查主管审批规则。'}
+                按成员直属上级生成，适合检查主管审批规则。
               </p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex p-1 bg-lightest-gray-background rounded-xl">
-              <button
-                type="button"
-                onClick={() => setChartMode('departments')}
-                className={cn(
-                  "h-9 px-4 rounded-lg text-[12px] font-black transition-all",
-                  chartMode === 'departments' ? "bg-white text-black shadow-sm" : "text-medium-gray"
-                )}
-              >
-                部门架构
-              </button>
-              <button
-                type="button"
-                onClick={() => setChartMode('reporting')}
-                className={cn(
-                  "h-9 px-4 rounded-lg text-[12px] font-black transition-all",
-                  chartMode === 'reporting' ? "bg-white text-black shadow-sm" : "text-medium-gray"
-                )}
-              >
-                汇报关系
-              </button>
-            </div>
             <span className="px-3 py-1.5 rounded-full bg-[#fff7e6] text-[#9a5b00] text-[11px] font-black">未绑定 {unboundMemberCount}</span>
           </div>
         </div>
 
-        {chartMode === 'departments' ? (
-          departmentChartRoots.length === 0 ? (
-            <div className="px-8 py-16 text-center text-[14px] font-bold text-medium-gray">
-              暂无部门，添加部门后会自动生成组织架构图。
-            </div>
-          ) : (
-            <ChartViewport>
-              {departmentChartRoots.map((node) => (
-                <DepartmentChartCard key={node.department.id} node={node} />
-              ))}
-            </ChartViewport>
-          )
+        {reportingChartRoots.length === 0 ? (
+          <div className="px-8 py-16 text-center text-[14px] font-bold text-medium-gray">
+            暂无成员，添加成员后会自动生成汇报关系图。
+          </div>
         ) : (
-          reportingChartRoots.length === 0 ? (
-            <div className="px-8 py-16 text-center text-[14px] font-bold text-medium-gray">
-              暂无成员，添加成员后会自动生成汇报关系图。
-            </div>
-          ) : (
-            <ChartViewport>
-              {reportingChartRoots.map((node) => (
-                <ReportingChartCard key={node.department.id} node={node} directory={directory} />
-              ))}
-            </ChartViewport>
-          )
+          <ChartViewport>
+            {reportingChartRoots.map((node) => (
+              <ReportingChartCard key={node.department.id} node={node} directory={directory} />
+            ))}
+          </ChartViewport>
         )}
       </section>
 
