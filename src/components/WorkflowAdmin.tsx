@@ -876,17 +876,20 @@ function FlowBranchRail({ count }: { count: number }) {
 
 function FlowBranchLane({
   showTopConnector,
+  showBottomConnector,
   children,
 }: {
   showTopConnector: boolean;
+  showBottomConnector: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div className="relative mx-auto flex w-[300px] min-w-[300px] flex-col items-center">
+    <div className="relative mx-auto flex h-full w-[300px] min-w-[300px] flex-col items-center">
       {showTopConnector && <span className="mt-6 h-6 w-px bg-[#bfc7d5]" />}
       <div className="relative z-10 flex w-full flex-col items-center">
         {children}
       </div>
+      {showBottomConnector && <span className="min-h-10 flex-1 w-px bg-[#bfc7d5]" />}
     </div>
   );
 }
@@ -898,8 +901,8 @@ function FlowMergeRail({ count }: { count: number }) {
 
   return (
     <div className="pointer-events-none relative h-16 w-full">
-      <span className="absolute top-6 h-px bg-[#c8d0dc]" style={{ left: edgeInset, right: edgeInset }} />
-      <span className="absolute left-1/2 top-6 h-10 w-px -translate-x-1/2 bg-[#bfc7d5]" />
+      <span className="absolute top-0 h-px bg-[#c8d0dc]" style={{ left: edgeInset, right: edgeInset }} />
+      <span className="absolute left-1/2 top-0 h-16 w-px -translate-x-1/2 bg-[#bfc7d5]" />
     </div>
   );
 }
@@ -1267,7 +1270,11 @@ function WorkflowFlowDesigner({
                   style={{ gridTemplateColumns: `repeat(${Math.max(flowBranches.length, 1)}, minmax(300px, 1fr))` }}
                 >
                   {flowBranches.map((branch, branchIndex) => (
-                    <FlowBranchLane key={branch.id} showTopConnector={flowBranches.length > 1}>
+                    <FlowBranchLane
+                      key={branch.id}
+                      showTopConnector={flowBranches.length > 1}
+                      showBottomConnector={flowBranches.length > 1}
+                    >
                       <FlowNode
                         tone={branch.isDefault ? 'condition' : 'condition'}
                         kicker={branch.isDefault ? '默认条件' : `条件 ${branchIndex + 1}`}
