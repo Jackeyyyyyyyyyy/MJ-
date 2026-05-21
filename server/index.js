@@ -909,11 +909,20 @@ function normalizeWorkflowDraft(draft) {
   const name = normalizeWorkflowText(nextDraft.basic?.name || nextDraft.name || '新审批流');
   const businessType = inferWorkflowBusinessType(nextDraft.businessType);
   const branches = normalizeWorkflowBranches(nextDraft);
+  const savedNodes = Array.isArray(nextDraft.nodes)
+    ? nextDraft.nodes.filter((node) => node && typeof node === 'object')
+    : [];
+  const hasSavedFlow = savedNodes.some((node) => node.type === 'approver' || node.type === 'condition' || node.type === 'cc');
   const defaultBranch = branches.find((branch) => branch.isDefault) || branches[branches.length - 1];
-  const legacyNodes = [
-    { id: 'node-start', type: 'start', title: '发起人', subtitle: 'Applicant' },
-    ...((defaultBranch?.approvalSteps || []).map((step, index) => approvalStepToLegacyNode(step, index))),
-  ];
+  const legacyNodes = hasSavedFlow
+    ? [
+        { id: 'node-start', type: 'start', title: '发起人', subtitle: 'Applicant' },
+        ...savedNodes.filter((node) => node.type !== 'start'),
+      ]
+    : [
+        { id: 'node-start', type: 'start', title: '发起人', subtitle: 'Applicant' },
+        ...((defaultBranch?.approvalSteps || []).map((step, index) => approvalStepToLegacyNode(step, index))),
+      ];
 
   return {
     ...nextDraft,
@@ -1521,6 +1530,13 @@ function selectWorkflowBranch(version, context) {
 }
 
 function getLinearApproverNodes(version, context = {}) {
+  const flowNodes = Array.isArray(version?.nodes)
+    ? version.nodes.filter((node) => node?.type !== 'start')
+    : [];
+  if (flowNodes.some((node) => node?.type === 'approver' || node?.type === 'condition')) {
+    return getLinearApproverNodesFromFlow(flowNodes, context);
+  }
+
   const selectedBranch = selectWorkflowBranch(version, context);
   if (selectedBranch) {
     return (selectedBranch.approvalSteps || []).map((step, index) => approvalStepToLegacyNode(step, index));
@@ -1529,6 +1545,31 @@ function getLinearApproverNodes(version, context = {}) {
   return Array.isArray(version?.nodes)
     ? version.nodes.filter((node) => node?.type === 'approver')
     : [];
+}
+
+function getLinearApproverNodesFromFlow(nodes, context = {}) {
+  const result = [];
+
+  (Array.isArray(nodes) ? nodes : []).forEach((node) => {
+    if (node?.type === 'approver') {
+      result.push(node);
+      return;
+    }
+
+    if (node?.type !== 'condition') return;
+
+    const branches = Array.isArray(node.conditions) ? node.conditions : [];
+    const defaultBranch = branches.find((branch) => branch?.isDefault) || null;
+    const matchedBranch = branches.find((branch) => {
+      if (branch?.isDefault) return false;
+      const structuredConditions = Array.isArray(branch.workflowConditions) ? branch.workflowConditions : [];
+      if (structuredConditions.length === 0) return false;
+      return structuredConditions.every((condition) => workflowConditionMatches(condition, context));
+    });
+    result.push(...getLinearApproverNodesFromFlow((matchedBranch || defaultBranch || branches[0])?.nodes || [], context));
+  });
+
+  return result;
 }
 
 function findMemberByAccount(directory, username) {
@@ -3220,3 +3261,4 @@ app.listen(port, () => {
   console.log(`MJ approval server listening on ${port}`);
   console.log(`Persistent data path: ${recordsFile}`);
 });
+

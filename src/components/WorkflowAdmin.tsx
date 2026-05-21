@@ -314,7 +314,7 @@ function defaultBranch(): WorkflowBranch {
     name: 'Default Branch',
     isDefault: true,
     conditions: [],
-    approvalSteps: [defaultStep(1)],
+    approvalSteps: [],
   };
 }
 
@@ -435,6 +435,99 @@ function stepToLegacyNode(step: ApprovalStep, index: number): WorkflowNode {
       : step.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
     rule: legacyRule,
   };
+}
+
+function stepToFlowNode(step: ApprovalStep, index: number): WorkflowNode {
+  return {
+    ...stepToLegacyNode(step, index),
+    id: step.id || createId('node'),
+    type: 'approver',
+    title: step.name || `审批节点 ${index + 1}`,
+    rule: step.approverRule,
+    approvalMode: step.approvalMode,
+    emptyApproverAction: step.emptyApproverAction,
+  };
+}
+
+function flowNodesFromDraft(draft: WorkflowVersion): WorkflowNode[] {
+  const nodes = Array.isArray(draft.nodes) ? draft.nodes.filter((node) => node.type !== 'start') : [];
+  if (nodes.some((node) => node.type === 'approver' || node.type === 'condition' || node.type === 'cc')) {
+    return nodes;
+  }
+
+  const branches = draft.branches || [];
+  const defaultBranch = branches.find((branch) => branch.isDefault) || branches[branches.length - 1];
+  const conditionalBranches = branches.filter((branch) => !branch.isDefault);
+  if (conditionalBranches.length === 0) {
+    return (defaultBranch?.approvalSteps || []).map(stepToFlowNode);
+  }
+
+  return [{
+    id: createId('flow-condition'),
+    type: 'condition',
+    title: '条件分化',
+    subtitle: '按条件进入不同分支',
+    conditions: [
+      ...conditionalBranches.map((branch, index) => ({
+        id: branch.id,
+        title: branch.name || `条件 ${index + 1}`,
+        expression: branch.conditions.map(formatCondition).join(' 且 '),
+        priority: index + 1,
+        isDefault: false,
+        workflowConditions: branch.conditions,
+        nodes: branch.approvalSteps.map(stepToFlowNode),
+      })),
+      ...(defaultBranch ? [{
+        id: defaultBranch.id,
+        title: '默认条件',
+        expression: '',
+        priority: 999,
+        isDefault: true,
+        workflowConditions: [],
+        nodes: defaultBranch.approvalSteps.map(stepToFlowNode),
+      }] : []),
+    ],
+  }];
+}
+
+function collectFlowSteps(nodes: WorkflowNode[]): ApprovalStep[] {
+  const steps: ApprovalStep[] = [];
+  nodes.forEach((node) => {
+    if (node.type === 'approver') {
+      steps.push(normalizeStep({
+        id: node.id,
+        name: node.title,
+        approverRule: node.rule || { type: 'specific_members', memberIds: [] },
+        approvalMode: node.approvalMode || 'one_of',
+        emptyApproverAction: node.emptyApproverAction || 'block_submit',
+      }, steps.length));
+    } else if (node.type === 'condition') {
+      const firstBranch = node.conditions?.find((condition) => !condition.isDefault) || node.conditions?.[0];
+      steps.push(...collectFlowSteps(firstBranch?.nodes || []));
+    }
+  });
+  return steps;
+}
+
+function branchesFromFlowNodes(nodes: WorkflowNode[]): WorkflowBranch[] {
+  const conditionNode = nodes.find((node) => node.type === 'condition');
+  if (conditionNode?.conditions?.length) {
+    return conditionNode.conditions.map((condition, index) => ({
+      id: condition.id || createId('branch'),
+      name: condition.title || (condition.isDefault ? 'Default Branch' : `Branch ${index + 1}`),
+      isDefault: Boolean(condition.isDefault),
+      conditions: condition.isDefault ? [] : (condition.workflowConditions || [parseLegacyCondition(condition.expression)]),
+      approvalSteps: collectFlowSteps(condition.nodes || []),
+    }));
+  }
+
+  return [{
+    id: 'branch-default',
+    name: 'Default Branch',
+    isDefault: true,
+    conditions: [],
+    approvalSteps: collectFlowSteps(nodes),
+  }];
 }
 
 function normalizeStep(step: Partial<ApprovalStep> | undefined, index: number): ApprovalStep {
@@ -611,14 +704,14 @@ function normalizeDraftForEditor(draft: WorkflowVersion): WorkflowVersion {
 
 function prepareDraftForSave(draft: WorkflowVersion): WorkflowVersion {
   const nextDraft = normalizeDraftForEditor(draft);
+  const flowNodes = flowNodesFromDraft(nextDraft);
   const scope = getBusinessScopeByNames(nextDraft.basic.moduleName, nextDraft.basic.approvalTypeName);
   const generatedName = getGeneratedWorkflowName(scope || {
     approvalTypeName: nextDraft.basic.approvalTypeName || '通用审批',
   });
-  const defaultWorkflowBranch = nextDraft.branches?.find((branch) => branch.isDefault);
   const legacyNodes: WorkflowNode[] = [
     { id: 'node-start', type: 'start', title: '发起人', subtitle: 'Applicant' },
-    ...((defaultWorkflowBranch?.approvalSteps || []).map(stepToLegacyNode)),
+    ...flowNodes,
   ];
 
   return {
@@ -627,6 +720,7 @@ function prepareDraftForSave(draft: WorkflowVersion): WorkflowVersion {
       ...nextDraft.basic,
       name: generatedName,
     },
+    branches: branchesFromFlowNodes(flowNodes),
     nodes: legacyNodes,
   };
 }
@@ -674,10 +768,6 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
 
   branches.forEach((branch, branchIndex) => {
     const branchLabel = branch.name || `Branch ${branchIndex + 1}`;
-    if (branch.approvalSteps.length === 0) {
-      addValidationError(state, 'branches', `${branchLabel} 至少需要一个审批节点`, branch.id);
-    }
-
     if (!branch.isDefault) {
       if (branch.conditions.length === 0) {
         addValidationError(state, 'branches', `${branchLabel} 必须配置条件`, branch.id);
@@ -1141,6 +1231,56 @@ function FlowAddButton({
   );
 }
 
+function FlowInsertButton({
+  onApproval,
+  onCondition,
+  onCc,
+}: {
+  onApproval: () => void;
+  onCondition: () => void;
+  onCc: () => void;
+}) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const items = [
+    { label: '添加审批', icon: <CheckCircle2 size={14} strokeWidth={2.4} />, onClick: onApproval },
+    { label: '添加条件分化', icon: <GitBranch size={14} strokeWidth={2.4} />, onClick: onCondition },
+    { label: '添加抄送', icon: <Send size={14} strokeWidth={2.4} />, onClick: onCc },
+  ];
+
+  return (
+    <div className="relative z-20">
+      <button
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        className="h-8 w-8 rounded-full border border-border-silver bg-white text-interactive-blue shadow-sm transition-all hover:scale-105 hover:border-interactive-blue hover:shadow-md flex items-center justify-center"
+        aria-label="添加流程节点"
+      >
+        <Plus size={15} strokeWidth={3} />
+      </button>
+      {isOpen && (
+        <div className="absolute left-1/2 top-10 w-44 -translate-x-1/2 rounded-2xl border border-border-silver bg-white/95 p-1.5 shadow-xl shadow-black/10 backdrop-blur">
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => {
+                item.onClick();
+                setIsOpen(false);
+              }}
+              className="flex h-9 w-full items-center gap-2 rounded-xl px-3 text-left text-[12px] font-black text-midnight-graphite transition-colors hover:bg-lightest-gray-background"
+            >
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-canvas-white text-medium-gray">
+                {item.icon}
+              </span>
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FlowNode({
   tone,
   kicker,
@@ -1534,7 +1674,13 @@ function WorkflowFlowDesigner({
               </div>
 
               <FlowConnector />
-              <FlowAddButton label="添加条件" onClick={onAddBranch} />
+              <FlowInsertButton
+                onApproval={() => {
+                  if (defaultBranch) onAddStep(defaultBranch.id);
+                }}
+                onCondition={onAddBranch}
+                onCc={() => onSelect({ type: 'cc' })}
+              />
               <FlowConnector compact />
 
               <div
@@ -1567,7 +1713,11 @@ function WorkflowFlowDesigner({
                       />
 
                       <FlowConnector compact />
-                      <FlowAddButton label="审批" onClick={() => onAddStep(branch.id)} />
+                      <FlowInsertButton
+                        onApproval={() => onAddStep(branch.id)}
+                        onCondition={onAddBranch}
+                        onCc={() => onSelect({ type: 'cc' })}
+                      />
                       <FlowConnector compact />
 
                       <div className="flex w-full flex-col items-center gap-0">
@@ -1577,7 +1727,17 @@ function WorkflowFlowDesigner({
                           </div>
                         ) : branch.approvalSteps.map((step, stepIndex) => (
                           <React.Fragment key={step.id}>
-                            {stepIndex > 0 && <FlowConnector compact />}
+                            {stepIndex > 0 && (
+                              <>
+                                <FlowConnector compact />
+                                <FlowInsertButton
+                                  onApproval={() => onAddStep(branch.id)}
+                                  onCondition={onAddBranch}
+                                  onCc={() => onSelect({ type: 'cc' })}
+                                />
+                                <FlowConnector compact />
+                              </>
+                            )}
                             <FlowNode
                               tone="approval"
                               kicker={`审批 ${stepIndex + 1}`}
@@ -2588,7 +2748,7 @@ export default function WorkflowAdmin() {
         name: `Branch ${branchCount}`,
         isDefault: false,
         conditions: [defaultCondition(defaultField)],
-        approvalSteps: [defaultStep(1)],
+        approvalSteps: [],
       };
 
       if (defaultIndex < 0) {

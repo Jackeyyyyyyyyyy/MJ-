@@ -168,11 +168,16 @@ export interface WorkflowNode {
   title: string;
   subtitle?: string;
   rule?: ApproverRule;
+  approvalMode?: ApprovalMode;
+  emptyApproverAction?: 'auto_pass' | 'block_submit';
+  ccRule?: CcRule;
   conditions?: Array<{
     id: string;
     title: string;
     expression: string;
     priority: number;
+    isDefault?: boolean;
+    workflowConditions?: WorkflowCondition[];
     nodes: WorkflowNode[];
   }>;
 }
