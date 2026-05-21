@@ -70,11 +70,20 @@ const businessTypeOptions: Array<{
 ];
 
 const conditionOperatorOptions: Array<{ value: WorkflowConditionOperator; label: string }> = [
+  { value: 'lt', label: '< 小于' },
   { value: 'lte', label: '<= 小于等于' },
   { value: 'gt', label: '> 大于' },
+  { value: 'gte', label: '>= 大于等于' },
   { value: 'between', label: '区间' },
   { value: 'eq', label: '= 等于' },
+  { value: 'neq', label: '!= 不等于' },
+  { value: 'contains', label: '包含' },
+  { value: 'not_contains', label: '不包含' },
 ];
+
+const numericConditionOperators = new Set<WorkflowConditionOperator>(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq']);
+const textConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'neq', 'contains', 'not_contains']);
+const identityConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'neq']);
 
 const businessScopeOptions: BusinessScopeOption[] = approvalSchema.modules.flatMap((module) => (
   module.approvalTypes.map((approvalType) => {
@@ -185,6 +194,22 @@ function getConditionFieldKind(field: string): ConditionFieldKind {
   if (field === 'submitter.member') return 'member';
   if (field === 'submitter.department') return 'department';
   return isNumericConditionFieldValue(field) ? 'number' : 'text';
+}
+
+function getConditionOperatorOptions(field: string) {
+  const kind = getConditionFieldKind(field);
+  const allowedOperators = kind === 'number'
+    ? numericConditionOperators
+    : kind === 'member' || kind === 'department'
+      ? identityConditionOperators
+      : textConditionOperators;
+
+  return conditionOperatorOptions.filter((option) => allowedOperators.has(option.value));
+}
+
+function getFallbackConditionOperator(field: string): WorkflowConditionOperator {
+  const kind = getConditionFieldKind(field);
+  return kind === 'number' ? 'lte' : 'eq';
 }
 
 function getConditionFieldOptions(draft: WorkflowVersion | null): ConditionFieldOption[] {
@@ -408,9 +433,10 @@ function normalizeStep(step: Partial<ApprovalStep> | undefined, index: number): 
 
 function normalizeCondition(condition: Partial<WorkflowCondition> | undefined): WorkflowCondition {
   const field = String(condition?.field || 'submitter.department') as WorkflowConditionField;
-  const operator = ['lte', 'gt', 'between', 'eq'].includes(String(condition?.operator))
+  const operatorOptions = getConditionOperatorOptions(field);
+  const operator = operatorOptions.some((option) => option.value === condition?.operator)
     ? condition?.operator as WorkflowConditionOperator
-    : isNumericConditionFieldValue(field) ? 'lte' : 'eq';
+    : getFallbackConditionOperator(field);
 
   return {
     id: condition?.id || createId('cond'),
@@ -633,12 +659,12 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
             if (!Number.isFinite(Number(condition.amountMin)) || !Number.isFinite(Number(condition.amountMax))) {
               addValidationError(state, 'branches', `${branchLabel} 数值区间必须填写有效数字`, branch.id);
             }
-          } else if (condition.operator === 'lte' && !Number.isFinite(Number(condition.amountMax))) {
+          } else if (['lt', 'lte'].includes(condition.operator) && !Number.isFinite(Number(condition.amountMax))) {
             addValidationError(state, 'branches', `${branchLabel} 数值上限必须填写有效数字`, branch.id);
-          } else if (condition.operator === 'gt' && !Number.isFinite(Number(condition.amountMin))) {
+          } else if (['gt', 'gte'].includes(condition.operator) && !Number.isFinite(Number(condition.amountMin))) {
             addValidationError(state, 'branches', `${branchLabel} 数值下限必须填写有效数字`, branch.id);
-          } else if (condition.operator === 'eq' && !condition.value?.trim()) {
-            addValidationError(state, 'branches', `${branchLabel} 条件值不能为空`, branch.id);
+          } else if (['eq', 'neq'].includes(condition.operator) && !Number.isFinite(Number(condition.value))) {
+            addValidationError(state, 'branches', `${branchLabel} 条件值必须填写有效数字`, branch.id);
           }
         } else if (!condition.value?.trim()) {
           addValidationError(state, 'branches', `${branchLabel} 条件值不能为空`, branch.id);
@@ -676,8 +702,11 @@ function formatCondition(condition: WorkflowCondition) {
   const fieldLabel = getConditionFieldLabel(condition.field);
   if (isNumericConditionFieldValue(condition.field)) {
     if (condition.operator === 'between') return `${fieldLabel} > ${condition.amountMin ?? '?'} 且 <= ${condition.amountMax ?? '?'}`;
+    if (condition.operator === 'lt') return `${fieldLabel} < ${condition.amountMax ?? '?'}`;
     if (condition.operator === 'gt') return `${fieldLabel} > ${condition.amountMin ?? '?'}`;
+    if (condition.operator === 'gte') return `${fieldLabel} >= ${condition.amountMin ?? '?'}`;
     if (condition.operator === 'lte') return `${fieldLabel} <= ${condition.amountMax ?? '?'}`;
+    if (condition.operator === 'neq') return `${fieldLabel} != ${condition.value || '?'}`;
     return `${fieldLabel} = ${condition.value || '?'}`;
   }
 
@@ -1337,7 +1366,7 @@ function ConditionValueControl({
     );
   }
 
-  if (kind === 'number' && condition.operator === 'gt') {
+  if (kind === 'number' && ['gt', 'gte'].includes(condition.operator)) {
     return (
       <input
         className="input-field text-[13px]"
@@ -1349,7 +1378,7 @@ function ConditionValueControl({
     );
   }
 
-  if (kind === 'number' && condition.operator === 'lte') {
+  if (kind === 'number' && ['lt', 'lte'].includes(condition.operator)) {
     return (
       <input
         className="input-field text-[13px]"
@@ -1357,6 +1386,18 @@ function ConditionValueControl({
         value={condition.amountMax ?? ''}
         onChange={(event) => onUpdateCondition(branchId, condition.id, { amountMax: event.target.value === '' ? undefined : Number(event.target.value) })}
         placeholder="金额上限"
+      />
+    );
+  }
+
+  if (kind === 'number') {
+    return (
+      <input
+        className="input-field text-[13px]"
+        type="number"
+        value={condition.value || ''}
+        onChange={(event) => onUpdateCondition(branchId, condition.id, { value: event.target.value })}
+        placeholder={`${getConditionFieldLabel(condition.field)}的值`}
       />
     );
   }
@@ -1407,10 +1448,7 @@ function ConditionEditor({
   onRemoveCondition: (branchId: string, conditionId: string) => void;
   onUpdateCondition: (branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
 }) {
-  const fieldKind = getConditionFieldKind(condition.field);
-  const operatorOptions = fieldKind === 'number'
-    ? conditionOperatorOptions
-    : conditionOperatorOptions.filter((option) => option.value === 'eq');
+  const operatorOptions = getConditionOperatorOptions(condition.field);
 
   return (
     <div className="rounded-2xl border border-border-silver bg-white p-4 space-y-3">
@@ -2744,7 +2782,7 @@ export default function WorkflowAdmin() {
                           value={condition.operator}
                           onChange={(event) => updateCondition(branch.id, condition.id, { operator: event.target.value as WorkflowConditionOperator })}
                         >
-                          {conditionOperatorOptions.map((option) => (
+                          {getConditionOperatorOptions(condition.field).map((option) => (
                             <option key={option.value} value={option.value}>{option.label}</option>
                           ))}
                         </select>
@@ -2765,7 +2803,7 @@ export default function WorkflowAdmin() {
                               placeholder="上限"
                             />
                           </>
-                        ) : isNumericConditionFieldValue(condition.field) && condition.operator === 'gt' ? (
+                        ) : isNumericConditionFieldValue(condition.field) && ['gt', 'gte'].includes(condition.operator) ? (
                           <input
                             className="input-field text-[13px] lg:col-span-2"
                             type="number"
@@ -2773,13 +2811,21 @@ export default function WorkflowAdmin() {
                             onChange={(event) => updateCondition(branch.id, condition.id, { amountMin: event.target.value === '' ? undefined : Number(event.target.value) })}
                             placeholder="金额下限"
                           />
-                        ) : isNumericConditionFieldValue(condition.field) && condition.operator === 'lte' ? (
+                        ) : isNumericConditionFieldValue(condition.field) && ['lt', 'lte'].includes(condition.operator) ? (
                           <input
                             className="input-field text-[13px] lg:col-span-2"
                             type="number"
                             value={condition.amountMax ?? ''}
                             onChange={(event) => updateCondition(branch.id, condition.id, { amountMax: event.target.value === '' ? undefined : Number(event.target.value) })}
                             placeholder="金额上限"
+                          />
+                        ) : isNumericConditionFieldValue(condition.field) ? (
+                          <input
+                            className="input-field text-[13px] lg:col-span-2"
+                            type="number"
+                            value={condition.value || ''}
+                            onChange={(event) => updateCondition(branch.id, condition.id, { value: event.target.value })}
+                            placeholder="条件值"
                           />
                         ) : (
                           <input
