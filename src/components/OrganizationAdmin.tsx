@@ -34,12 +34,47 @@ interface DepartmentChartNode {
 
 interface ReportingChartNode {
   department: OrganizationDepartment;
-  members: OrganizationMember[];
+  memberRoots: ReportingMemberNode[];
   children: ReportingChartNode[];
   memberCount: number;
   boundCount: number;
   hasMissingParent: boolean;
   hasCycle: boolean;
+}
+
+interface ReportingMemberNode {
+  member: OrganizationMember;
+  children: ReportingMemberNode[];
+  hasCycle: boolean;
+}
+
+function buildDepartmentMemberTree(members: OrganizationMember[]) {
+  const membersById = new Map(members.map((member) => [member.id, member]));
+  const childrenBySupervisor = new Map<string, OrganizationMember[]>();
+
+  members.forEach((member) => {
+    if (!member.supervisorId || !membersById.has(member.supervisorId)) return;
+    const children = childrenBySupervisor.get(member.supervisorId) || [];
+    children.push(member);
+    childrenBySupervisor.set(member.supervisorId, children);
+  });
+
+  const createNode = (member: OrganizationMember, ancestors = new Set<string>()): ReportingMemberNode => {
+    const hasCycle = ancestors.has(member.id);
+    if (hasCycle) return { member, children: [], hasCycle: true };
+
+    const nextAncestors = new Set(ancestors);
+    nextAncestors.add(member.id);
+
+    return {
+      member,
+      children: (childrenBySupervisor.get(member.id) || []).map((child) => createNode(child, nextAncestors)),
+      hasCycle: false,
+    };
+  };
+
+  const roots = members.filter((member) => !member.supervisorId || !membersById.has(member.supervisorId));
+  return (roots.length > 0 ? roots : members.slice(0, 1)).map((member) => createNode(member));
 }
 
 function buildDepartmentChart(directory: OrganizationDirectory) {
@@ -112,7 +147,7 @@ function buildReportingChart(directory: OrganizationDirectory) {
     if (hasCycle) {
       return {
         department,
-        members,
+        memberRoots: buildDepartmentMemberTree(members),
         children: [],
         memberCount: members.length,
         boundCount: members.filter((member) => Boolean(member.accountUsername)).length,
@@ -126,7 +161,7 @@ function buildReportingChart(directory: OrganizationDirectory) {
 
     return {
       department,
-      members,
+      memberRoots: buildDepartmentMemberTree(members),
       children: (childrenByParent.get(department.id) || []).map((child) => createNode(child, nextAncestors)),
       memberCount: members.length,
       boundCount: members.filter((member) => Boolean(member.accountUsername)).length,
@@ -417,6 +452,32 @@ function DepartmentChartCard({ node }: { node: DepartmentChartNode; key?: React.
   );
 }
 
+function ReportingMemberTree({ node, directory }: { node: ReportingMemberNode; directory: OrganizationDirectory }) {
+  const member = node.member;
+
+  return (
+    <div className="relative">
+      <div className="rounded-xl bg-lightest-gray-background px-3 py-2">
+        <p className="text-[12px] font-black text-midnight-graphite truncate">{member.name}</p>
+        <p className="text-[11px] font-bold text-medium-gray truncate">{member.title || '未配置职位'}</p>
+        <p className="text-[10px] font-bold text-light-gray truncate">
+          上级：{member.supervisorId ? getMemberName(directory, member.supervisorId) : '无'}
+        </p>
+        {node.hasCycle && (
+          <p className="mt-1 text-[10px] font-bold text-[#c62828]">汇报链路存在循环</p>
+        )}
+      </div>
+      {node.children.length > 0 && (
+        <div className="ml-4 mt-1.5 space-y-1.5 border-l-2 border-slate-300 pl-3">
+          {node.children.map((child) => (
+            <ReportingMemberTree key={child.member.id} node={child} directory={directory} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReportingChartCard({ node, directory }: { node: ReportingChartNode; directory: OrganizationDirectory; key?: React.Key }) {
   const warning = node.hasMissingParent || node.hasCycle;
 
@@ -439,18 +500,12 @@ function ReportingChartCard({ node, directory }: { node: ReportingChartNode; dir
           <p className="text-[11px] font-bold text-light-gray truncate">
             已绑定 {node.boundCount} / 未绑定 {Math.max(0, node.memberCount - node.boundCount)}
           </p>
-          <div className="space-y-1">
-            {node.members.length === 0 ? (
+          <div className="space-y-1.5">
+            {node.memberRoots.length === 0 ? (
               <p className="text-[11px] font-bold text-light-gray">暂无成员</p>
             ) : (
-              node.members.map((member) => (
-                <div key={member.id} className="rounded-xl bg-lightest-gray-background px-3 py-2">
-                  <p className="text-[12px] font-black text-midnight-graphite truncate">{member.name}</p>
-                  <p className="text-[11px] font-bold text-medium-gray truncate">{member.title || '未配置职位'}</p>
-                  <p className="text-[10px] font-bold text-light-gray truncate">
-                    上级：{member.supervisorId ? getMemberName(directory, member.supervisorId) : '无'}
-                  </p>
-                </div>
+              node.memberRoots.map((memberNode) => (
+                <ReportingMemberTree key={memberNode.member.id} node={memberNode} directory={directory} />
               ))
             )}
           </div>
