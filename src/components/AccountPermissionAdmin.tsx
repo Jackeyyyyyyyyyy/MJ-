@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, KeyRound, Layers, Plus, RefreshCw, ShieldCheck, UserCog, Users } from 'lucide-react';
+import { Check, KeyRound, Plus, RefreshCw, ShieldCheck, UserCog, Users } from 'lucide-react';
 import { storage } from '../storage';
 import { AccountInput, Role, SystemAccount } from '../types';
 import StatsOverview from './StatsOverview';
@@ -284,19 +284,7 @@ export default function AccountPermissionAdmin() {
                     )}
                   </div>
 
-                  {account.isSuperAdmin ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      {account.permissions.map((permission) => (
-                        <div
-                          key={permission.key}
-                          className="min-h-[42px] px-3 py-2 bg-canvas-white border border-border-silver rounded-lg flex items-center gap-3"
-                        >
-                          <Layers size={15} strokeWidth={2.2} className="text-medium-gray shrink-0" />
-                          <span className="text-[13px] font-semibold text-midnight-graphite">{permission.label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
+                  {!account.isSuperAdmin && (
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[1fr_1fr_160px_160px_120px] gap-3">
                       <input
                         value={draft.username}
