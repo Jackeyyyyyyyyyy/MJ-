@@ -3,6 +3,7 @@ build/
 dist/
 coverage/
 data/
+.codex-git-tmp/
 /7508ff027f03db621bce44250088499a.png
 .DS_Store
 *.log

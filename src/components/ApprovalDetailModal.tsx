@@ -169,6 +169,21 @@ function getAiSuggestionDisplay(record: ApprovalRecord) {
   };
 }
 
+function getCcTimelineItem(record: ApprovalRecord, finishedAt?: string) {
+  const recipients = record.ccRecipients || [];
+  if (recipients.length === 0) return null;
+
+  const recipientNames = recipients.map((recipient) => recipient.name).filter(Boolean).join('、');
+  const isFinished = record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.REJECTED;
+
+  return {
+    title: '抄送',
+    desc: isFinished ? `已同步给：${recipientNames}` : `流程结束后同步给：${recipientNames}`,
+    time: isFinished ? finishedAt : undefined,
+    state: isFinished ? 'done' : 'pending',
+  };
+}
+
 export default function ApprovalDetailModal({ record, onClose, onApprove, onReject, showAiSuggestion = false, showAiRawResponse = false }: ApprovalDetailModalProps) {
   const [preview, setPreview] = React.useState<PreviewState | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = React.useState(false);
@@ -186,6 +201,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
   const aiRawText = typeof record.aiSuggestion?.rawText === 'string' ? record.aiSuggestion.rawText.trim() : '';
   const finishedAt = record.approvedAt || record.rejectedAt;
   const workflowSteps = record.workflowInstance?.steps;
+  const ccTimelineItem = getCcTimelineItem(record, finishedAt);
   const approvalTimeline = workflowSteps?.length
     ? [
         {
@@ -206,6 +222,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
             ? 'done'
             : (step.status === 'pending' ? 'active' : (step.status === 'rejected' ? 'failed' : 'pending')),
         })),
+        ...(ccTimelineItem ? [ccTimelineItem] : []),
       ]
     : [
         {
@@ -230,6 +247,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
             ? 'done'
             : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending'),
         },
+        ...(ccTimelineItem ? [ccTimelineItem] : []),
       ];
 
   const handleAttachmentDownload = async (attachment: ApprovalAttachment) => {

@@ -10,10 +10,26 @@ interface ApprovalProgressModalProps {
   onClose: () => void;
 }
 
+function getCcProgressStep(record: ApprovalRecord) {
+  const recipients = record.ccRecipients || [];
+  if (recipients.length === 0) return null;
+
+  const recipientNames = recipients.map((recipient) => recipient.name).filter(Boolean).join('、');
+  const isFinished = record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.REJECTED;
+
+  return {
+    title: '抄送',
+    desc: isFinished ? `已同步给：${recipientNames}` : `流程结束后同步给：${recipientNames}`,
+    time: isFinished ? (record.approvedAt || record.rejectedAt) : undefined,
+    status: isFinished ? 'completed' : 'pending'
+  };
+}
+
 export default function ApprovalProgressModal({ record, onClose }: ApprovalProgressModalProps) {
   if (!record) return null;
 
   const workflowSteps = record.workflowInstance?.steps;
+  const ccProgressStep = getCcProgressStep(record);
   const steps = workflowSteps?.length
     ? [
         {
@@ -34,6 +50,7 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
             ? 'completed'
             : (step.status === 'pending' ? 'current' : (step.status === 'rejected' ? 'failed' : 'pending')),
         })),
+        ...(ccProgressStep ? [ccProgressStep] : []),
       ]
     : [
         {
@@ -53,7 +70,8 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
           desc: record.status === ApprovalStatus.APPROVED ? '审批流程顺利结束' : (record.status === ApprovalStatus.REJECTED ? '审批流程已被拒绝' : '待处理'),
           time: record.approvedAt || record.rejectedAt,
           status: record.status === ApprovalStatus.APPROVED ? 'completed' : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending')
-        }
+        },
+        ...(ccProgressStep ? [ccProgressStep] : [])
       ];
 
   return (
