@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Building2, GitBranch, Link2, Maximize2, Minus, Plus, Save, Trash2, UserRound, Users, ZoomIn } from 'lucide-react';
+import { AlertCircle, Building2, GitBranch, Link2, Maximize2, Minus, Plus, Save, Trash2, UserRound, Users } from 'lucide-react';
 import { storage } from '../storage';
 import { OrganizationDepartment, OrganizationDirectory, OrganizationMember, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
@@ -326,6 +326,7 @@ function buildHealthMessages(directory: OrganizationDirectory) {
 function ChartViewport({ children }: { children: React.ReactNode }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<HTMLDivElement | null>(null);
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
   const dragStateRef = useRef({
     isDragging: false,
@@ -338,22 +339,25 @@ function ChartViewport({ children }: { children: React.ReactNode }) {
 
   const fitToView = () => {
     const viewport = viewportRef.current;
-    const content = contentRef.current;
-    if (!viewport || !content) return;
+    const chart = chartRef.current;
+    if (!viewport || !chart) return;
 
-    const contentWidth = content.offsetWidth;
-    const contentHeight = content.offsetHeight;
+    const contentWidth = chart.offsetWidth;
+    const contentHeight = chart.offsetHeight;
     if (!contentWidth || !contentHeight) return;
 
+    const paddingX = 72;
+    const paddingY = 64;
+
     const scale = Math.min(
-      1,
-      Math.max(0.38, Math.min((viewport.clientWidth - 80) / contentWidth, (viewport.clientHeight - 88) / contentHeight)),
+      1.2,
+      Math.max(0.38, Math.min((viewport.clientWidth - paddingX) / contentWidth, (viewport.clientHeight - paddingY) / contentHeight)),
     );
 
     setView({
       scale,
-      x: (viewport.clientWidth - contentWidth * scale) / 2,
-      y: Math.max(36, (viewport.clientHeight - contentHeight * scale) / 2),
+      x: (viewport.clientWidth - contentWidth * scale) / 2 - chart.offsetLeft * scale,
+      y: Math.max(32, (viewport.clientHeight - contentHeight * scale) / 2) - chart.offsetTop * scale,
     });
   };
 
@@ -438,7 +442,7 @@ function ChartViewport({ children }: { children: React.ReactNode }) {
         </button>
         <span className="min-w-12 text-center text-[11px] font-black text-medium-gray">{Math.round(view.scale * 100)}%</span>
         <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={() => zoomAt(view.scale * 1.12)}>
-          <ZoomIn size={14} />
+          <Plus size={14} />
         </button>
         <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={fitToView}>
           <Maximize2 size={14} />
@@ -452,7 +456,7 @@ function ChartViewport({ children }: { children: React.ReactNode }) {
           transformOrigin: '0 0',
         }}
       >
-        <div className="flex items-start justify-center gap-12">{children}</div>
+        <div ref={chartRef} className="flex items-start justify-center gap-12">{children}</div>
       </div>
     </div>
   );

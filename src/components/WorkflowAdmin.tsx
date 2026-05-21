@@ -14,7 +14,6 @@ import {
   Trash2,
   UserRound,
   Users,
-  ZoomIn,
 } from 'lucide-react';
 import { storage } from '../storage';
 import { approvalSchema } from '../approvalSchema';
@@ -1293,6 +1292,7 @@ function WorkflowFlowDesigner({
   const canvasContentHeight = 980;
   const canvasFrameRef = React.useRef<HTMLDivElement | null>(null);
   const canvasContentRef = React.useRef<HTMLDivElement | null>(null);
+  const canvasFlowRef = React.useRef<HTMLDivElement | null>(null);
   const [canvasView, setCanvasView] = React.useState({ scale: 1, x: 0, y: 0 });
   const eligibleSubmitters = React.useMemo(
     () => getEligibleSubmitterMembers(submitPermission, directory),
@@ -1311,22 +1311,25 @@ function WorkflowFlowDesigner({
 
   const fitWorkflowCanvas = React.useCallback(() => {
     const frame = canvasFrameRef.current;
-    const content = canvasContentRef.current;
-    if (!frame || !content) return;
+    const flow = canvasFlowRef.current;
+    if (!frame || !flow) return;
 
-    const contentWidth = content.offsetWidth;
-    const contentHeight = content.offsetHeight;
+    const contentWidth = flow.offsetWidth;
+    const contentHeight = flow.offsetHeight;
     if (!contentWidth || !contentHeight) return;
 
+    const paddingX = 72;
+    const paddingY = 64;
+
     const scale = Math.min(
-      1,
-      Math.max(0.36, Math.min((frame.clientWidth - 96) / contentWidth, (frame.clientHeight - 96) / contentHeight)),
+      1.2,
+      Math.max(0.36, Math.min((frame.clientWidth - paddingX) / contentWidth, (frame.clientHeight - paddingY) / contentHeight)),
     );
 
     setCanvasView({
       scale,
-      x: (frame.clientWidth - contentWidth * scale) / 2,
-      y: Math.max(32, (frame.clientHeight - contentHeight * scale) / 2),
+      x: (frame.clientWidth - contentWidth * scale) / 2 - flow.offsetLeft * scale,
+      y: Math.max(32, (frame.clientHeight - contentHeight * scale) / 2) - flow.offsetTop * scale,
     });
   }, []);
 
@@ -1490,7 +1493,7 @@ function WorkflowFlowDesigner({
             </button>
             <span className="min-w-12 text-center text-[11px] font-black text-medium-gray">{Math.round(canvasView.scale * 100)}%</span>
             <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={() => zoomWorkflowCanvas(canvasView.scale * 1.12)}>
-              <ZoomIn size={14} />
+              <Plus size={14} />
             </button>
             <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={fitWorkflowCanvas}>
               <Maximize2 size={14} />
@@ -1508,7 +1511,7 @@ function WorkflowFlowDesigner({
               transformOrigin: '0 0',
             }}
           >
-            <div className="mx-auto flex max-w-[1480px] flex-col items-center">
+            <div ref={canvasFlowRef} className="mx-auto flex max-w-[1480px] flex-col items-center">
               <div className="w-[300px]">
                 <FlowNode
                   tone="submit"
