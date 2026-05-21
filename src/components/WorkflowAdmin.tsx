@@ -760,6 +760,13 @@ function formatSubmitPermission(permission: SubmitPermissionRule, directory: Org
   return excluded ? `${scope}；排除 ${excluded}` : scope;
 }
 
+function formatPreviewSubmitter(member: OrganizationDirectory['members'][number] | null, directory: OrganizationDirectory) {
+  if (!member) return '暂无可预览申请人';
+
+  const departmentName = directory.departments.find((department) => department.id === member.departmentId)?.name;
+  return [member.name, departmentName, member.title].filter(Boolean).join(' · ');
+}
+
 function getBranchTitle(branch: WorkflowBranch) {
   return branch.isDefault ? 'Default Branch' : branch.name;
 }
@@ -1165,9 +1172,10 @@ function WorkflowFlowDesigner({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {eligibleSubmitters.length > 0 && (
-            <label className="flex h-9 items-center gap-2 rounded-full bg-lightest-gray-background px-3 text-[12px] font-bold text-medium-gray">
-              <span>主管预览人</span>
+          <label className="flex h-9 items-center gap-2 rounded-full bg-lightest-gray-background px-3 text-[12px] font-bold text-medium-gray">
+            <UserRound size={14} strokeWidth={2.4} />
+            <span>申请人预览</span>
+            {eligibleSubmitters.length > 0 ? (
               <select
                 className="bg-transparent text-[12px] font-black text-midnight-graphite outline-none"
                 value={previewSubmitter?.id || ''}
@@ -1177,8 +1185,10 @@ function WorkflowFlowDesigner({
                   <option key={member.id} value={member.id}>{member.name}</option>
                 ))}
               </select>
-            </label>
-          )}
+            ) : (
+              <span className="text-[12px] font-black text-light-gray">暂无成员</span>
+            )}
+          </label>
           <button
             type="button"
             onClick={onAddBranch}
@@ -1236,7 +1246,14 @@ function WorkflowFlowDesigner({
                   selected={isDesignerSelected(activeSelection, 'submit')}
                   hasError={Boolean(validation.sections.submit?.length)}
                   onClick={() => onSelect({ type: 'submit' })}
-                />
+                >
+                  <div className="mt-3 flex items-center justify-between gap-2 rounded-md bg-lightest-gray-background px-3 py-2 text-[11px] font-black">
+                    <span className="shrink-0 text-light-gray">当前预览</span>
+                    <span className="min-w-0 truncate text-midnight-graphite">
+                      {formatPreviewSubmitter(previewSubmitter, directory)}
+                    </span>
+                  </div>
+                </FlowNode>
               </div>
 
               <FlowConnector />
