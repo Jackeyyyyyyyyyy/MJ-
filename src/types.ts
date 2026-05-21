@@ -71,7 +71,16 @@ export interface SubmitPermissionRule {
 
 export type WorkflowConditionField = string;
 
-export type WorkflowConditionOperator = 'lte' | 'gt' | 'between' | 'eq';
+export type WorkflowConditionOperator =
+  | 'lt'
+  | 'lte'
+  | 'gt'
+  | 'gte'
+  | 'between'
+  | 'eq'
+  | 'neq'
+  | 'contains'
+  | 'not_contains';
 
 export interface WorkflowCondition {
   id: string;

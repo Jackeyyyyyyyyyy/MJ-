@@ -35,7 +35,9 @@ const STEP_SKIPPED = 'skipped';
 const DEFAULT_ORGANIZATION_ID = 'default-org';
 const WORKFLOW_BUSINESS_TYPES = new Set(['reimbursement', 'purchase', 'leave', 'general']);
 const WORKFLOW_CONDITION_FIELDS = new Set(['amount', 'category', 'project', 'department']);
-const WORKFLOW_CONDITION_OPERATORS = new Set(['lte', 'gt', 'between', 'eq']);
+const WORKFLOW_CONDITION_OPERATORS = new Set(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq', 'contains', 'not_contains']);
+const NUMERIC_WORKFLOW_CONDITION_OPERATORS = new Set(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq']);
+const TEXT_WORKFLOW_CONDITION_OPERATORS = new Set(['eq', 'neq', 'contains', 'not_contains']);
 const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'submitter_manager', 'multi_supervisor']);
 const WORKFLOW_APPROVAL_MODES = new Set(['one_of', 'all_of']);
 const LEGACY_ROLE_GROUP_MEMBERS = {
@@ -785,11 +787,14 @@ function parseLegacyConditionExpression(expression, index = 0) {
   }
 
   if (numbers.length === 1) {
+    const isGreaterThanOrEqual = text.includes('>=');
+    const isGreaterThan = !isGreaterThanOrEqual && text.includes('>');
+    const isLessThan = text.includes('<') && !text.includes('<=');
     return {
       id: createWorkflowId('cond'),
       field: 'amount',
-      operator: text.includes('>') ? 'gt' : 'lte',
-      ...(text.includes('>') ? { amountMin: numbers[0] } : { amountMax: numbers[0] }),
+      operator: isGreaterThanOrEqual ? 'gte' : isGreaterThan ? 'gt' : isLessThan ? 'lt' : 'lte',
+      ...(isGreaterThanOrEqual || isGreaterThan ? { amountMin: numbers[0] } : { amountMax: numbers[0] }),
       expression: text,
     };
   }
@@ -830,14 +835,15 @@ function normalizeApprovalStep(step, index = 0) {
 
 function normalizeWorkflowCondition(condition, index = 0) {
   const field = normalizeWorkflowText(condition?.field) || 'submitter.department';
-  const operator = WORKFLOW_CONDITION_OPERATORS.has(condition?.operator)
+  const allowedOperators = getWorkflowConditionOperatorsForField(field);
+  const operator = WORKFLOW_CONDITION_OPERATORS.has(condition?.operator) && allowedOperators.has(condition.operator)
     ? condition.operator
     : isNumericWorkflowConditionField(field) ? 'lte' : 'eq';
   return {
     id: normalizeWorkflowText(condition?.id) || createWorkflowId('cond'),
     field,
     operator,
-    ...(condition?.value ? { value: String(condition.value) } : {}),
+    ...(condition?.value !== undefined && condition?.value !== null ? { value: String(condition.value) } : {}),
     ...(Number.isFinite(Number(condition?.amountMin)) ? { amountMin: Number(condition.amountMin) } : {}),
     ...(Number.isFinite(Number(condition?.amountMax)) ? { amountMax: Number(condition.amountMax) } : {}),
     ...(condition?.expression ? { expression: String(condition.expression) } : {}),
@@ -968,6 +974,12 @@ function isNumericWorkflowConditionField(field) {
   return normalizedField === 'amount' || /金额|价格|费用|利润|汇率|数量|总额|时长|天数|小时|修改前|修改后/.test(label);
 }
 
+function getWorkflowConditionOperatorsForField(field) {
+  return isNumericWorkflowConditionField(field)
+    ? NUMERIC_WORKFLOW_CONDITION_OPERATORS
+    : TEXT_WORKFLOW_CONDITION_OPERATORS;
+}
+
 function validateWorkflowDraftForPublish(draft) {
   const errors = [];
   const name = normalizeWorkflowText(draft?.basic?.name);
@@ -1006,10 +1018,12 @@ function validateWorkflowDraftForPublish(draft) {
             if (!Number.isFinite(Number(condition.amountMin)) || !Number.isFinite(Number(condition.amountMax))) {
               errors.push(`${branchName} 数值区间必须填写有效数字`);
             }
-          } else if (condition.operator === 'lte' && !Number.isFinite(Number(condition.amountMax))) {
+          } else if (['lt', 'lte'].includes(condition.operator) && !Number.isFinite(Number(condition.amountMax))) {
             errors.push(`${branchName} 数值上限必须填写有效数字`);
-          } else if (condition.operator === 'gt' && !Number.isFinite(Number(condition.amountMin))) {
+          } else if (['gt', 'gte'].includes(condition.operator) && !Number.isFinite(Number(condition.amountMin))) {
             errors.push(`${branchName} 数值下限必须填写有效数字`);
+          } else if (['eq', 'neq'].includes(condition.operator) && !Number.isFinite(Number(condition.value))) {
+            errors.push(`${branchName} 条件值必须填写有效数字`);
           }
         } else if (!normalizeWorkflowText(condition.value)) {
           errors.push(`${branchName} 条件值不能为空`);
@@ -1458,11 +1472,23 @@ function workflowConditionMatches(condition, context) {
         && actualNumber > Number(condition.amountMin)
         && actualNumber <= Number(condition.amountMax);
     }
+    if (condition.operator === 'lt') {
+      return actualNumber !== undefined && actualNumber < Number(condition.amountMax);
+    }
     if (condition.operator === 'gt') {
       return actualNumber !== undefined && actualNumber > Number(condition.amountMin);
     }
+    if (condition.operator === 'gte') {
+      return actualNumber !== undefined && actualNumber >= Number(condition.amountMin);
+    }
     if (condition.operator === 'lte') {
       return actualNumber !== undefined && actualNumber <= Number(condition.amountMax);
+    }
+    if (condition.operator === 'eq') {
+      return actualNumber !== undefined && actualNumber === Number(condition.value);
+    }
+    if (condition.operator === 'neq') {
+      return actualNumber !== undefined && actualNumber !== Number(condition.value);
     }
   }
 
@@ -1470,9 +1496,12 @@ function workflowConditionMatches(condition, context) {
   const actual = normalizeComparableText(actualValue);
   if (!expected || !actual) return false;
 
-  return condition.operator === 'eq'
-    ? actual === expected || actual.includes(expected)
-    : actual.includes(expected);
+  if (condition.operator === 'neq') return actual !== expected && !actual.includes(expected);
+  if (condition.operator === 'contains') return actual.includes(expected);
+  if (condition.operator === 'not_contains') return !actual.includes(expected);
+  if (condition.operator === 'eq') return actual === expected || actual.includes(expected);
+
+  return false;
 }
 
 function selectWorkflowBranch(version, context) {

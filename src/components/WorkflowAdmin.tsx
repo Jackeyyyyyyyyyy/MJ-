@@ -12,7 +12,6 @@ import {
   Trash2,
   UserRound,
   Users,
-  Workflow,
   XCircle,
 } from 'lucide-react';
 import { storage } from '../storage';
@@ -160,16 +159,28 @@ function getGeneratedWorkflowName(scope: Pick<BusinessScopeOption, 'approvalType
   return `${scope.approvalTypeName}审批流`;
 }
 
-function getWorkflowScopeLabel(moduleName?: string, approvalTypeName?: string) {
-  if (moduleName && approvalTypeName) return `${moduleName} / ${approvalTypeName}`;
-  return moduleName || approvalTypeName || '未设置业务';
+function getWorkflowTitle(moduleName?: string, approvalTypeName?: string) {
+  return approvalTypeName || moduleName || '未设置业务';
 }
 
-function getTemplateScopeLabel(template: WorkflowTemplate) {
-  return getWorkflowScopeLabel(
-    template.moduleName || template.draft?.basic?.moduleName,
-    template.approvalTypeName || template.draft?.basic?.approvalTypeName,
-  );
+function getWorkflowMeta(moduleName?: string, version?: number) {
+  return [moduleName, `v${version || 1}`].filter(Boolean).join(' · ');
+}
+
+function getTemplateOptionLabel(template: WorkflowTemplate) {
+  const moduleName = template.moduleName || template.draft?.basic?.moduleName;
+  const approvalTypeName = template.approvalTypeName || template.draft?.basic?.approvalTypeName;
+  return `${getWorkflowTitle(moduleName, approvalTypeName)} · ${statusLabels[template.status]} · v${template.currentVersion || 1}`;
+}
+
+function formatWorkflowMessage(message: string) {
+  const knownMessages: Record<string, string> = {
+    'published workflow template already exists for this organization and approval type': '该业务已有已发布流程，请先停用旧版本后再发布。',
+    'missing workflow template fields': '审批流信息不完整，请补齐后再保存。',
+    'workflow template not found': '未找到该审批流，可能已被删除。',
+  };
+
+  return knownMessages[message] || message;
 }
 
 function getBusinessTypeMeta(type?: string) {
@@ -322,12 +333,14 @@ function parseLegacyCondition(expression?: string): WorkflowCondition {
   }
 
   if (numbers.length === 1) {
-    const isGreaterThan = text.includes('>');
+    const isGreaterThanOrEqual = text.includes('>=');
+    const isGreaterThan = !isGreaterThanOrEqual && text.includes('>');
+    const isLessThan = text.includes('<') && !text.includes('<=');
     return {
       id: createId('cond'),
       field: 'amount',
-      operator: isGreaterThan ? 'gt' : 'lte',
-      ...(isGreaterThan ? { amountMin: numbers[0] } : { amountMax: numbers[0] }),
+      operator: isGreaterThanOrEqual ? 'gte' : isGreaterThan ? 'gt' : isLessThan ? 'lt' : 'lte',
+      ...(isGreaterThanOrEqual || isGreaterThan ? { amountMin: numbers[0] } : { amountMax: numbers[0] }),
       expression: text,
     };
   }
@@ -783,6 +796,12 @@ function getSupervisorDepthLabel(rule: ApproverRule) {
   return depth === 1 ? '发起人的直属上级' : `发起人的上 ${depth} 级主管`;
 }
 
+function getSupervisorLevelLabel(level: number) {
+  const numerals = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+  const normalizedLevel = Math.max(1, Number(level) || 1);
+  return `第${numerals[normalizedLevel - 1] || normalizedLevel}级主管`;
+}
+
 function getEligibleSubmitterMembers(permission: SubmitPermissionRule, directory: OrganizationDirectory) {
   const excludedMemberIds = new Set(permission.excludedMemberIds || []);
   return directory.members.filter((member) => {
@@ -800,13 +819,19 @@ function getSupervisorChainPreview(
 ) {
   const membersById = new Map(directory.members.map((member) => [member.id, member]));
   const submitter = membersById.get(submitterId) || null;
-  const chain: string[] = [];
+  const chain: Array<{ level: number; label: string; name: string; isMissing: boolean }> = [];
   let current = submitter;
   const maxDepth = Math.max(1, Number(depth) || 1);
 
   for (let index = 0; index < maxDepth; index += 1) {
     const supervisor = current?.supervisorId ? membersById.get(current.supervisorId) : null;
-    chain.push(supervisor?.name || `第 ${index + 1} 级未配置`);
+    const level = index + 1;
+    chain.push({
+      level,
+      label: getSupervisorLevelLabel(level),
+      name: supervisor?.name || '未配置',
+      isMissing: !supervisor,
+    });
     current = supervisor || null;
   }
 
@@ -1064,19 +1089,20 @@ function WorkflowFlowDesigner({
         <p className="text-[10px] font-black text-light-gray">
           {depth}级直接主管 · 以 {preview.submitter?.name || previewSubmitter.name} 预览
         </p>
-        <div className="flex flex-wrap gap-1.5">
-          {preview.chain.map((name, index) => (
-            <span
-              key={`${step.id}-supervisor-${index}`}
+        <div className="space-y-1.5">
+          {preview.chain.map((item) => (
+            <div
+              key={`${step.id}-supervisor-${item.level}`}
               className={cn(
-                "rounded-full px-2 py-1 text-[11px] font-black",
-                name.includes('未配置')
+                "flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-[11px] font-black",
+                item.isMissing
                   ? "bg-[#ffebee] text-[#c62828]"
-                  : "bg-white text-midnight-graphite border border-border-silver"
+                  : "bg-white text-midnight-graphite border-border-silver"
               )}
             >
-              {index + 1}. {name}
-            </span>
+              <span className="shrink-0 text-medium-gray">{item.label}</span>
+              <span className="min-w-0 truncate">{item.name}</span>
+            </div>
           ))}
         </div>
       </div>
@@ -1421,7 +1447,7 @@ function ConditionValueControl({
   return (
     <input
       className="input-field text-[13px]"
-      type={kind === 'number' ? 'number' : 'text'}
+      type="text"
       value={condition.value || ''}
       onChange={(event) => onUpdateCondition(branchId, condition.id, { value: event.target.value })}
       placeholder={`${getConditionFieldLabel(condition.field)}的值`}
@@ -2466,46 +2492,32 @@ export default function WorkflowAdmin() {
       </div>
 
       {message && (
-        <div className="rounded-2xl border border-border-silver bg-white px-5 py-4 text-[13px] font-bold text-midnight-graphite">
-          {message}
+        <div className="rounded-xl border border-border-silver bg-white px-4 py-3 text-[12px] font-bold text-medium-gray">
+          {formatWorkflowMessage(message)}
         </div>
       )}
 
-      <section className="rounded-xl border border-border-silver bg-white shadow-sm p-3">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
-          <select
-            className="input-field text-[13px]"
-            value={createBusinessKey}
-            onChange={(event) => setCreateBusinessKey(event.target.value)}
-          >
-            {businessScopeOptions.map((option) => (
-              <option key={option.key} value={option.key}>{option.label}</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={isSaving}
-            className="h-10 px-4 rounded-full bg-black text-white text-[12px] font-bold flex items-center justify-center gap-2 disabled:opacity-40"
-          >
-            <Plus size={15} strokeWidth={3} /> 新建
-          </button>
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-border-silver bg-white shadow-sm p-3">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
-          <div className="flex shrink-0 items-center gap-3">
-            <Workflow size={17} />
-            <h2 className="text-[16px] font-black">流程列表</h2>
-            <span className="rounded-full bg-lightest-gray-background px-2.5 py-1 text-[10px] font-black text-medium-gray">
-              {templates.length}
-            </span>
-          </div>
-
-          <div className="grid flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+      <section className="rounded-xl border border-border-silver bg-white shadow-sm p-4">
+        <div className="grid gap-4 xl:grid-cols-[minmax(190px,0.7fr)_minmax(240px,1fr)_auto] xl:items-end">
+          <label className="min-w-0">
+            <span className="mb-2 block text-[11px] font-black text-light-gray">业务类型</span>
             <select
-              className="input-field text-[14px]"
+              className="input-field h-11 py-0 text-[13px]"
+              value={createBusinessKey}
+              onChange={(event) => setCreateBusinessKey(event.target.value)}
+            >
+              {businessScopeOptions.map((option) => (
+                <option key={option.key} value={option.key}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="min-w-0">
+            <span className="mb-2 flex items-center justify-between text-[11px] font-black text-light-gray">
+              <span>当前流程</span>
+              <span>{templates.length} 个</span>
+            </span>
+            <select
+              className="input-field h-11 py-0 text-[13px]"
               value={selectedId}
               onChange={(event) => {
                 const template = templates.find((item) => item.id === event.target.value);
@@ -2517,16 +2529,19 @@ export default function WorkflowAdmin() {
                 <option value="">暂无审批流模板</option>
               ) : templates.map((template) => (
                 <option key={template.id} value={template.id}>
-                  {getTemplateScopeLabel(template)} · {statusLabels[template.status]} · v{template.currentVersion || 1}
+                  {getTemplateOptionLabel(template)}
                 </option>
               ))}
             </select>
-            {selectedTemplate && (
-              <span className={cn("h-11 px-3 rounded-full text-[11px] font-black flex items-center justify-center", statusClasses[selectedTemplate.status])}>
-                {statusLabels[selectedTemplate.status]}
-              </span>
-            )}
-          </div>
+          </label>
+          <button
+            type="button"
+            onClick={handleCreate}
+            disabled={isSaving}
+            className="h-11 px-5 rounded-full bg-black text-white text-[12px] font-bold flex items-center justify-center gap-2 disabled:opacity-40"
+          >
+            <Plus size={15} strokeWidth={3} /> 新建流程
+          </button>
         </div>
       </section>
 
@@ -2536,25 +2551,22 @@ export default function WorkflowAdmin() {
         </section>
       ) : (
         <div className="space-y-6">
-            <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
-              <div className="p-6 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <section className="rounded-xl border border-border-silver bg-white shadow-sm overflow-hidden">
+              <div className="p-5 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
                     <span className={cn("px-2.5 py-1 rounded-full text-[10px] font-black", statusClasses[selectedTemplate.status])}>
                       {statusLabels[selectedTemplate.status]}
                     </span>
-                    <span className="px-2.5 py-1 rounded-full bg-lightest-gray-background text-[10px] font-black text-medium-gray">
-                      {getWorkflowScopeLabel(draft.basic.moduleName, draft.basic.approvalTypeName)}
+                    <span className="text-[12px] font-bold text-light-gray">
+                      {getWorkflowMeta(draft.basic.moduleName, draft.version)}
                     </span>
                   </div>
-                  <h2 className="mt-3 text-[24px] font-black text-midnight-graphite tracking-tight truncate">
-                    {getWorkflowScopeLabel(draft.basic.moduleName, draft.basic.approvalTypeName)}
+                  <h2 className="text-[22px] font-black text-midnight-graphite tracking-tight truncate">
+                    {getWorkflowTitle(draft.basic.moduleName, draft.basic.approvalTypeName)}
                   </h2>
-                  <p className="mt-1 text-[12px] font-bold text-medium-gray">
-                    当前版本 v{draft.version || 1}
-                  </p>
                 </div>
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={handleSave}
