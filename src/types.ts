@@ -122,6 +122,9 @@ export interface WorkflowApproverSnapshot {
   memberId: string;
   name: string;
   accountUsername?: string;
+  status?: 'pending' | 'approved' | 'rejected';
+  actedAt?: string;
+  comment?: string;
 }
 
 export interface WorkflowCcRecipientSnapshot {
@@ -135,6 +138,7 @@ export interface WorkflowInstanceStep {
   name: string;
   order: number;
   approvers: WorkflowApproverSnapshot[];
+  approvalMode?: ApprovalMode;
   status: WorkflowStepStatus;
   actedByMemberId?: string;
   actedByName?: string;

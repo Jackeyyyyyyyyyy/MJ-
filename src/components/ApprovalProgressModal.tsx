@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, CheckCircle2, Clock, Check } from 'lucide-react';
-import { ApprovalRecord, ApprovalStatus } from '../types';
+import { ApprovalRecord, ApprovalStatus, WorkflowApproverSnapshot } from '../types';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 
@@ -25,6 +25,18 @@ function getCcProgressStep(record: ApprovalRecord) {
   };
 }
 
+function getApproverStatusLabel(approver: WorkflowApproverSnapshot) {
+  if (approver.status === 'approved') return '已同意';
+  if (approver.status === 'rejected') return '已拒绝';
+  return '待处理';
+}
+
+function getApproverStatusClass(approver: WorkflowApproverSnapshot) {
+  if (approver.status === 'approved') return 'bg-[#e8f5e9] text-[#2e7d32]';
+  if (approver.status === 'rejected') return 'bg-[#ffebee] text-[#c62828]';
+  return 'bg-lightest-gray-background text-medium-gray';
+}
+
 export default function ApprovalProgressModal({ record, onClose }: ApprovalProgressModalProps) {
   if (!record) return null;
 
@@ -42,15 +54,28 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
           title: step.name,
           desc: [
             `审批人：${step.approvers.map((approver) => approver.name).join('、') || '未解析'}`,
+            step.approvalMode === 'all_of' ? '所有人都要通过' : '',
             step.actedByName ? `操作人：${step.actedByName}` : '',
             step.comment ? `意见：${step.comment}` : '',
           ].filter(Boolean).join(' ｜ '),
           time: step.actedAt,
+          approvers: step.approvers || [],
           status: step.status === 'approved' || step.status === 'skipped'
             ? 'completed'
             : (step.status === 'pending' ? 'current' : (step.status === 'rejected' ? 'failed' : 'pending')),
         })),
         ...(ccProgressStep ? [ccProgressStep] : []),
+        {
+          title: record.status === ApprovalStatus.REJECTED ? '审批驳回' : '审批完成',
+          desc: record.status === ApprovalStatus.APPROVED
+            ? '审批流程已通过'
+            : (record.status === ApprovalStatus.REJECTED ? '审批流程已被拒绝' : '等待最终审批结果'),
+          time: record.approvedAt || record.rejectedAt,
+          status: record.status === ApprovalStatus.APPROVED
+            ? 'completed'
+            : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending'),
+          isFinal: true,
+        },
       ]
     : [
         {
@@ -65,13 +90,14 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
           time: record.approvedAt || record.rejectedAt,
           status: record.status === ApprovalStatus.PENDING ? 'current' : 'completed'
         },
+        ...(ccProgressStep ? [ccProgressStep] : []),
         {
           title: '审批通过',
           desc: record.status === ApprovalStatus.APPROVED ? '审批流程顺利结束' : (record.status === ApprovalStatus.REJECTED ? '审批流程已被拒绝' : '待处理'),
           time: record.approvedAt || record.rejectedAt,
-          status: record.status === ApprovalStatus.APPROVED ? 'completed' : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending')
-        },
-        ...(ccProgressStep ? [ccProgressStep] : [])
+          status: record.status === ApprovalStatus.APPROVED ? 'completed' : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending'),
+          isFinal: true,
+        }
       ];
 
   return (
@@ -118,6 +144,7 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
                   <div className="shrink-0 z-10">
                     <div className={cn(
                       "w-10 h-10 rounded-2xl flex items-center justify-center border-2 transition-all duration-500",
+                      step.isFinal && step.status === 'completed' ? "bg-[#2e7d32] border-[#2e7d32] text-white" :
                       step.status === 'completed' ? "bg-black border-black text-white" : 
                       (step.status === 'current' ? "bg-white border-black text-black shadow-xl shadow-black/10" : 
                       (step.status === 'failed' ? "bg-rose-500 border-rose-500 text-white" : "bg-white border-border-silver text-light-gray"))
@@ -136,6 +163,22 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
                       step.status === 'completed' ? "text-black" : (step.status === 'current' ? "text-black" : "text-medium-gray")
                     )}>{step.title}</h3>
                     <p className="text-[12px] font-bold text-medium-gray">{step.desc}</p>
+                    {step.approvers && step.approvers.length > 1 && (
+                      <div className="mt-2 space-y-1.5">
+                        {step.approvers.map((approver) => (
+                          <div
+                            key={`${step.title}-${approver.memberId}`}
+                            className={cn(
+                              "flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-[11px] font-black",
+                              getApproverStatusClass(approver)
+                            )}
+                          >
+                            <span className="min-w-0 truncate">{approver.name}</span>
+                            <span className="shrink-0">{getApproverStatusLabel(approver)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {step.time && (
                       <p className="text-[10px] font-black text-light-gray font-mono mt-2 uppercase tracking-widest">
                         {format(new Date(step.time), 'yyyy.MM.dd // HH:mm:ss')}

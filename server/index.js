@@ -768,6 +768,7 @@ function approvalStepToLegacyNode(step, index = 0) {
       ? `\u8fde\u7eed\u5ba1\u6279\uff1a\u53d1\u8d77\u4eba\u7684\u4e0a ${Math.max(1, Number(rule.supervisorDepth) || 1)} \u7ea7\u4e3b\u7ba1`
       : step?.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
     rule: legacyRule,
+    approvalMode: step?.approvalMode === 'all_of' ? 'all_of' : 'one_of',
   };
 }
 
@@ -1646,7 +1647,11 @@ function createWorkflowStep(node, order, approvers, status = STEP_NOT_STARTED, c
     stepId: node.id || `step-${order}`,
     name: node.title || `Step ${order}`,
     order,
-    approvers: approvers.map(toApproverSnapshot),
+    approvalMode: node.approvalMode === 'all_of' ? 'all_of' : 'one_of',
+    approvers: approvers.map((approver) => ({
+      ...toApproverSnapshot(approver),
+      status: 'pending',
+    })),
     status,
     ...(comment ? { comment } : {}),
   };
@@ -1756,6 +1761,8 @@ function canUserApproveRecord(user, record) {
   if (!currentStep) return false;
   return (currentStep.approvers || []).some((approver) => (
     normalizeWorkflowText(approver.accountUsername).toLowerCase() === normalizeWorkflowText(user.username).toLowerCase()
+    && approver.status !== 'approved'
+    && approver.status !== 'rejected'
   ));
 }
 
@@ -1764,6 +1771,10 @@ function hasUserHandledWorkflowRecord(user, record) {
 
   return record.workflowInstance.steps.some((step) => (
     normalizeWorkflowText(step.actedByAccountUsername).toLowerCase() === normalizeWorkflowText(user.username).toLowerCase()
+    || (step.approvers || []).some((approver) => (
+      normalizeWorkflowText(approver.accountUsername).toLowerCase() === normalizeWorkflowText(user.username).toLowerCase()
+      && ['approved', 'rejected'].includes(approver.status)
+    ))
   ));
 }
 
@@ -1836,6 +1847,14 @@ function advanceWorkflowRecord(record, user, status, reason) {
 
   const now = new Date().toISOString();
   const comment = String(reason || '').trim();
+  if (actingApprover.status === 'approved' || actingApprover.status === 'rejected') {
+    throw createHttpError('current user has already handled this workflow step', 409);
+  }
+
+  actingApprover.status = status === STATUS_REJECTED ? 'rejected' : 'approved';
+  actingApprover.actedAt = now;
+  actingApprover.comment = status === STATUS_REJECTED ? comment : (comment || 'Approved');
+
   currentStep.actedByMemberId = actingApprover.memberId;
   currentStep.actedByName = user.name;
   currentStep.actedByAccountUsername = user.username;
@@ -1855,8 +1874,18 @@ function advanceWorkflowRecord(record, user, status, reason) {
     return record;
   }
 
+  appendApprovalLog(record, '\u6279\u51c6', user, `${actingApprover.name || user.name} approved ${currentStep.name}`, currentStep);
+
+  const requiresAllApprovers = currentStep.approvalMode === 'all_of';
+  const isStepComplete = !requiresAllApprovers || (currentStep.approvers || []).every((approver) => approver.status === 'approved');
+  if (!isStepComplete) {
+    currentStep.status = STEP_PENDING;
+    currentStep.comment = `${actingApprover.name || user.name} 已同意，等待其他审批人`;
+    return record;
+  }
+
   currentStep.status = STEP_APPROVED;
-  appendApprovalLog(record, '\u6279\u51c6', user, `${currentStep.name} approved`, currentStep);
+  currentStep.comment = requiresAllApprovers ? '所有审批人已通过' : currentStep.comment;
 
   const nextStepIndex = record.workflowInstance.steps.findIndex((step) => step.status === STEP_NOT_STARTED);
   if (nextStepIndex >= 0) {
