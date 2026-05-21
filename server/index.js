@@ -36,7 +36,7 @@ const DEFAULT_ORGANIZATION_ID = 'default-org';
 const WORKFLOW_BUSINESS_TYPES = new Set(['reimbursement', 'purchase', 'leave', 'general']);
 const WORKFLOW_CONDITION_FIELDS = new Set(['amount', 'category', 'project', 'department']);
 const WORKFLOW_CONDITION_OPERATORS = new Set(['lte', 'gt', 'between', 'eq']);
-const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'submitter_manager']);
+const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'submitter_manager', 'multi_supervisor']);
 const WORKFLOW_APPROVAL_MODES = new Set(['one_of', 'all_of']);
 const LEGACY_ROLE_GROUP_MEMBERS = {
   'role-board': ['qin-an-tang'],
@@ -718,9 +718,12 @@ function legacyRuleToApprovalStep(node, index = 0) {
   } else if (rule.type === 'role') {
     approverRule = { type: 'specific_members', memberIds: getLegacyRoleGroupMemberIds(rule.roleGroupId) };
   } else if (rule.type === 'direct_supervisor') {
-    approverRule = { type: 'submitter_manager' };
+    approverRule = { type: 'multi_supervisor', supervisorDepth: 1 };
   } else if (rule.type === 'nth_supervisor' || rule.type === 'multi_supervisor') {
-    approverRule = { type: 'submitter_manager' };
+    approverRule = {
+      type: 'multi_supervisor',
+      supervisorDepth: Math.max(1, Number(rule.supervisorDepth || rule.supervisorLevel) || 1),
+    };
   }
 
   return {
@@ -747,13 +750,21 @@ function approvalStepToLegacyNode(step, index = 0) {
       type: 'direct_supervisor',
       emptyApproverAction: step?.emptyApproverAction || 'block_submit',
     };
+  } else if (rule.type === 'multi_supervisor') {
+    legacyRule = {
+      type: 'multi_supervisor',
+      supervisorDepth: Math.max(1, Number(rule.supervisorDepth) || 1),
+      emptyApproverAction: step?.emptyApproverAction || 'block_submit',
+    };
   }
 
   return {
     id: step?.id || createWorkflowId('node'),
     type: 'approver',
     title: step?.name || `审批节点 ${index + 1}`,
-    subtitle: step?.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
+    subtitle: rule.type === 'multi_supervisor'
+      ? `\u8fde\u7eed\u5ba1\u6279\uff1a\u53d1\u8d77\u4eba\u7684\u4e0a ${Math.max(1, Number(rule.supervisorDepth) || 1)} \u7ea7\u4e3b\u7ba1`
+      : step?.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
     rule: legacyRule,
   };
 }
@@ -799,8 +810,8 @@ function normalizeApprovalStep(step, index = 0) {
     roleGroupIds: _legacyRoleGroupIds,
     ...ruleWithoutRoleGroups
   } = rule;
-  const ruleType = rule.type === 'department_manager'
-    ? 'submitter_manager'
+  const ruleType = rule.type === 'department_manager' || rule.type === 'submitter_manager'
+    ? 'multi_supervisor'
     : WORKFLOW_APPROVER_TYPES.has(rule.type) ? rule.type : 'specific_members';
   return {
     id: normalizeWorkflowText(step?.id) || createWorkflowId('step'),
@@ -808,6 +819,7 @@ function normalizeApprovalStep(step, index = 0) {
     approverRule: {
       ...ruleWithoutRoleGroups,
       type: ruleType,
+      ...(ruleType === 'multi_supervisor' ? { supervisorDepth: Math.max(1, Number(rule.supervisorDepth || rule.supervisorLevel) || 1) } : {}),
       memberIds: isLegacyRoleRule ? getLegacyRoleGroupMemberIds(legacyRoleGroupId) : Array.isArray(rule.memberIds) ? rule.memberIds : [],
       departmentIds: Array.isArray(rule.departmentIds) ? rule.departmentIds : [],
     },
@@ -1611,6 +1623,26 @@ function createWorkflowStep(node, order, approvers, status = STEP_NOT_STARTED, c
   };
 }
 
+function createSupervisorChainWorkflowSteps(node, startOrder, directory, applicantMember) {
+  const rule = node?.rule || {};
+  if (rule.type !== 'multi_supervisor') return null;
+  if (!applicantMember) {
+    throw createHttpError('Cannot resolve supervisor chain because applicant is not bound to organization.', 400);
+  }
+
+  const supervisors = getSupervisorChain(directory, applicantMember, rule.supervisorDepth || 1)
+    .filter((member) => normalizeWorkflowText(member.accountUsername));
+  return supervisors.map((supervisor, index) => createWorkflowStep(
+    {
+      ...node,
+      id: `${node.id || 'supervisor'}-${index + 1}`,
+      title: `${node.title || '\u4e0a\u7ea7\u5ba1\u6279'} \u7b2c${index + 1}\u7ea7`,
+    },
+    startOrder + index,
+    [supervisor],
+  ));
+}
+
 async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, applicantUsername, businessData }) {
   const template = await findPublishedWorkflow(moduleName, approvalTypeName);
   if (!template) {
@@ -1628,20 +1660,35 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
 
   const steps = [];
 
-  nodes.forEach((node, index) => {
+  nodes.forEach((node) => {
     const rule = node.rule || {};
+    const supervisorSteps = createSupervisorChainWorkflowSteps(node, steps.length, directory, applicantMember);
+    if (supervisorSteps) {
+      if (supervisorSteps.length === 0) {
+        if (rule.emptyApproverAction === 'auto_pass') {
+          steps.push(createWorkflowStep(node, steps.length, [], STEP_SKIPPED, 'No approver was resolved; step was skipped automatically.'));
+          return;
+        }
+
+        throw createHttpError(`No approver can be resolved for workflow step: ${node.title || steps.length + 1}.`, 400);
+      }
+
+      steps.push(...supervisorSteps);
+      return;
+    }
+
     const approvers = resolveApproversForRule(rule, directory, applicantMember);
 
     if (approvers.length === 0) {
       if (rule.emptyApproverAction === 'auto_pass') {
-        steps.push(createWorkflowStep(node, index, [], STEP_SKIPPED, 'No approver was resolved; step was skipped automatically.'));
+        steps.push(createWorkflowStep(node, steps.length, [], STEP_SKIPPED, 'No approver was resolved; step was skipped automatically.'));
         return;
       }
 
-      throw createHttpError(`No approver can be resolved for workflow step: ${node.title || index + 1}.`, 400);
+      throw createHttpError(`No approver can be resolved for workflow step: ${node.title || steps.length + 1}.`, 400);
     }
 
-    steps.push(createWorkflowStep(node, index, approvers));
+    steps.push(createWorkflowStep(node, steps.length, approvers));
   });
 
   const firstPendingIndex = steps.findIndex((step) => step.status === STEP_NOT_STARTED);

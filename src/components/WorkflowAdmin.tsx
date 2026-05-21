@@ -318,8 +318,13 @@ function legacyNodeToStep(node: WorkflowNode, index: number): ApprovalStep {
     approverRule = { type: 'specific_members', memberIds: legacyRule.memberIds || [] };
   } else if (String(legacyRule.type) === 'role') {
     approverRule = { type: 'specific_members', memberIds: getLegacyRoleGroupMemberIds(legacyRule.roleGroupId) };
-  } else if (legacyRule.type === 'direct_supervisor' || legacyRule.type === 'nth_supervisor' || legacyRule.type === 'multi_supervisor') {
-    approverRule = { type: 'submitter_manager' };
+  } else if (legacyRule.type === 'direct_supervisor') {
+    approverRule = { type: 'multi_supervisor', supervisorDepth: 1 };
+  } else if (legacyRule.type === 'nth_supervisor' || legacyRule.type === 'multi_supervisor') {
+    approverRule = {
+      type: 'multi_supervisor',
+      supervisorDepth: Math.max(1, Number(legacyRule.supervisorDepth || legacyRule.supervisorLevel) || 1),
+    };
   }
 
   return {
@@ -350,13 +355,21 @@ function stepToLegacyNode(step: ApprovalStep, index: number): WorkflowNode {
       type: 'direct_supervisor',
       emptyApproverAction: step.emptyApproverAction,
     };
+  } else if (rule.type === 'multi_supervisor') {
+    legacyRule = {
+      type: 'multi_supervisor',
+      supervisorDepth: Math.max(1, Number(rule.supervisorDepth) || 1),
+      emptyApproverAction: step.emptyApproverAction,
+    };
   }
 
   return {
     id: step.id || createId('node'),
     type: 'approver',
     title: step.name || `审批节点 ${index + 1}`,
-    subtitle: step.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
+    subtitle: rule.type === 'multi_supervisor'
+      ? `连续审批：发起人的上 ${Math.max(1, Number(rule.supervisorDepth) || 1)} 级主管`
+      : step.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
     rule: legacyRule,
   };
 }
@@ -369,9 +382,9 @@ function normalizeStep(step: Partial<ApprovalStep> | undefined, index: number): 
     roleGroupIds: _legacyRoleGroupIds,
     ...ruleWithoutRoleGroups
   } = rule as ApproverRule & { roleGroupId?: string; roleGroupIds?: string[] };
-  const type = String(rule.type) === 'department_manager'
-    ? 'submitter_manager'
-    : ['specific_members', 'submitter_manager'].includes(String(rule.type))
+  const type = String(rule.type) === 'department_manager' || String(rule.type) === 'submitter_manager'
+    ? 'multi_supervisor'
+    : ['specific_members', 'submitter_manager', 'multi_supervisor'].includes(String(rule.type))
       ? rule.type
       : 'specific_members';
 
@@ -381,6 +394,7 @@ function normalizeStep(step: Partial<ApprovalStep> | undefined, index: number): 
     approverRule: {
       ...ruleWithoutRoleGroups,
       type,
+      ...(type === 'multi_supervisor' ? { supervisorDepth: Math.max(1, Number(rule.supervisorDepth || rule.supervisorLevel) || 1) } : {}),
       memberIds: isLegacyRoleRule ? getLegacyRoleGroupMemberIds(legacyRoleGroupId) : Array.isArray(rule.memberIds) ? rule.memberIds : [],
       departmentIds: Array.isArray(rule.departmentIds) ? rule.departmentIds : [],
     },
@@ -666,6 +680,7 @@ function formatCondition(condition: WorkflowCondition) {
 
 function formatStepRule(step: ApprovalStep, directory: OrganizationDirectory) {
   const rule = step.approverRule;
+  if (rule.type === 'multi_supervisor') return getSupervisorDepthLabel(rule);
   if (rule.type === 'submitter_manager') return '发起人的上级';
   return (rule.memberIds || [])
     .map((memberId) => directory.members.find((member) => member.id === memberId)?.name)
@@ -721,8 +736,15 @@ function isDesignerSelected(
 }
 
 function getApproverTypeLabel(type: ApproverRule['type']) {
+  if (type === 'multi_supervisor') return '发起人的多级上级';
   if (type === 'submitter_manager') return '发起人的上级';
   return '指定成员';
+}
+
+function getSupervisorDepthLabel(rule: ApproverRule) {
+  if (rule.type !== 'multi_supervisor') return getApproverTypeLabel(rule.type);
+  const depth = Math.max(1, Number(rule.supervisorDepth) || 1);
+  return depth === 1 ? '发起人的直属上级' : `发起人的上 ${depth} 级主管`;
 }
 
 function getApprovalModeLabel(mode: ApprovalMode) {
@@ -1061,7 +1083,7 @@ function WorkflowFlowDesigner({
                               kicker={`审批 ${stepIndex + 1}`}
                               title={step.name}
                               subtitle={formatStepRule(step, directory)}
-                              meta={getApprovalModeLabel(step.approvalMode)}
+                              meta={step.approverRule.type === 'specific_members' ? getApprovalModeLabel(step.approvalMode) : getSupervisorDepthLabel(step.approverRule)}
                               icon={<CheckCircle2 size={17} strokeWidth={2.5} />}
                               selected={isDesignerSelected(activeSelection, 'step', branch.id, step.id)}
                               hasError={Boolean(validation.steps[step.id]?.length)}
@@ -1387,7 +1409,7 @@ function StepEditor({
           <div className="grid grid-cols-2 gap-2">
             {[
               { value: 'specific_members', label: '指定成员' },
-              { value: 'submitter_manager', label: '发起人上级' },
+              { value: 'multi_supervisor', label: '发起人上级' },
             ].map((item) => (
               <React.Fragment key={item.value}>
                 <SegmentedButton
@@ -1397,7 +1419,9 @@ function StepEditor({
                       type: item.value as ApproverRule['type'],
                       memberIds: [],
                       departmentIds: [],
+                      ...(item.value === 'multi_supervisor' ? { supervisorDepth: 1 } : {}),
                     },
+                    approvalMode: item.value === 'multi_supervisor' ? 'one_of' : step.approvalMode,
                   })}
                 >
                   {item.label}
@@ -1421,17 +1445,39 @@ function StepEditor({
           </label>
         )}
 
-        <label className="block space-y-2">
-          <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">通过方式</span>
-          <select
-            className="input-field text-[13px]"
-            value={step.approvalMode}
-            onChange={(event) => onUpdateStep(branch.id, step.id, { approvalMode: event.target.value as ApprovalMode })}
-          >
-            <option value="one_of">多人任意一人通过</option>
-            <option value="all_of">所有人都要通过</option>
-          </select>
-        </label>
+        {step.approverRule.type === 'multi_supervisor' && (
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">主管层级</span>
+            <input
+              className="input-field text-[14px]"
+              type="number"
+              min={1}
+              max={20}
+              value={Math.max(1, Number(step.approverRule.supervisorDepth) || 1)}
+              onChange={(event) => onUpdateStep(branch.id, step.id, {
+                approverRule: {
+                  ...step.approverRule,
+                  supervisorDepth: Math.max(1, Math.min(20, Number(event.target.value) || 1)),
+                },
+                approvalMode: 'one_of',
+              })}
+            />
+          </label>
+        )}
+
+        {step.approverRule.type === 'specific_members' && (
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">通过方式</span>
+            <select
+              className="input-field text-[13px]"
+              value={step.approvalMode}
+              onChange={(event) => onUpdateStep(branch.id, step.id, { approvalMode: event.target.value as ApprovalMode })}
+            >
+              <option value="one_of">多人任意一人通过</option>
+              <option value="all_of">所有人都要通过</option>
+            </select>
+          </label>
+        )}
 
         <label className="block space-y-2">
           <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">找不到审批人</span>
@@ -1448,7 +1494,7 @@ function StepEditor({
         </label>
 
         <div className="rounded-2xl bg-canvas-white px-4 py-3 text-[12px] font-bold leading-5 text-medium-gray">
-          {getApproverTypeLabel(step.approverRule.type)} · {getApprovalModeLabel(step.approvalMode)} · {getEmptyApproverActionLabel(step.emptyApproverAction)}
+          {getSupervisorDepthLabel(step.approverRule)}{step.approverRule.type === 'specific_members' ? ` · ${getApprovalModeLabel(step.approvalMode)}` : ''} · {getEmptyApproverActionLabel(step.emptyApproverAction)}
         </div>
 
         <div className="grid grid-cols-3 gap-2">
@@ -1645,7 +1691,10 @@ function DesignerInspector({
                   className="w-full rounded-2xl border border-border-silver bg-white px-4 py-3 text-left hover:bg-canvas-white"
                 >
                   <span className="block text-[13px] font-black text-midnight-graphite">{index + 1}. {step.name}</span>
-                  <span className="mt-1 block text-[11px] font-bold text-medium-gray">{getApproverTypeLabel(step.approverRule.type)} · {getApprovalModeLabel(step.approvalMode)}</span>
+                  <span className="mt-1 block text-[11px] font-bold text-medium-gray">
+                    {getSupervisorDepthLabel(step.approverRule)}
+                    {step.approverRule.type === 'specific_members' ? ` · ${getApprovalModeLabel(step.approvalMode)}` : ''}
+                  </span>
                 </button>
               ))}
             </div>
@@ -2800,21 +2849,40 @@ export default function WorkflowAdmin() {
                                     type,
                                     memberIds: [],
                                     departmentIds: [],
+                                    ...(type === 'multi_supervisor' ? { supervisorDepth: 1 } : {}),
                                   },
+                                  approvalMode: type === 'multi_supervisor' ? 'one_of' : step.approvalMode,
                                 });
                               }}
                             >
                               <option value="specific_members">指定成员</option>
-                              <option value="submitter_manager">发起人的上级</option>
+                              <option value="multi_supervisor">发起人的上级</option>
                             </select>
-                            <select
-                              className="input-field text-[13px]"
-                              value={step.approvalMode}
-                              onChange={(event) => updateStep(branch.id, step.id, { approvalMode: event.target.value as ApprovalMode })}
-                            >
-                              <option value="one_of">多人任意一人通过</option>
-                              <option value="all_of">所有人都要通过</option>
-                            </select>
+                            {step.approverRule.type === 'specific_members' ? (
+                              <select
+                                className="input-field text-[13px]"
+                                value={step.approvalMode}
+                                onChange={(event) => updateStep(branch.id, step.id, { approvalMode: event.target.value as ApprovalMode })}
+                              >
+                                <option value="one_of">多人任意一人通过</option>
+                                <option value="all_of">所有人都要通过</option>
+                              </select>
+                            ) : (
+                              <input
+                                className="input-field text-[13px]"
+                                type="number"
+                                min={1}
+                                max={20}
+                                value={Math.max(1, Number(step.approverRule.supervisorDepth) || 1)}
+                                onChange={(event) => updateStep(branch.id, step.id, {
+                                  approverRule: {
+                                    ...step.approverRule,
+                                    supervisorDepth: Math.max(1, Math.min(20, Number(event.target.value) || 1)),
+                                  },
+                                  approvalMode: 'one_of',
+                                })}
+                              />
+                            )}
                           </div>
 
                           {step.approverRule.type === 'specific_members' && (
