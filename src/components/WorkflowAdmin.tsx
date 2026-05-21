@@ -12,7 +12,6 @@ import {
   Trash2,
   UserRound,
   Users,
-  XCircle,
 } from 'lucide-react';
 import { storage } from '../storage';
 import { approvalSchema } from '../approvalSchema';
@@ -145,14 +144,35 @@ function getBusinessScopeKey(moduleName?: string, approvalTypeName?: string) {
   return `${moduleName || ''}${BUSINESS_SCOPE_SEPARATOR}${approvalTypeName || ''}`;
 }
 
-function getBusinessScopeByKey(key: string) {
-  return businessScopeOptions.find((option) => option.key === key) || businessScopeOptions[0];
-}
-
 function getBusinessScopeByNames(moduleName?: string, approvalTypeName?: string) {
   return businessScopeOptions.find((option) => (
     option.moduleName === moduleName && option.approvalTypeName === approvalTypeName
   )) || null;
+}
+
+function normalizeTemplateForEditor(template: WorkflowTemplate): WorkflowTemplate {
+  return {
+    ...template,
+    draft: normalizeDraftForEditor(template.draft),
+    publishedVersion: template.publishedVersion ? normalizeDraftForEditor(template.publishedVersion) : undefined,
+  };
+}
+
+function sortWorkflowTemplatesByBusinessScope(templates: WorkflowTemplate[]) {
+  const orderByScope = new Map(businessScopeOptions.map((option, index) => [option.key, index]));
+
+  return [...templates].sort((left, right) => {
+    const leftKey = getBusinessScopeKey(left.moduleName || left.draft?.basic?.moduleName, left.approvalTypeName || left.draft?.basic?.approvalTypeName);
+    const rightKey = getBusinessScopeKey(right.moduleName || right.draft?.basic?.moduleName, right.approvalTypeName || right.draft?.basic?.approvalTypeName);
+    const leftOrder = orderByScope.get(leftKey);
+    const rightOrder = orderByScope.get(rightKey);
+
+    if (leftOrder !== undefined || rightOrder !== undefined) {
+      return (leftOrder ?? Number.MAX_SAFE_INTEGER) - (rightOrder ?? Number.MAX_SAFE_INTEGER);
+    }
+
+    return `${left.moduleName}/${left.approvalTypeName}`.localeCompare(`${right.moduleName}/${right.approvalTypeName}`, 'zh-Hans-CN');
+  });
 }
 
 function getGeneratedWorkflowName(scope: Pick<BusinessScopeOption, 'approvalTypeName'>) {
@@ -2122,7 +2142,6 @@ export default function WorkflowAdmin() {
   const [directory, setDirectory] = useState<OrganizationDirectory>({ departments: [], members: [] });
   const [selectedId, setSelectedId] = useState('');
   const [draft, setDraft] = useState<WorkflowVersion | null>(null);
-  const [createBusinessKey, setCreateBusinessKey] = useState(businessScopeOptions[0]?.key || '');
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -2149,18 +2168,49 @@ export default function WorkflowAdmin() {
     () => getConditionFieldOptions(draft),
     [draft?.basic.moduleName, draft?.basic.approvalTypeName],
   );
+
+  useEffect(() => {
+    if (!message) return;
+    const timer = window.setTimeout(() => setMessage(''), 2600);
+    return () => window.clearTimeout(timer);
+  }, [message]);
+
+  const ensureDefaultWorkflowTemplates = async (sourceTemplates: WorkflowTemplate[]) => {
+    const templatesByScope = new Set(
+      sourceTemplates.map((template) => getBusinessScopeKey(
+        template.moduleName || template.draft?.basic?.moduleName,
+        template.approvalTypeName || template.draft?.basic?.approvalTypeName,
+      )),
+    );
+    const missingScopes = businessScopeOptions.filter((scope) => !templatesByScope.has(scope.key));
+    if (missingScopes.length === 0) return sourceTemplates;
+
+    const createdTemplates: WorkflowTemplate[] = [];
+    for (const scope of missingScopes) {
+      const name = getGeneratedWorkflowName(scope);
+      const created = await storage.createWorkflowTemplate({
+        name,
+        businessType: scope.businessType,
+        organizationId: DEFAULT_ORG_ID,
+        moduleName: scope.moduleName,
+        approvalTypeName: scope.approvalTypeName,
+      });
+      const updated = await storage.updateWorkflowDraft(created.id, createDraft(name, scope));
+      createdTemplates.push(updated);
+    }
+
+    return [...sourceTemplates, ...createdTemplates];
+  };
+
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [nextTemplates, nextDirectory] = await Promise.all([
+      const [fetchedTemplates, nextDirectory] = await Promise.all([
         storage.getWorkflowTemplates(),
         storage.getOrganizationDirectory(),
       ]);
-      const normalizedTemplates = nextTemplates.map((template) => ({
-        ...template,
-        draft: normalizeDraftForEditor(template.draft),
-        publishedVersion: template.publishedVersion ? normalizeDraftForEditor(template.publishedVersion) : undefined,
-      }));
+      const nextTemplates = await ensureDefaultWorkflowTemplates(fetchedTemplates);
+      const normalizedTemplates = sortWorkflowTemplatesByBusinessScope(nextTemplates.map(normalizeTemplateForEditor));
       setTemplates(normalizedTemplates);
       setDirectory(nextDirectory);
       const nextSelected = normalizedTemplates[0] || null;
@@ -2375,47 +2425,10 @@ export default function WorkflowAdmin() {
     if (!selectedTemplate || !draft) return null;
     const nextDraft = prepareDraftForSave(draft);
     const saved = await storage.updateWorkflowDraft(selectedTemplate.id, nextDraft);
-    const normalized = {
-      ...saved,
-      draft: normalizeDraftForEditor(saved.draft),
-      publishedVersion: saved.publishedVersion ? normalizeDraftForEditor(saved.publishedVersion) : undefined,
-    };
+    const normalized = normalizeTemplateForEditor(saved);
     setTemplates((current) => current.map((template) => template.id === normalized.id ? normalized : template));
     setDraft(JSON.parse(JSON.stringify(normalized.draft)));
     return normalized;
-  };
-
-  const handleCreate = async () => {
-    const scope = getBusinessScopeByKey(createBusinessKey);
-    const name = getGeneratedWorkflowName(scope);
-    setIsSaving(true);
-    setMessage('');
-    try {
-      const created = await storage.createWorkflowTemplate({
-        name,
-        businessType: scope.businessType,
-        organizationId: DEFAULT_ORG_ID,
-        moduleName: scope.moduleName,
-        approvalTypeName: scope.approvalTypeName,
-      });
-      const nextDraft = createDraft(name, scope);
-      const updated = await storage.updateWorkflowDraft(created.id, nextDraft);
-      const normalized = {
-        ...updated,
-        draft: normalizeDraftForEditor(updated.draft),
-        publishedVersion: updated.publishedVersion ? normalizeDraftForEditor(updated.publishedVersion) : undefined,
-      };
-      setTemplates((current) => [normalized, ...current]);
-      setSelectedId(normalized.id);
-      setDraft(JSON.parse(JSON.stringify(normalized.draft)));
-      setValidation(validateDraft(normalized.draft));
-      setDesignerSelection(submitDesignerSelection);
-      setMessage('审批流已创建');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '创建失败');
-    } finally {
-      setIsSaving(false);
-    }
   };
 
   const handleSave = async () => {
@@ -2448,11 +2461,7 @@ export default function WorkflowAdmin() {
     try {
       await saveDraft();
       const published = await storage.publishWorkflowTemplate(selectedTemplate.id);
-      const normalized = {
-        ...published,
-        draft: normalizeDraftForEditor(published.draft),
-        publishedVersion: published.publishedVersion ? normalizeDraftForEditor(published.publishedVersion) : undefined,
-      };
+      const normalized = normalizeTemplateForEditor(published);
       setTemplates((current) => current.map((template) => template.id === normalized.id ? normalized : template));
       setDraft(JSON.parse(JSON.stringify(normalized.draft)));
       setMessage('审批流已发布');
@@ -2463,67 +2472,36 @@ export default function WorkflowAdmin() {
     }
   };
 
-  const handleStatusChange = async (status: WorkflowTemplate['status']) => {
-    if (!selectedTemplate) return;
-    setIsSaving(true);
-    setMessage('');
-    try {
-      const updated = await storage.setWorkflowTemplateStatus(selectedTemplate.id, status);
-      const normalized = {
-        ...updated,
-        draft: normalizeDraftForEditor(updated.draft),
-        publishedVersion: updated.publishedVersion ? normalizeDraftForEditor(updated.publishedVersion) : undefined,
-      };
-      setTemplates((current) => current.map((template) => template.id === normalized.id ? normalized : template));
-      setMessage(status === 'disabled' ? '审批流已停用' : '审批流已启用');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '状态更新失败');
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  const handleInitialize = async () => {
+    if (!selectedTemplate || !draft) return;
+    const scope = getBusinessScopeByNames(
+      selectedTemplate.moduleName || draft.basic.moduleName,
+      selectedTemplate.approvalTypeName || draft.basic.approvalTypeName,
+    ) || {
+      key: getBusinessScopeKey(draft.basic.moduleName, draft.basic.approvalTypeName),
+      moduleName: draft.basic.moduleName,
+      approvalTypeName: draft.basic.approvalTypeName,
+      label: `${draft.basic.moduleName} / ${draft.basic.approvalTypeName}`,
+      businessType: draft.businessType || selectedTemplate.businessType || 'general',
+      fields: [],
+    };
 
-  const handleDuplicate = async (templateId: string) => {
-    setIsSaving(true);
-    setMessage('');
-    try {
-      const duplicated = await storage.duplicateWorkflowTemplate(templateId);
-      const normalized = {
-        ...duplicated,
-        draft: normalizeDraftForEditor(duplicated.draft),
-        publishedVersion: duplicated.publishedVersion ? normalizeDraftForEditor(duplicated.publishedVersion) : undefined,
-      };
-      setTemplates((current) => [normalized, ...current]);
-      setSelectedId(normalized.id);
-      setDraft(JSON.parse(JSON.stringify(normalized.draft)));
-      setDesignerSelection(submitDesignerSelection);
-      setMessage('审批流副本已创建');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '复制失败');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!selectedTemplate) return;
-    const confirmed = window.confirm(`确认删除审批流「${selectedTemplate.name}」？已发起的历史申请不会被删除。`);
+    const confirmed = window.confirm(`确认初始化「${scope.approvalTypeName}」审批流？当前草稿会被重置为空白流程。`);
     if (!confirmed) return;
 
     setIsSaving(true);
     setMessage('');
     try {
-      await storage.deleteWorkflowTemplate(selectedTemplate.id);
-      const nextTemplates = templates.filter((template) => template.id !== selectedTemplate.id);
-      const nextSelected = nextTemplates[0] || null;
-      setTemplates(nextTemplates);
-      setSelectedId(nextSelected?.id || '');
-      setDraft(nextSelected ? JSON.parse(JSON.stringify(nextSelected.draft)) : null);
+      const nextDraft = createDraft(getGeneratedWorkflowName(scope), scope);
+      const updated = await storage.updateWorkflowDraft(selectedTemplate.id, nextDraft);
+      const normalized = normalizeTemplateForEditor(updated);
+      setTemplates((current) => current.map((template) => template.id === normalized.id ? normalized : template));
+      setDraft(JSON.parse(JSON.stringify(normalized.draft)));
       setValidation(createValidationState());
       setDesignerSelection(submitDesignerSelection);
-      setMessage('审批流已删除');
+      setMessage('审批流已初始化');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '删除失败');
+      setMessage(error instanceof Error ? error.message : '初始化失败');
     } finally {
       setIsSaving(false);
     }
@@ -2556,58 +2534,10 @@ export default function WorkflowAdmin() {
       </div>
 
       {message && (
-        <div className="rounded-xl border border-border-silver bg-white px-4 py-3 text-[12px] font-bold text-medium-gray">
+        <div className="fixed right-5 top-5 z-[90] max-w-[360px] rounded-xl border border-border-silver bg-white px-4 py-3 text-[12px] font-bold text-midnight-graphite shadow-xl shadow-black/10">
           {formatWorkflowMessage(message)}
         </div>
       )}
-
-      <section className="rounded-xl border border-border-silver bg-white shadow-sm p-4">
-        <div className="grid gap-4 xl:grid-cols-[minmax(190px,0.7fr)_minmax(240px,1fr)_auto] xl:items-end">
-          <label className="min-w-0">
-            <span className="mb-2 block text-[11px] font-black text-light-gray">业务类型</span>
-            <select
-              className="input-field h-11 py-0 text-[13px]"
-              value={createBusinessKey}
-              onChange={(event) => setCreateBusinessKey(event.target.value)}
-            >
-              {businessScopeOptions.map((option) => (
-                <option key={option.key} value={option.key}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="min-w-0">
-            <span className="mb-2 flex items-center justify-between text-[11px] font-black text-light-gray">
-              <span>当前流程</span>
-              <span>{templates.length} 个</span>
-            </span>
-            <select
-              className="input-field h-11 py-0 text-[13px]"
-              value={selectedId}
-              onChange={(event) => {
-                const template = templates.find((item) => item.id === event.target.value);
-                if (template) selectTemplate(template);
-              }}
-              disabled={templates.length === 0}
-            >
-              {templates.length === 0 ? (
-                <option value="">暂无审批流模板</option>
-              ) : templates.map((template) => (
-                <option key={template.id} value={template.id}>
-                  {getTemplateOptionLabel(template)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={isSaving}
-            className="h-11 px-5 rounded-full bg-black text-white text-[12px] font-bold flex items-center justify-center gap-2 disabled:opacity-40"
-          >
-            <Plus size={15} strokeWidth={3} /> 新建流程
-          </button>
-        </div>
-      </section>
 
       {!draft || !selectedTemplate ? (
         <section className="rounded-2xl border border-border-silver bg-white shadow-sm p-12 text-center text-[14px] font-bold text-medium-gray">
@@ -2630,7 +2560,25 @@ export default function WorkflowAdmin() {
                     {getWorkflowTitle(draft.basic.moduleName, draft.basic.approvalTypeName)}
                   </h2>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="mr-1 min-w-[220px]">
+                    <span className="sr-only">当前流程</span>
+                    <select
+                      className="input-field h-10 py-0 text-[12px] font-bold"
+                      value={selectedId}
+                      onChange={(event) => {
+                        const template = templates.find((item) => item.id === event.target.value);
+                        if (template) selectTemplate(template);
+                      }}
+                      disabled={templates.length === 0 || isSaving}
+                    >
+                      {templates.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {getTemplateOptionLabel(template)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button
                     type="button"
                     onClick={handleSave}
@@ -2647,32 +2595,13 @@ export default function WorkflowAdmin() {
                   >
                     <CheckCircle2 size={14} /> 发布
                   </button>
-                  {selectedTemplate.status === 'disabled' ? (
-                    <button
-                      type="button"
-                      onClick={() => handleStatusChange('published')}
-                      disabled={isSaving}
-                      className="h-10 px-4 rounded-full bg-lightest-gray-background text-[12px] font-bold disabled:opacity-40"
-                    >
-                      启用
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleStatusChange('disabled')}
-                      disabled={isSaving}
-                      className="h-10 px-4 rounded-full bg-[#ffebee] text-[#c62828] text-[12px] font-bold flex items-center gap-2 disabled:opacity-40"
-                    >
-                      <XCircle size={14} /> 停用
-                    </button>
-                  )}
                   <button
                     type="button"
-                    onClick={handleDelete}
+                    onClick={handleInitialize}
                     disabled={isSaving}
-                    className="h-10 px-4 rounded-full bg-white border border-[#f1c7c7] text-[#c62828] text-[12px] font-bold flex items-center gap-2 disabled:opacity-40"
+                    className="h-10 px-4 rounded-full bg-white border border-border-silver text-midnight-graphite text-[12px] font-bold flex items-center gap-2 disabled:opacity-40"
                   >
-                    <Trash2 size={14} /> 删除
+                    <AlertCircle size={14} /> 初始化
                   </button>
                 </div>
               </div>
