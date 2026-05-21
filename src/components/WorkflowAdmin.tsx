@@ -873,29 +873,152 @@ function getEmptyApproverActionLabel(action: ApprovalStep['emptyApproverAction']
   return action === 'auto_pass' ? '找不到审批人时自动跳过' : '找不到审批人时报错';
 }
 
+type FlowAnchorSide = 'top' | 'bottom' | 'left' | 'right';
+type FlowPoint = { x: number; y: number };
+type FlowNodeBox = { x: number; y: number; width: number; height: number };
+
+const FLOW_EDGE_COLOR = '#CBD5E1';
+const FLOW_EDGE_STROKE = 2;
+const FLOW_ARROW_WIDTH = 10;
+const FLOW_ARROW_HEIGHT = 7;
+const FLOW_BRANCH_CARD_WIDTH = 300;
+const FLOW_BRANCH_GAP = 180;
+
+function getNodeAnchor(node: FlowNodeBox, side: FlowAnchorSide): FlowPoint {
+  switch (side) {
+    case 'top':
+      return { x: node.x + node.width / 2, y: node.y };
+    case 'bottom':
+      return { x: node.x + node.width / 2, y: node.y + node.height };
+    case 'left':
+      return { x: node.x, y: node.y + node.height / 2 };
+    case 'right':
+      return { x: node.x + node.width, y: node.y + node.height / 2 };
+    default:
+      return { x: node.x + node.width / 2, y: node.y + node.height / 2 };
+  }
+}
+
+function buildOrthogonalPath(
+  start: FlowPoint,
+  end: FlowPoint,
+  options: { viaY?: number; radius?: number } = {},
+) {
+  const radius = options.radius ?? 12;
+
+  if (Math.abs(start.x - end.x) < 0.1) {
+    return `M ${start.x} ${start.y} V ${end.y}`;
+  }
+
+  const viaY = options.viaY ?? start.y + (end.y - start.y) / 2;
+  const directionX = end.x > start.x ? 1 : -1;
+  const directionY = end.y > viaY ? 1 : -1;
+  const firstRadius = Math.min(radius, Math.abs(end.x - start.x) / 2, Math.abs(viaY - start.y));
+  const secondRadius = Math.min(radius, Math.abs(end.x - start.x) / 2, Math.abs(end.y - viaY));
+
+  return [
+    `M ${start.x} ${start.y}`,
+    `V ${viaY - firstRadius}`,
+    `Q ${start.x} ${viaY} ${start.x + directionX * firstRadius} ${viaY}`,
+    `H ${end.x - directionX * secondRadius}`,
+    `Q ${end.x} ${viaY} ${end.x} ${viaY + directionY * secondRadius}`,
+    `V ${end.y}`,
+  ].join(' ');
+}
+
+function renderArrowMarker(id: string) {
+  return (
+    <marker
+      id={id}
+      markerHeight={FLOW_ARROW_HEIGHT}
+      markerUnits="userSpaceOnUse"
+      markerWidth={FLOW_ARROW_WIDTH}
+      orient="auto"
+      refX={FLOW_ARROW_WIDTH}
+      refY={FLOW_ARROW_HEIGHT / 2}
+    >
+      <path d={`M 0 0 L ${FLOW_ARROW_WIDTH} ${FLOW_ARROW_HEIGHT / 2} L 0 ${FLOW_ARROW_HEIGHT} Z`} fill={FLOW_EDGE_COLOR} />
+    </marker>
+  );
+}
+
+function FlowConnectorLayer({
+  width,
+  height,
+  paths,
+  arrows,
+  className,
+}: {
+  width: number;
+  height: number;
+  paths: string[];
+  arrows?: FlowPoint[];
+  className?: string;
+}) {
+  return (
+    <div className={cn("pointer-events-none absolute left-0 top-0 w-full", className)}>
+      <svg
+        aria-hidden="true"
+        className="h-full w-full overflow-visible"
+        preserveAspectRatio="none"
+        viewBox={`0 0 ${width} ${height}`}
+      >
+        <g
+          fill="none"
+          stroke={FLOW_EDGE_COLOR}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={FLOW_EDGE_STROKE}
+          vectorEffect="non-scaling-stroke"
+        >
+          {paths.map((path, index) => (
+            <path key={`${path}-${index}`} d={path} />
+          ))}
+        </g>
+      </svg>
+      {arrows?.map((point, index) => (
+        <svg
+          key={`${point.x}-${point.y}-${index}`}
+          aria-hidden="true"
+          className="absolute overflow-visible"
+          style={{
+            height: FLOW_ARROW_HEIGHT,
+            left: `calc(${(point.x / width) * 100}% - ${FLOW_ARROW_WIDTH / 2}px)`,
+            top: `calc(${(point.y / height) * 100}% - 1px)`,
+            width: FLOW_ARROW_WIDTH,
+          }}
+          viewBox={`0 0 ${FLOW_ARROW_WIDTH} ${FLOW_ARROW_HEIGHT}`}
+        >
+          <path d={`M 0 0 L ${FLOW_ARROW_WIDTH} 0 L ${FLOW_ARROW_WIDTH / 2} ${FLOW_ARROW_HEIGHT} Z`} fill={FLOW_EDGE_COLOR} />
+        </svg>
+      ))}
+    </div>
+  );
+}
+
 function FlowConnector({ compact = false }: { compact?: boolean }) {
   const arrowId = React.useId();
+  const height = compact ? 48 : 68;
 
   return (
-    <div className={cn("flex flex-col items-center", compact ? "h-8" : "h-12")}>
+    <div className={cn("flex flex-col items-center", compact ? "h-12" : "h-[68px]")}>
       <svg
         aria-hidden="true"
         className="h-full w-4 overflow-visible"
         preserveAspectRatio="none"
-        viewBox="0 0 16 48"
+        viewBox={`0 0 16 ${height}`}
       >
         <defs>
-          <marker id={arrowId} markerHeight="7" markerWidth="7" orient="auto" refX="3.5" refY="3.5">
-            <path d="M 0 0 L 7 3.5 L 0 7 Z" fill="#c8d1df" />
-          </marker>
+          {renderArrowMarker(arrowId)}
         </defs>
         <path
-          d="M 8 0 V 42"
+          d={`M 8 0 V ${height - 8}`}
           fill="none"
           markerEnd={`url(#${arrowId})`}
-          stroke="#c8d1df"
+          stroke={FLOW_EDGE_COLOR}
           strokeLinecap="round"
-          strokeWidth="1.5"
+          strokeLinejoin="round"
+          strokeWidth={FLOW_EDGE_STROKE}
           vectorEffect="non-scaling-stroke"
         />
       </svg>
@@ -906,42 +1029,27 @@ function FlowConnector({ compact = false }: { compact?: boolean }) {
 function FlowBranchRail({ count }: { count: number }) {
   if (count <= 1) return null;
 
-  const firstCenter = 50 / count;
-  const lastCenter = 100 - firstCenter;
-  const branchCenters = Array.from({ length: count }, (_, index) => ((index + 0.5) / count) * 100);
+  const width = count * FLOW_BRANCH_CARD_WIDTH + (count - 1) * FLOW_BRANCH_GAP;
+  const height = 88;
+  const cardStep = FLOW_BRANCH_CARD_WIDTH + FLOW_BRANCH_GAP;
+  const firstCenter = FLOW_BRANCH_CARD_WIDTH / 2;
+  const lastCenter = firstCenter + (count - 1) * cardStep;
+  const branchCenters = Array.from({ length: count }, (_, index) => firstCenter + index * cardStep);
+  const splitY = 38;
+  const arrowY = height - FLOW_ARROW_HEIGHT - 2;
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-0 h-16">
-      <svg
-        aria-hidden="true"
-        className="h-full w-full overflow-visible"
-        preserveAspectRatio="none"
-        viewBox="0 0 100 64"
-      >
-        <g
-          fill="none"
-          stroke="#c8d1df"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1.5"
-          vectorEffect="non-scaling-stroke"
-        >
-          <path d={`M 50 0 V 28 M ${firstCenter} 28 H ${lastCenter}`} />
-          {branchCenters.map((center) => (
-            <path key={center} d={`M ${center} 28 V 54`} />
-          ))}
-        </g>
-      </svg>
-      <div className="absolute inset-x-0 top-[54px]">
-        {branchCenters.map((center) => (
-          <span
-            key={center}
-            className="absolute h-0 w-0 -translate-x-1/2 border-x-[5px] border-t-[7px] border-x-transparent border-t-[#c8d1df]"
-            style={{ left: `${center}%` }}
-          />
-        ))}
-      </div>
-    </div>
+    <FlowConnectorLayer
+      arrows={branchCenters.map((center) => ({ x: center, y: arrowY }))}
+      className="top-0 h-[88px]"
+      height={height}
+      paths={[
+        buildOrthogonalPath({ x: width / 2, y: 0 }, { x: width / 2, y: splitY }),
+        `M ${firstCenter} ${splitY} H ${lastCenter}`,
+        ...branchCenters.map((center) => buildOrthogonalPath({ x: center, y: splitY }, { x: center, y: arrowY })),
+      ]}
+      width={width}
+    />
   );
 }
 
@@ -953,6 +1061,7 @@ const FlowBranchLane: React.FC<{
   children,
 }) => {
   const arrowId = React.useId();
+  const height = 56;
 
   return (
     <div className="relative mx-auto flex h-full w-[300px] min-w-[300px] flex-col items-center">
@@ -962,22 +1071,21 @@ const FlowBranchLane: React.FC<{
       {showBottomConnector && (
         <svg
           aria-hidden="true"
-          className="min-h-10 flex-1 w-4 overflow-visible"
+          className="min-h-14 flex-1 w-4 overflow-visible"
           preserveAspectRatio="none"
-          viewBox="0 0 16 48"
+          viewBox={`0 0 16 ${height}`}
         >
           <defs>
-            <marker id={arrowId} markerHeight="7" markerWidth="7" orient="auto" refX="3.5" refY="3.5">
-              <path d="M 0 0 L 7 3.5 L 0 7 Z" fill="#c8d1df" />
-            </marker>
+            {renderArrowMarker(arrowId)}
           </defs>
           <path
-            d="M 8 0 V 42"
+            d={`M 8 0 V ${height - 8}`}
             fill="none"
             markerEnd={`url(#${arrowId})`}
-            stroke="#c8d1df"
+            stroke={FLOW_EDGE_COLOR}
             strokeLinecap="round"
-            strokeWidth="1.5"
+            strokeLinejoin="round"
+            strokeWidth={FLOW_EDGE_STROKE}
             vectorEffect="non-scaling-stroke"
           />
         </svg>
@@ -989,27 +1097,25 @@ const FlowBranchLane: React.FC<{
 function FlowMergeRail({ count }: { count: number }) {
   if (count <= 1) return <FlowConnector />;
 
+  const width = count * FLOW_BRANCH_CARD_WIDTH + (count - 1) * FLOW_BRANCH_GAP;
+  const height = 88;
+  const cardStep = FLOW_BRANCH_CARD_WIDTH + FLOW_BRANCH_GAP;
+  const firstCenter = FLOW_BRANCH_CARD_WIDTH / 2;
+  const lastCenter = firstCenter + (count - 1) * cardStep;
+  const mergeY = 34;
+  const arrowY = height - FLOW_ARROW_HEIGHT - 2;
+
   return (
-    <div className="pointer-events-none relative h-16 w-full">
-      <svg
-        aria-hidden="true"
-        className="h-full w-full overflow-visible"
-        preserveAspectRatio="none"
-        viewBox="0 0 100 64"
-      >
-        <g
-          fill="none"
-          stroke="#c8d1df"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1.5"
-          vectorEffect="non-scaling-stroke"
-        >
-          <path d={`M ${50 / count} 0 H ${100 - 50 / count}`} />
-          <path d="M 50 0 V 54" />
-        </g>
-      </svg>
-      <span className="absolute left-1/2 top-[54px] h-0 w-0 -translate-x-1/2 border-x-[5px] border-t-[7px] border-x-transparent border-t-[#c8d1df]" />
+    <div className="relative h-[88px]" style={{ width: `${width}px` }}>
+      <FlowConnectorLayer
+        arrows={[{ x: width / 2, y: arrowY }]}
+        height={height}
+        paths={[
+          `M ${firstCenter} ${mergeY} H ${lastCenter}`,
+          buildOrthogonalPath({ x: width / 2, y: mergeY }, { x: width / 2, y: arrowY }),
+        ]}
+        width={width}
+      />
     </div>
   );
 }
@@ -1170,6 +1276,9 @@ function WorkflowFlowDesigner({
   const selectedStep = selection.type === 'step'
     ? selectedBranch?.approvalSteps.find((step) => step.id === selection.stepId) || null
     : null;
+  const branchFlowWidth = flowBranches.length > 0
+    ? flowBranches.length * FLOW_BRANCH_CARD_WIDTH + Math.max(0, flowBranches.length - 1) * FLOW_BRANCH_GAP
+    : FLOW_BRANCH_CARD_WIDTH;
   const activeSelection: DesignerSelection = (
     (selection.type === 'branch' && selectedBranch)
     || (selection.type === 'step' && selectedStep)
@@ -1178,7 +1287,7 @@ function WorkflowFlowDesigner({
   const canvasViewportRef = React.useRef<HTMLDivElement | null>(null);
   const panStartRef = React.useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [isPanning, setIsPanning] = React.useState(false);
-  const canvasMinWidth = Math.max(960, flowBranches.length * 312);
+  const canvasMinWidth = Math.max(1080, branchFlowWidth + 160);
   const eligibleSubmitters = React.useMemo(
     () => getEligibleSubmitterMembers(submitPermission, directory),
     [submitPermission, directory],
@@ -1354,11 +1463,17 @@ function WorkflowFlowDesigner({
               <FlowAddButton label="添加条件" onClick={onAddBranch} />
               <FlowConnector compact />
 
-              <div className={cn("relative w-full", flowBranches.length > 1 && "pt-16")}>
+              <div
+                className={cn("relative", flowBranches.length > 1 && "pt-[88px]")}
+                style={{ width: `${branchFlowWidth}px` }}
+              >
                 <FlowBranchRail count={flowBranches.length} />
                 <div
-                  className="relative grid items-stretch gap-5"
-                  style={{ gridTemplateColumns: `repeat(${Math.max(flowBranches.length, 1)}, minmax(300px, 1fr))` }}
+                  className="relative grid items-stretch"
+                  style={{
+                    columnGap: `${FLOW_BRANCH_GAP}px`,
+                    gridTemplateColumns: `repeat(${Math.max(flowBranches.length, 1)}, ${FLOW_BRANCH_CARD_WIDTH}px)`,
+                  }}
                 >
                   {flowBranches.map((branch, branchIndex) => (
                     <FlowBranchLane
