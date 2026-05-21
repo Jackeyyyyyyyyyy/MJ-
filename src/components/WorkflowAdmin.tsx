@@ -754,6 +754,36 @@ function getSupervisorDepthLabel(rule: ApproverRule) {
   return depth === 1 ? '发起人的直属上级' : `发起人的上 ${depth} 级主管`;
 }
 
+function getEligibleSubmitterMembers(permission: SubmitPermissionRule, directory: OrganizationDirectory) {
+  const excludedMemberIds = new Set(permission.excludedMemberIds || []);
+  return directory.members.filter((member) => {
+    if (member.enabled === false || excludedMemberIds.has(member.id)) return false;
+    if (permission.type === 'members') return permission.memberIds.includes(member.id);
+    if (permission.type === 'departments') return permission.departmentIds.includes(member.departmentId);
+    return true;
+  });
+}
+
+function getSupervisorChainPreview(
+  directory: OrganizationDirectory,
+  submitterId: string,
+  depth: number,
+) {
+  const membersById = new Map(directory.members.map((member) => [member.id, member]));
+  const submitter = membersById.get(submitterId) || null;
+  const chain: string[] = [];
+  let current = submitter;
+  const maxDepth = Math.max(1, Number(depth) || 1);
+
+  for (let index = 0; index < maxDepth; index += 1) {
+    const supervisor = current?.supervisorId ? membersById.get(current.supervisorId) : null;
+    chain.push(supervisor?.name || `第 ${index + 1} 级未配置`);
+    current = supervisor || null;
+  }
+
+  return { submitter, chain };
+}
+
 function getApprovalModeLabel(mode: ApprovalMode) {
   return mode === 'all_of' ? '会签：所有人通过' : '或签：任一人通过';
 }
@@ -935,6 +965,20 @@ function WorkflowFlowDesigner({
   const panStartRef = React.useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [isPanning, setIsPanning] = React.useState(false);
   const canvasMinWidth = Math.max(960, flowBranches.length * 312);
+  const eligibleSubmitters = React.useMemo(
+    () => getEligibleSubmitterMembers(submitPermission, directory),
+    [submitPermission, directory],
+  );
+  const [previewSubmitterId, setPreviewSubmitterId] = React.useState('');
+  const previewSubmitter = eligibleSubmitters.find((member) => member.id === previewSubmitterId)
+    || eligibleSubmitters[0]
+    || null;
+
+  React.useEffect(() => {
+    if (!previewSubmitterId || !eligibleSubmitters.some((member) => member.id === previewSubmitterId)) {
+      setPreviewSubmitterId(eligibleSubmitters[0]?.id || '');
+    }
+  }, [eligibleSubmitters, previewSubmitterId]);
 
   const handleCanvasPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -973,6 +1017,43 @@ function WorkflowFlowDesigner({
     }
   };
 
+  const renderSupervisorPreview = (step: ApprovalStep) => {
+    if (step.approverRule.type !== 'multi_supervisor') return null;
+
+    const depth = Math.max(1, Number(step.approverRule.supervisorDepth) || 1);
+    if (!previewSubmitter) {
+      return (
+        <div className="mt-3 rounded-md bg-lightest-gray-background px-3 py-2 text-[11px] font-bold text-medium-gray">
+          暂无可预览的发起人
+        </div>
+      );
+    }
+
+    const preview = getSupervisorChainPreview(directory, previewSubmitter.id, depth);
+    return (
+      <div className="mt-3 space-y-2 rounded-md bg-lightest-gray-background px-3 py-2">
+        <p className="text-[10px] font-black text-light-gray">
+          {depth}级直接主管 · 以 {preview.submitter?.name || previewSubmitter.name} 预览
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {preview.chain.map((name, index) => (
+            <span
+              key={`${step.id}-supervisor-${index}`}
+              className={cn(
+                "rounded-full px-2 py-1 text-[11px] font-black",
+                name.includes('未配置')
+                  ? "bg-[#ffebee] text-[#c62828]"
+                  : "bg-white text-midnight-graphite border border-border-silver"
+              )}
+            >
+              {index + 1}. {name}
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <section className="rounded-xl border border-border-silver bg-white shadow-sm overflow-visible">
       <div className="px-5 py-4 border-b border-border-silver flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -985,7 +1066,21 @@ function WorkflowFlowDesigner({
             <p className="hidden">按飞书审批的画布方式配置提交人、条件分支、审批节点和抄送。</p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {eligibleSubmitters.length > 0 && (
+            <label className="flex h-9 items-center gap-2 rounded-full bg-lightest-gray-background px-3 text-[12px] font-bold text-medium-gray">
+              <span>主管预览人</span>
+              <select
+                className="bg-transparent text-[12px] font-black text-midnight-graphite outline-none"
+                value={previewSubmitter?.id || ''}
+                onChange={(event) => setPreviewSubmitterId(event.target.value)}
+              >
+                {eligibleSubmitters.map((member) => (
+                  <option key={member.id} value={member.id}>{member.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <button
             type="button"
             onClick={onAddBranch}
@@ -1095,7 +1190,9 @@ function WorkflowFlowDesigner({
                               selected={isDesignerSelected(activeSelection, 'step', branch.id, step.id)}
                               hasError={Boolean(validation.steps[step.id]?.length)}
                               onClick={() => onSelect({ type: 'step', branchId: branch.id, stepId: step.id })}
-                            />
+                            >
+                              {renderSupervisorPreview(step)}
+                            </FlowNode>
                           </React.Fragment>
                         ))}
                       </div>
