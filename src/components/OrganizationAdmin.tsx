@@ -15,10 +15,6 @@ function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
-function readSelectedValues(event: React.ChangeEvent<HTMLSelectElement>) {
-  return Array.from(event.currentTarget.selectedOptions, (option) => (option as HTMLOptionElement).value);
-}
-
 function getDepartmentName(directory: OrganizationDirectory, departmentId?: string) {
   return directory.departments.find((department) => department.id === departmentId)?.name || '未配置部门';
 }
@@ -30,7 +26,6 @@ function getMemberName(directory: OrganizationDirectory, memberId?: string) {
 interface DepartmentChartNode {
   department: OrganizationDepartment;
   children: DepartmentChartNode[];
-  leaders: OrganizationMember[];
   memberCount: number;
   boundCount: number;
   hasMissingParent: boolean;
@@ -61,13 +56,11 @@ function buildDepartmentChart(directory: OrganizationDirectory) {
     const hasCycle = ancestors.has(department.id);
     visited.add(department.id);
     const members = directory.members.filter((member) => member.departmentId === department.id && member.enabled !== false);
-    const leaderIds = new Set(department.leaderIds || []);
 
     if (hasCycle) {
       return {
         department,
         children: [],
-        leaders: members.filter((member) => leaderIds.has(member.id)),
         memberCount: members.length,
         boundCount: members.filter((member) => Boolean(member.accountUsername)).length,
         hasMissingParent: false,
@@ -81,7 +74,6 @@ function buildDepartmentChart(directory: OrganizationDirectory) {
     return {
       department,
       children: (childrenByParent.get(department.id) || []).map((child) => createNode(child, nextAncestors)),
-      leaders: members.filter((member) => leaderIds.has(member.id)),
       memberCount: members.length,
       boundCount: members.filter((member) => Boolean(member.accountUsername)).length,
       hasMissingParent: Boolean(department.parentId && !departmentsById.has(department.parentId)),
@@ -182,6 +174,55 @@ function hasMemberCycle(directory: OrganizationDirectory, memberId: string) {
   return false;
 }
 
+function getAncestorDepartmentIds(directory: OrganizationDirectory, departmentId?: string) {
+  const departmentsById = new Map(directory.departments.map((department) => [department.id, department]));
+  const ids = new Set<string>();
+  let current = departmentId ? departmentsById.get(departmentId) : undefined;
+
+  while (current) {
+    if (ids.has(current.id)) break;
+    ids.add(current.id);
+    current = current.parentId ? departmentsById.get(current.parentId) : undefined;
+  }
+
+  return ids;
+}
+
+function getReportLineMemberIds(directory: OrganizationDirectory, memberId: string) {
+  const childrenBySupervisor = new Map<string, OrganizationMember[]>();
+  directory.members.forEach((member) => {
+    if (!member.supervisorId) return;
+    childrenBySupervisor.set(member.supervisorId, [
+      ...(childrenBySupervisor.get(member.supervisorId) || []),
+      member,
+    ]);
+  });
+
+  const ids = new Set<string>();
+  const collect = (supervisorId: string) => {
+    (childrenBySupervisor.get(supervisorId) || []).forEach((child) => {
+      if (ids.has(child.id)) return;
+      ids.add(child.id);
+      collect(child.id);
+    });
+  };
+
+  collect(memberId);
+  return ids;
+}
+
+function getSupervisorCandidates(directory: OrganizationDirectory, member: OrganizationMember) {
+  const eligibleDepartmentIds = getAncestorDepartmentIds(directory, member.departmentId);
+  const reportLineMemberIds = getReportLineMemberIds(directory, member.id);
+
+  return directory.members.filter((candidate) => (
+    candidate.id !== member.id
+    && candidate.enabled !== false
+    && eligibleDepartmentIds.has(candidate.departmentId)
+    && !reportLineMemberIds.has(candidate.id)
+  ));
+}
+
 function buildHealthMessages(directory: OrganizationDirectory) {
   const messages: Array<{ tone: 'danger' | 'warning' | 'info'; text: string }> = [];
   const departmentIds = new Set(directory.departments.map((department) => department.id));
@@ -221,9 +262,6 @@ function buildHealthMessages(directory: OrganizationDirectory) {
       messages.push({ tone: 'danger', text: `${department.name} 的部门层级存在循环` });
     }
 
-    if ((department.leaderIds || []).some((leaderId) => !memberIds.has(leaderId))) {
-      messages.push({ tone: 'danger', text: `${department.name} 配置了不存在的部门负责人` });
-    }
   });
 
   const unboundMembers = directory.members.filter((member) => !member.accountUsername && member.enabled !== false);
@@ -334,9 +372,6 @@ function DepartmentChartCard({ node }: { node: DepartmentChartNode; key?: React.
         </div>
         <div>
           <p className="text-[16px] font-black text-midnight-graphite truncate">{node.department.name}</p>
-          <p className="text-[12px] font-bold text-medium-gray truncate">
-            负责人：{node.leaders.map((leader) => leader.name).join('、') || '未设置'}
-          </p>
           <p className="text-[11px] font-bold text-light-gray truncate">
             已绑定 {node.boundCount} / 未绑定 {unboundCount}
           </p>
@@ -552,7 +587,7 @@ export default function OrganizationAdmin() {
       ...current,
       departments: [
         ...current.departments,
-        { id, name: '新部门', parentId, leaderIds: [] },
+        { id, name: '新部门', parentId },
       ],
     }));
     setSelectedDepartmentId(id);
@@ -595,10 +630,6 @@ export default function OrganizationAdmin() {
       members: current.members
         .filter((item) => item.id !== member.id)
         .map((item) => item.supervisorId === member.id ? { ...item, supervisorId: undefined } : item),
-      departments: current.departments.map((department) => ({
-        ...department,
-        leaderIds: (department.leaderIds || []).filter((leaderId) => leaderId !== member.id),
-      })),
     }));
   };
 
@@ -837,21 +868,6 @@ export default function OrganizationAdmin() {
                     ))}
                   </select>
                 </label>
-                <label className="space-y-2 lg:col-span-2">
-                  <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">部门负责人</span>
-                  <select
-                    multiple
-                    className="input-field min-h-[112px]"
-                    value={selectedDepartment.leaderIds || []}
-                    onChange={(event) => updateDepartment(selectedDepartment.id, { leaderIds: readSelectedValues(event) })}
-                  >
-                    {directory.members.map((member) => (
-                      <option key={member.id} value={member.id}>
-                        {member.name} / {member.title || '未配置职位'} / {getDepartmentName(directory, member.departmentId)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
               </div>
             ) : (
               <div className="px-8 py-16 text-center text-[14px] font-bold text-medium-gray">
@@ -882,7 +898,10 @@ export default function OrganizationAdmin() {
                   当前部门暂无成员。
                 </div>
               ) : (
-                selectedDepartmentMembers.map((member) => (
+                selectedDepartmentMembers.map((member) => {
+                  const supervisorCandidates = getSupervisorCandidates(directory, member);
+
+                  return (
                   <article key={member.id} className="p-5 space-y-4">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                       <div className="flex items-center gap-3 min-w-0">
@@ -931,7 +950,7 @@ export default function OrganizationAdmin() {
                       <select
                         className="input-field"
                         value={member.departmentId}
-                        onChange={(event) => updateMember(member.id, { departmentId: event.target.value })}
+                        onChange={(event) => updateMember(member.id, { departmentId: event.target.value, supervisorId: undefined })}
                       >
                         <option value="">未选择部门</option>
                         {directory.departments.map((department) => (
@@ -944,7 +963,10 @@ export default function OrganizationAdmin() {
                         onChange={(event) => updateMember(member.id, { supervisorId: event.target.value || undefined })}
                       >
                         <option value="">无直属上级</option>
-                        {directory.members.filter((item) => item.id !== member.id).map((item) => (
+                        {supervisorCandidates.length === 0 && (
+                          <option value="" disabled>暂无可选上级</option>
+                        )}
+                        {supervisorCandidates.map((item) => (
                           <option key={item.id} value={item.id}>
                             {item.name} / {getDepartmentName(directory, item.departmentId)}
                           </option>
@@ -962,7 +984,8 @@ export default function OrganizationAdmin() {
                     </div>
 
                   </article>
-                ))
+                  );
+                })
               )}
             </div>
           </section>

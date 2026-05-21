@@ -36,7 +36,7 @@ const DEFAULT_ORGANIZATION_ID = 'default-org';
 const WORKFLOW_BUSINESS_TYPES = new Set(['reimbursement', 'purchase', 'leave', 'general']);
 const WORKFLOW_CONDITION_FIELDS = new Set(['amount', 'category', 'project', 'department']);
 const WORKFLOW_CONDITION_OPERATORS = new Set(['lte', 'gt', 'between', 'eq']);
-const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'department_manager', 'submitter_manager']);
+const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'submitter_manager']);
 const WORKFLOW_APPROVAL_MODES = new Set(['one_of', 'all_of']);
 const LEGACY_ROLE_GROUP_MEMBERS = {
   'role-board': ['qin-an-tang'],
@@ -629,13 +629,13 @@ function updateAiAssistantConfig(mutator) {
 function createDefaultOrganizationDirectory() {
   return {
     departments: [
-      { id: 'dept-board', name: '董事会', leaderIds: ['qin-an-tang'] },
-      { id: 'dept-management', name: '总经办', parentId: 'dept-board', leaderIds: ['fan-lu'] },
-      { id: 'dept-sales', name: '销售部', parentId: 'dept-management', leaderIds: ['yang-nan'] },
-      { id: 'dept-finance', name: '财务部', parentId: 'dept-management', leaderIds: ['qian-lin'] },
-      { id: 'dept-operations', name: '运营清关', parentId: 'dept-management', leaderIds: ['li-qi'] },
-      { id: 'dept-admin', name: '行政人事', parentId: 'dept-management', leaderIds: ['lin-jin-biao'] },
-      { id: 'dept-warehouse', name: '仓储物流', parentId: 'dept-management', leaderIds: ['huang-song-yuan'] },
+      { id: 'dept-board', name: '董事会' },
+      { id: 'dept-management', name: '总经办', parentId: 'dept-board' },
+      { id: 'dept-sales', name: '销售部', parentId: 'dept-management' },
+      { id: 'dept-finance', name: '财务部', parentId: 'dept-management' },
+      { id: 'dept-operations', name: '运营清关', parentId: 'dept-management' },
+      { id: 'dept-admin', name: '行政人事', parentId: 'dept-management' },
+      { id: 'dept-warehouse', name: '仓储物流', parentId: 'dept-management' },
     ],
     members: [
       { id: 'qin-an-tang', name: '秦安堂', departmentId: 'dept-board', title: '董事长', enabled: true },
@@ -742,7 +742,7 @@ function approvalStepToLegacyNode(step, index = 0) {
       memberIds: Array.isArray(rule.memberIds) ? rule.memberIds : [],
       emptyApproverAction: step?.emptyApproverAction || 'block_submit',
     };
-  } else if (rule.type === 'submitter_manager' || rule.type === 'department_manager') {
+  } else if (rule.type === 'submitter_manager') {
     legacyRule = {
       type: 'direct_supervisor',
       emptyApproverAction: step?.emptyApproverAction || 'block_submit',
@@ -799,7 +799,9 @@ function normalizeApprovalStep(step, index = 0) {
     roleGroupIds: _legacyRoleGroupIds,
     ...ruleWithoutRoleGroups
   } = rule;
-  const ruleType = WORKFLOW_APPROVER_TYPES.has(rule.type) ? rule.type : 'specific_members';
+  const ruleType = rule.type === 'department_manager'
+    ? 'submitter_manager'
+    : WORKFLOW_APPROVER_TYPES.has(rule.type) ? rule.type : 'specific_members';
   return {
     id: normalizeWorkflowText(step?.id) || createWorkflowId('step'),
     name: normalizeWorkflowText(step?.name) || `审批节点 ${index + 1}`,
@@ -1248,9 +1250,6 @@ function normalizeOrganizationDirectoryInput({ departments, members }) {
     id: normalizeWorkflowText(department?.id),
     name: normalizeWorkflowText(department?.name),
     ...(normalizeWorkflowText(department?.parentId) ? { parentId: normalizeWorkflowText(department.parentId) } : {}),
-    leaderIds: Array.isArray(department?.leaderIds)
-      ? department.leaderIds.map(normalizeWorkflowText).filter(Boolean)
-      : [],
   }));
   const normalizedMembers = members.map((member) => ({
     id: normalizeWorkflowText(member?.id),
@@ -1294,11 +1293,6 @@ function validateOrganizationDirectory(directory) {
       }
     }
 
-    (department.leaderIds || []).forEach((leaderId) => {
-      if (!memberIds.has(leaderId)) {
-        throw createHttpError(`department leader does not exist: ${department.name}`, 400);
-      }
-    });
   });
 
   directory.members.forEach((member) => {

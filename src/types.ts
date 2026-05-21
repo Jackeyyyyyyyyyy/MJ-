@@ -18,7 +18,6 @@ export type AdminView = 'accounts' | 'ai-assistant' | 'organization' | 'workflow
 
 export type ApproverRuleType =
   | 'specific_members'
-  | 'department_manager'
   | 'submitter_manager'
   | 'specified'
   | 'direct_supervisor'
@@ -30,7 +29,6 @@ export interface OrganizationDepartment {
   id: string;
   name: string;
   parentId?: string;
-  leaderIds: string[];
 }
 
 export interface OrganizationMember {

@@ -345,7 +345,7 @@ function stepToLegacyNode(step: ApprovalStep, index: number): WorkflowNode {
       memberIds: rule.memberIds || [],
       emptyApproverAction: step.emptyApproverAction,
     };
-  } else if (rule.type === 'department_manager' || rule.type === 'submitter_manager') {
+  } else if (rule.type === 'submitter_manager') {
     legacyRule = {
       type: 'direct_supervisor',
       emptyApproverAction: step.emptyApproverAction,
@@ -369,9 +369,11 @@ function normalizeStep(step: Partial<ApprovalStep> | undefined, index: number): 
     roleGroupIds: _legacyRoleGroupIds,
     ...ruleWithoutRoleGroups
   } = rule as ApproverRule & { roleGroupId?: string; roleGroupIds?: string[] };
-  const type = ['specific_members', 'department_manager', 'submitter_manager'].includes(String(rule.type))
-    ? rule.type
-    : 'specific_members';
+  const type = String(rule.type) === 'department_manager'
+    ? 'submitter_manager'
+    : ['specific_members', 'submitter_manager'].includes(String(rule.type))
+      ? rule.type
+      : 'specific_members';
 
   return {
     id: step?.id || createId('step'),
@@ -664,7 +666,6 @@ function formatCondition(condition: WorkflowCondition) {
 
 function formatStepRule(step: ApprovalStep, directory: OrganizationDirectory) {
   const rule = step.approverRule;
-  if (rule.type === 'department_manager') return '部门主管';
   if (rule.type === 'submitter_manager') return '发起人的上级';
   return (rule.memberIds || [])
     .map((memberId) => directory.members.find((member) => member.id === memberId)?.name)
@@ -720,7 +721,6 @@ function isDesignerSelected(
 }
 
 function getApproverTypeLabel(type: ApproverRule['type']) {
-  if (type === 'department_manager') return '部门主管';
   if (type === 'submitter_manager') return '发起人的上级';
   return '指定成员';
 }
@@ -1387,7 +1387,6 @@ function StepEditor({
           <div className="grid grid-cols-2 gap-2">
             {[
               { value: 'specific_members', label: '指定成员' },
-              { value: 'department_manager', label: '部门主管' },
               { value: 'submitter_manager', label: '发起人上级' },
             ].map((item) => (
               <React.Fragment key={item.value}>
@@ -2806,7 +2805,6 @@ export default function WorkflowAdmin() {
                               }}
                             >
                               <option value="specific_members">指定成员</option>
-                              <option value="department_manager">部门主管</option>
                               <option value="submitter_manager">发起人的上级</option>
                             </select>
                             <select
