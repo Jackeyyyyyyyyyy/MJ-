@@ -884,28 +884,43 @@ function FlowConnector({ compact = false }: { compact?: boolean }) {
 function FlowBranchRail({ count }: { count: number }) {
   if (count <= 1) return null;
 
-  const edgeInset = `${50 / count}%`;
+  const firstCenter = 50 / count;
+  const lastCenter = 100 - firstCenter;
+  const branchCenters = Array.from({ length: count }, (_, index) => ((index + 0.5) / count) * 100);
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-0 h-12">
-      <span className="absolute left-1/2 top-0 h-6 w-px -translate-x-1/2 bg-[#bfc7d5]" />
-      <span className="absolute top-6 h-px bg-[#bfc7d5]" style={{ left: edgeInset, right: edgeInset }} />
-    </div>
+    <svg
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 top-0 h-16 w-full overflow-visible"
+      preserveAspectRatio="none"
+      viewBox="0 0 100 64"
+    >
+      <g
+        fill="none"
+        stroke="#d6dde8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.4"
+        vectorEffect="non-scaling-stroke"
+      >
+        <path d={`M 50 0 V 28 M ${firstCenter} 28 H ${lastCenter}`} />
+        {branchCenters.map((center) => (
+          <path key={center} d={`M ${center} 28 V 64`} />
+        ))}
+      </g>
+    </svg>
   );
 }
 
 function FlowBranchLane({
-  showTopConnector,
   showBottomConnector,
   children,
 }: {
-  showTopConnector: boolean;
   showBottomConnector: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div className="relative mx-auto flex h-full w-[300px] min-w-[300px] flex-col items-center">
-      {showTopConnector && <span className="mt-6 h-6 w-px bg-[#bfc7d5]" />}
       <div className="relative z-10 flex w-full flex-col items-center">
         {children}
       </div>
@@ -1212,22 +1227,6 @@ function WorkflowFlowDesigner({
               <span className="text-[12px] font-black text-light-gray">暂无成员</span>
             )}
           </label>
-          <button
-            type="button"
-            onClick={onAddBranch}
-            className="h-9 px-4 rounded-full bg-lightest-gray-background text-[12px] font-bold flex items-center gap-2 hover:bg-canvas-white"
-          >
-            <GitBranch size={14} /> 添加条件
-          </button>
-          {defaultBranch && (
-            <button
-              type="button"
-              onClick={() => onAddStep(defaultBranch.id)}
-              className="h-9 px-4 rounded-full bg-black text-white text-[12px] font-bold flex items-center gap-2"
-            >
-              <Plus size={14} /> 添加审批
-            </button>
-          )}
         </div>
       </div>
 
@@ -1283,7 +1282,7 @@ function WorkflowFlowDesigner({
               <FlowAddButton label="添加条件" onClick={onAddBranch} />
               <FlowConnector compact />
 
-              <div className="relative w-full pt-0">
+              <div className={cn("relative w-full", flowBranches.length > 1 && "pt-16")}>
                 <FlowBranchRail count={flowBranches.length} />
                 <div
                   className="relative grid items-stretch gap-5"
@@ -1292,7 +1291,6 @@ function WorkflowFlowDesigner({
                   {flowBranches.map((branch, branchIndex) => (
                     <FlowBranchLane
                       key={branch.id}
-                      showTopConnector={flowBranches.length > 1}
                       showBottomConnector={flowBranches.length > 1}
                     >
                       <FlowNode
