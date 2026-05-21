@@ -50,7 +50,7 @@ interface BusinessScopeOption {
   fields: string[];
 }
 
-type ConditionFieldKind = 'number' | 'text' | 'member' | 'department' | 'role';
+type ConditionFieldKind = 'number' | 'text' | 'member' | 'department';
 
 interface ConditionFieldOption {
   value: WorkflowConditionField;
@@ -102,6 +102,21 @@ const statusClasses: Record<WorkflowTemplate['status'], string> = {
   published: 'bg-[#e8f5e9] text-[#2e7d32]',
   disabled: 'bg-[#ffebee] text-[#c62828]',
 };
+
+const legacyRoleGroupMembers: Record<string, string[]> = {
+  'role-board': ['qin-an-tang'],
+  'role-gm': ['fan-lu'],
+  'role-finance': ['qian-lin', 'hu-ning-fei', 'ye-fei', 'wang-tumiao', 'jiang-hua'],
+  'role-sales': ['yang-nan', 'hong-wei'],
+  'role-admin': ['lin-jin-biao'],
+  'role-warehouse': ['huang-song-yuan'],
+  'role-ops': ['li-qi'],
+  'role-assistant': ['qin-sheng'],
+};
+
+function getLegacyRoleGroupMemberIds(roleGroupId?: string) {
+  return legacyRoleGroupMembers[String(roleGroupId || '')] || [];
+}
 
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -158,7 +173,6 @@ function getConditionFieldLabel(field: string) {
   if (field === 'amount') return '金额';
   if (field === 'submitter.member') return '提交人';
   if (field === 'submitter.department') return '提交人部门';
-  if (field === 'submitter.role') return '提交人角色组';
   if (field.startsWith(FORM_FIELD_PREFIX)) return field.slice(FORM_FIELD_PREFIX.length);
   if (field.startsWith(SUBMITTER_FIELD_PREFIX)) return field.slice(SUBMITTER_FIELD_PREFIX.length);
   return field;
@@ -167,7 +181,6 @@ function getConditionFieldLabel(field: string) {
 function getConditionFieldKind(field: string): ConditionFieldKind {
   if (field === 'submitter.member') return 'member';
   if (field === 'submitter.department') return 'department';
-  if (field === 'submitter.role') return 'role';
   return isNumericConditionFieldValue(field) ? 'number' : 'text';
 }
 
@@ -182,7 +195,6 @@ function getConditionFieldOptions(draft: WorkflowVersion | null): ConditionField
   return [
     { value: 'submitter.member', label: '提交人 / 本人', kind: 'member' },
     { value: 'submitter.department', label: '提交人 / 部门', kind: 'department' },
-    { value: 'submitter.role', label: '提交人 / 角色组', kind: 'role' },
     ...formFieldOptions,
   ];
 }
@@ -201,7 +213,6 @@ function defaultCcRule(): CcRule {
     timing: 'workflow_completed',
     memberIds: [],
     departmentIds: [],
-    roleGroupIds: [],
   };
 }
 
@@ -297,13 +308,16 @@ function parseLegacyCondition(expression?: string): WorkflowCondition {
 }
 
 function legacyNodeToStep(node: WorkflowNode, index: number): ApprovalStep {
-  const legacyRule = node.rule || { type: 'specified', memberIds: [] };
+  const legacyRule = (node.rule || { type: 'specified', memberIds: [] }) as ApproverRule & {
+    roleGroupId?: string;
+    type?: string;
+  };
   let approverRule: ApproverRule = { type: 'specific_members', memberIds: [] };
 
   if (legacyRule.type === 'specified') {
     approverRule = { type: 'specific_members', memberIds: legacyRule.memberIds || [] };
-  } else if (legacyRule.type === 'role') {
-    approverRule = { type: 'role_based', roleGroupId: legacyRule.roleGroupId || '' };
+  } else if (String(legacyRule.type) === 'role') {
+    approverRule = { type: 'specific_members', memberIds: getLegacyRoleGroupMemberIds(legacyRule.roleGroupId) };
   } else if (legacyRule.type === 'direct_supervisor' || legacyRule.type === 'nth_supervisor' || legacyRule.type === 'multi_supervisor') {
     approverRule = { type: 'submitter_manager' };
   }
@@ -331,12 +345,6 @@ function stepToLegacyNode(step: ApprovalStep, index: number): WorkflowNode {
       memberIds: rule.memberIds || [],
       emptyApproverAction: step.emptyApproverAction,
     };
-  } else if (rule.type === 'role_based') {
-    legacyRule = {
-      type: 'role',
-      roleGroupId: rule.roleGroupId || '',
-      emptyApproverAction: step.emptyApproverAction,
-    };
   } else if (rule.type === 'department_manager' || rule.type === 'submitter_manager') {
     legacyRule = {
       type: 'direct_supervisor',
@@ -355,7 +363,13 @@ function stepToLegacyNode(step: ApprovalStep, index: number): WorkflowNode {
 
 function normalizeStep(step: Partial<ApprovalStep> | undefined, index: number): ApprovalStep {
   const rule = step?.approverRule || { type: 'specific_members', memberIds: [] };
-  const type = ['specific_members', 'department_manager', 'submitter_manager', 'role_based'].includes(String(rule.type))
+  const isLegacyRoleRule = String(rule.type) === 'role_based' || String(rule.type) === 'role';
+  const {
+    roleGroupId: legacyRoleGroupId,
+    roleGroupIds: _legacyRoleGroupIds,
+    ...ruleWithoutRoleGroups
+  } = rule as ApproverRule & { roleGroupId?: string; roleGroupIds?: string[] };
+  const type = ['specific_members', 'department_manager', 'submitter_manager'].includes(String(rule.type))
     ? rule.type
     : 'specific_members';
 
@@ -363,11 +377,10 @@ function normalizeStep(step: Partial<ApprovalStep> | undefined, index: number): 
     id: step?.id || createId('step'),
     name: step?.name || `审批节点 ${index + 1}`,
     approverRule: {
-      ...rule,
+      ...ruleWithoutRoleGroups,
       type,
-      memberIds: Array.isArray(rule.memberIds) ? rule.memberIds : [],
+      memberIds: isLegacyRoleRule ? getLegacyRoleGroupMemberIds(legacyRoleGroupId) : Array.isArray(rule.memberIds) ? rule.memberIds : [],
       departmentIds: Array.isArray(rule.departmentIds) ? rule.departmentIds : [],
-      roleGroupIds: Array.isArray(rule.roleGroupIds) ? rule.roleGroupIds : [],
     },
     approvalMode: step?.approvalMode === 'all_of' ? 'all_of' : 'one_of',
     emptyApproverAction: step?.emptyApproverAction === 'auto_pass' ? 'auto_pass' : 'block_submit',
@@ -395,7 +408,6 @@ function getAllowedConditionFields(scope: BusinessScopeOption) {
   return new Set<WorkflowConditionField>([
     'submitter.member',
     'submitter.department',
-    'submitter.role',
     ...scope.fields.map((field) => `${FORM_FIELD_PREFIX}${field}`),
   ]);
 }
@@ -511,7 +523,6 @@ function normalizeDraftForEditor(draft: WorkflowVersion): WorkflowVersion {
       ...(draft.ccRule || {}),
       memberIds: draft.ccRule?.memberIds || [],
       departmentIds: draft.ccRule?.departmentIds || [],
-      roleGroupIds: draft.ccRule?.roleGroupIds || [],
       timing: 'workflow_completed',
     },
     nodes: Array.isArray(draft.nodes) ? draft.nodes : [],
@@ -619,8 +630,6 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
         addValidationError(state, 'branches', `${stepLabel} 必须配置审批人规则`, branch.id, step.id);
       } else if (rule.type === 'specific_members' && (!rule.memberIds || rule.memberIds.length === 0)) {
         addValidationError(state, 'branches', `${stepLabel} 必须选择指定成员`, branch.id, step.id);
-      } else if (rule.type === 'role_based' && !rule.roleGroupId) {
-        addValidationError(state, 'branches', `${stepLabel} 必须选择角色组`, branch.id, step.id);
       }
     });
   });
@@ -657,9 +666,6 @@ function formatStepRule(step: ApprovalStep, directory: OrganizationDirectory) {
   const rule = step.approverRule;
   if (rule.type === 'department_manager') return '部门主管';
   if (rule.type === 'submitter_manager') return '发起人的上级';
-  if (rule.type === 'role_based') {
-    return directory.roleGroups.find((role) => role.id === rule.roleGroupId)?.name || '指定角色';
-  }
   return (rule.memberIds || [])
     .map((memberId) => directory.members.find((member) => member.id === memberId)?.name)
     .filter(Boolean)
@@ -716,7 +722,6 @@ function isDesignerSelected(
 function getApproverTypeLabel(type: ApproverRule['type']) {
   if (type === 'department_manager') return '部门主管';
   if (type === 'submitter_manager') return '发起人的上级';
-  if (type === 'role_based') return '指定角色';
   return '指定成员';
 }
 
@@ -843,7 +848,6 @@ function WorkflowFlowDesigner({
   fieldOptions,
   memberOptions,
   departmentOptions,
-  roleOptions,
   onSelect,
   onAddBranch,
   onRemoveBranch,
@@ -868,7 +872,6 @@ function WorkflowFlowDesigner({
   fieldOptions: ConditionFieldOption[];
   memberOptions: Array<{ value: string; label: string }>;
   departmentOptions: Array<{ value: string; label: string }>;
-  roleOptions: Array<{ value: string; label: string }>;
   onSelect: (selection: DesignerSelection) => void;
   onAddBranch: () => void;
   onRemoveBranch: (branchId: string) => void;
@@ -1081,7 +1084,6 @@ function WorkflowFlowDesigner({
                   subtitle={[
                     ccRule.memberIds.length ? `${ccRule.memberIds.length} 个成员` : '',
                     ccRule.departmentIds.length ? `${ccRule.departmentIds.length} 个部门` : '',
-                    ccRule.roleGroupIds.length ? `${ccRule.roleGroupIds.length} 个角色` : '',
                   ].filter(Boolean).join('、') || '流程结束后抄送，可为空'}
                   icon={<Send size={17} strokeWidth={2.5} />}
                   selected={isDesignerSelected(activeSelection, 'cc')}
@@ -1113,7 +1115,6 @@ function WorkflowFlowDesigner({
           validation={validation}
           memberOptions={memberOptions}
           departmentOptions={departmentOptions}
-          roleOptions={roleOptions}
           fieldOptions={fieldOptions}
           onSelect={onSelect}
           onRemoveBranch={onRemoveBranch}
@@ -1179,14 +1180,12 @@ function ConditionValueControl({
   branchId,
   memberOptions,
   departmentOptions,
-  roleOptions,
   onUpdateCondition,
 }: {
   condition: WorkflowCondition;
   branchId: string;
   memberOptions: Array<{ value: string; label: string }>;
   departmentOptions: Array<{ value: string; label: string }>;
-  roleOptions: Array<{ value: string; label: string }>;
   onUpdateCondition: (branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
 }) {
   const kind = getConditionFieldKind(condition.field);
@@ -1236,8 +1235,8 @@ function ConditionValueControl({
     );
   }
 
-  if (kind === 'department' || kind === 'member' || kind === 'role') {
-    const options = kind === 'department' ? departmentOptions : kind === 'member' ? memberOptions : roleOptions;
+  if (kind === 'department' || kind === 'member') {
+    const options = kind === 'department' ? departmentOptions : memberOptions;
     return (
       <select
         className="input-field text-[13px]"
@@ -1270,7 +1269,6 @@ function ConditionEditor({
   fieldOptions,
   memberOptions,
   departmentOptions,
-  roleOptions,
   onRemoveCondition,
   onUpdateCondition,
 }: {
@@ -1280,7 +1278,6 @@ function ConditionEditor({
   fieldOptions: ConditionFieldOption[];
   memberOptions: Array<{ value: string; label: string }>;
   departmentOptions: Array<{ value: string; label: string }>;
-  roleOptions: Array<{ value: string; label: string }>;
   onRemoveCondition: (branchId: string, conditionId: string) => void;
   onUpdateCondition: (branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
 }) {
@@ -1331,7 +1328,6 @@ function ConditionEditor({
         branchId={branch.id}
         memberOptions={memberOptions}
         departmentOptions={departmentOptions}
-        roleOptions={roleOptions}
         onUpdateCondition={onUpdateCondition}
       />
       <div className="rounded-xl bg-canvas-white px-3 py-2 text-[11px] font-bold text-medium-gray">
@@ -1346,7 +1342,6 @@ function StepEditor({
   step,
   stepIndex,
   memberOptions,
-  roleOptions,
   validation,
   onSelect,
   onUpdateStep,
@@ -1357,7 +1352,6 @@ function StepEditor({
   step: ApprovalStep;
   stepIndex: number;
   memberOptions: Array<{ value: string; label: string }>;
-  roleOptions: Array<{ value: string; label: string }>;
   validation: ValidationState;
   onSelect: (selection: DesignerSelection) => void;
   onUpdateStep: (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => void;
@@ -1395,7 +1389,6 @@ function StepEditor({
               { value: 'specific_members', label: '指定成员' },
               { value: 'department_manager', label: '部门主管' },
               { value: 'submitter_manager', label: '发起人上级' },
-              { value: 'role_based', label: '指定角色' },
             ].map((item) => (
               <React.Fragment key={item.value}>
                 <SegmentedButton
@@ -1405,8 +1398,6 @@ function StepEditor({
                       type: item.value as ApproverRule['type'],
                       memberIds: [],
                       departmentIds: [],
-                      roleGroupIds: [],
-                      roleGroupId: '',
                     },
                   })}
                 >
@@ -1428,24 +1419,6 @@ function StepEditor({
               })}
               emptyText="暂无成员"
             />
-          </label>
-        )}
-
-        {step.approverRule.type === 'role_based' && (
-          <label className="block space-y-2">
-            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">角色组</span>
-            <select
-              className="input-field text-[13px]"
-              value={step.approverRule.roleGroupId || ''}
-              onChange={(event) => onUpdateStep(branch.id, step.id, {
-                approverRule: { ...step.approverRule, roleGroupId: event.target.value },
-              })}
-            >
-              <option value="">选择角色组</option>
-              {roleOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
           </label>
         )}
 
@@ -1523,7 +1496,6 @@ function DesignerInspector({
   validation,
   memberOptions,
   departmentOptions,
-  roleOptions,
   fieldOptions,
   onSelect,
   onRemoveBranch,
@@ -1548,7 +1520,6 @@ function DesignerInspector({
   validation: ValidationState;
   memberOptions: Array<{ value: string; label: string }>;
   departmentOptions: Array<{ value: string; label: string }>;
-  roleOptions: Array<{ value: string; label: string }>;
   fieldOptions: ConditionFieldOption[];
   onSelect: (selection: DesignerSelection) => void;
   onRemoveBranch: (branchId: string) => void;
@@ -1573,7 +1544,6 @@ function DesignerInspector({
           step={selectedStep}
           stepIndex={selectedBranch.approvalSteps.findIndex((step) => step.id === selectedStep.id)}
           memberOptions={memberOptions}
-          roleOptions={roleOptions}
           validation={validation}
           onSelect={onSelect}
           onUpdateStep={onUpdateStep}
@@ -1638,7 +1608,6 @@ function DesignerInspector({
                     fieldOptions={fieldOptions}
                     memberOptions={memberOptions}
                     departmentOptions={departmentOptions}
-                    roleOptions={roleOptions}
                     onRemoveCondition={onRemoveCondition}
                     onUpdateCondition={onUpdateCondition}
                   />
@@ -1703,7 +1672,7 @@ function DesignerInspector({
         <InspectorHeader
           label="抄送"
           title="抄送配置"
-          description="审批流程完成后，把结果同步给相关成员、部门或角色组。"
+          description="审批流程完成后，把结果同步给相关成员或部门。"
         />
         <div className="space-y-5 p-5">
           <label className="block space-y-2">
@@ -1722,15 +1691,6 @@ function DesignerInspector({
               options={departmentOptions}
               onChange={(departmentIds) => onPatchCcRule({ departmentIds })}
               emptyText="暂无部门"
-            />
-          </label>
-          <label className="block space-y-2">
-            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">抄送角色</span>
-            <MultiSelect
-              value={ccRule.roleGroupIds}
-              options={roleOptions}
-              onChange={(roleGroupIds) => onPatchCcRule({ roleGroupIds })}
-              emptyText="暂无角色"
             />
           </label>
         </div>
@@ -1879,7 +1839,7 @@ function MultiSelect({
 
 export default function WorkflowAdmin() {
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
-  const [directory, setDirectory] = useState<OrganizationDirectory>({ departments: [], members: [], roleGroups: [] });
+  const [directory, setDirectory] = useState<OrganizationDirectory>({ departments: [], members: [] });
   const [selectedId, setSelectedId] = useState('');
   const [draft, setDraft] = useState<WorkflowVersion | null>(null);
   const [createBusinessKey, setCreateBusinessKey] = useState(businessScopeOptions[0]?.key || '');
@@ -1905,10 +1865,6 @@ export default function WorkflowAdmin() {
   const departmentOptions = useMemo(
     () => directory.departments.map((department) => ({ value: department.id, label: department.name })),
     [directory.departments],
-  );
-  const roleOptions = useMemo(
-    () => directory.roleGroups.map((roleGroup) => ({ value: roleGroup.id, label: roleGroup.name })),
-    [directory.roleGroups],
   );
   const conditionFieldOptionsForDraft = useMemo(
     () => getConditionFieldOptions(draft),
@@ -2561,7 +2517,6 @@ export default function WorkflowAdmin() {
               fieldOptions={conditionFieldOptionsForDraft}
               memberOptions={memberOptions}
               departmentOptions={departmentOptions}
-              roleOptions={roleOptions}
               onSelect={setDesignerSelection}
               onAddBranch={addBranch}
               onRemoveBranch={removeBranch}
@@ -2846,8 +2801,6 @@ export default function WorkflowAdmin() {
                                     type,
                                     memberIds: [],
                                     departmentIds: [],
-                                    roleGroupIds: [],
-                                    roleGroupId: '',
                                   },
                                 });
                               }}
@@ -2855,7 +2808,6 @@ export default function WorkflowAdmin() {
                               <option value="specific_members">指定成员</option>
                               <option value="department_manager">部门主管</option>
                               <option value="submitter_manager">发起人的上级</option>
-                              <option value="role_based">指定角色</option>
                             </select>
                             <select
                               className="input-field text-[13px]"
@@ -2876,21 +2828,6 @@ export default function WorkflowAdmin() {
                               })}
                               emptyText="暂无成员"
                             />
-                          )}
-
-                          {step.approverRule.type === 'role_based' && (
-                            <select
-                              className="input-field text-[13px]"
-                              value={step.approverRule.roleGroupId || ''}
-                              onChange={(event) => updateStep(branch.id, step.id, {
-                                approverRule: { ...step.approverRule, roleGroupId: event.target.value },
-                              })}
-                            >
-                              <option value="">选择角色组</option>
-                              {roleOptions.map((option) => (
-                                <option key={option.value} value={option.value}>{option.label}</option>
-                              ))}
-                            </select>
                           )}
 
                           <select
@@ -2919,7 +2856,7 @@ export default function WorkflowAdmin() {
               title="抄送配置"
               icon={<Send size={18} strokeWidth={2.5} />}
             >
-              <div className="grid gap-4 lg:grid-cols-3">
+              <div className="grid gap-4 lg:grid-cols-2">
                 <label className="space-y-2">
                   <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">抄送成员</span>
                   <MultiSelect
@@ -2936,15 +2873,6 @@ export default function WorkflowAdmin() {
                     options={departmentOptions}
                     onChange={(departmentIds) => patchCcRule({ departmentIds })}
                     emptyText="暂无部门"
-                  />
-                </label>
-                <label className="space-y-2">
-                  <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">抄送角色</span>
-                  <MultiSelect
-                    value={ccRule.roleGroupIds}
-                    options={roleOptions}
-                    onChange={(roleGroupIds) => patchCcRule({ roleGroupIds })}
-                    emptyText="暂无角色"
                   />
                 </label>
               </div>

@@ -20,12 +20,10 @@ export type ApproverRuleType =
   | 'specific_members'
   | 'department_manager'
   | 'submitter_manager'
-  | 'role_based'
   | 'specified'
   | 'direct_supervisor'
   | 'nth_supervisor'
   | 'multi_supervisor'
-  | 'role'
   | 'initiator_select';
 
 export interface OrganizationDepartment {
@@ -42,20 +40,12 @@ export interface OrganizationMember {
   departmentId: string;
   title: string;
   supervisorId?: string;
-  roleGroupIds: string[];
   enabled: boolean;
-}
-
-export interface OrganizationRoleGroup {
-  id: string;
-  name: string;
-  memberIds: string[];
 }
 
 export interface OrganizationDirectory {
   departments: OrganizationDepartment[];
   members: OrganizationMember[];
-  roleGroups: OrganizationRoleGroup[];
   updatedAt?: string;
 }
 
@@ -63,8 +53,6 @@ export interface ApproverRule {
   type: ApproverRuleType;
   memberIds?: string[];
   departmentIds?: string[];
-  roleGroupId?: string;
-  roleGroupIds?: string[];
   supervisorLevel?: number;
   supervisorDepth?: number;
   emptyApproverAction?: 'auto_pass' | 'block_submit';
@@ -119,7 +107,6 @@ export interface CcRule {
   timing: 'workflow_completed';
   memberIds: string[];
   departmentIds: string[];
-  roleGroupIds: string[];
 }
 
 export type WorkflowStepStatus = 'not_started' | 'pending' | 'approved' | 'rejected' | 'skipped';

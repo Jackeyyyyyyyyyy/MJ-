@@ -36,8 +36,18 @@ const DEFAULT_ORGANIZATION_ID = 'default-org';
 const WORKFLOW_BUSINESS_TYPES = new Set(['reimbursement', 'purchase', 'leave', 'general']);
 const WORKFLOW_CONDITION_FIELDS = new Set(['amount', 'category', 'project', 'department']);
 const WORKFLOW_CONDITION_OPERATORS = new Set(['lte', 'gt', 'between', 'eq']);
-const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'department_manager', 'submitter_manager', 'role_based']);
+const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'department_manager', 'submitter_manager']);
 const WORKFLOW_APPROVAL_MODES = new Set(['one_of', 'all_of']);
+const LEGACY_ROLE_GROUP_MEMBERS = {
+  'role-board': ['qin-an-tang'],
+  'role-gm': ['fan-lu'],
+  'role-finance': ['qian-lin', 'hu-ning-fei', 'ye-fei', 'wang-tumiao', 'jiang-hua'],
+  'role-sales': ['yang-nan', 'hong-wei'],
+  'role-admin': ['lin-jin-biao'],
+  'role-warehouse': ['huang-song-yuan'],
+  'role-ops': ['li-qi'],
+  'role-assistant': ['qin-sheng'],
+};
 const managedRoles = new Set(['employee', 'boss']);
 const defaultAiAssistantPrompt =
   '你是 MJ 审批系统的管理助手，只做只读分析。你负责总结审批风险、发现异常、解释待办优先级，并引用相关审批单。不得编造数据，不得替用户做审批决定，不得建议绕过流程。回答要先给简短结论，再列关键原因；如果涉及具体单据，请在 relatedRecordIds 中返回对应 recordId。';
@@ -628,29 +638,19 @@ function createDefaultOrganizationDirectory() {
       { id: 'dept-warehouse', name: '仓储物流', parentId: 'dept-management', leaderIds: ['huang-song-yuan'] },
     ],
     members: [
-      { id: 'qin-an-tang', name: '秦安堂', departmentId: 'dept-board', title: '董事长', roleGroupIds: ['role-board'], enabled: true },
-      { id: 'fan-lu', name: '范璐', departmentId: 'dept-management', title: '总经理', supervisorId: 'qin-an-tang', roleGroupIds: ['role-gm'], enabled: true },
-      { id: 'yang-nan', name: '杨宿南', departmentId: 'dept-sales', title: '业务一部负责人', supervisorId: 'fan-lu', roleGroupIds: ['role-sales'], enabled: true },
-      { id: 'hong-wei', name: '洪伟', departmentId: 'dept-sales', title: '销售经理', supervisorId: 'yang-nan', roleGroupIds: ['role-sales'], enabled: true },
-      { id: 'qian-lin', name: '钱琳', departmentId: 'dept-finance', title: '财务总监', supervisorId: 'fan-lu', roleGroupIds: ['role-finance'], enabled: true },
-      { id: 'hu-ning-fei', name: '胡宁飞', departmentId: 'dept-finance', title: '财务助理', supervisorId: 'qian-lin', roleGroupIds: ['role-finance'], enabled: true },
-      { id: 'ye-fei', name: '叶飞', departmentId: 'dept-finance', title: '审批人', supervisorId: 'qian-lin', roleGroupIds: ['role-finance'], enabled: true },
-      { id: 'lin-jin-biao', name: '林金彪', departmentId: 'dept-admin', title: '行政人事', supervisorId: 'fan-lu', roleGroupIds: ['role-admin'], enabled: true },
-      { id: 'huang-song-yuan', name: '黄松源', departmentId: 'dept-warehouse', title: '仓储负责人', supervisorId: 'fan-lu', roleGroupIds: ['role-warehouse'], enabled: true },
-      { id: 'li-qi', name: '利祺', departmentId: 'dept-operations', title: '操作', supervisorId: 'fan-lu', roleGroupIds: ['role-ops'], enabled: true },
-      { id: 'qin-sheng', name: '秦笙', departmentId: 'dept-management', title: '抄送人', supervisorId: 'fan-lu', roleGroupIds: ['role-assistant'], enabled: true },
-      { id: 'wang-tumiao', name: '王涂妙', departmentId: 'dept-finance', title: '抄送人', supervisorId: 'qian-lin', roleGroupIds: ['role-finance'], enabled: true },
-      { id: 'jiang-hua', name: '姜华', departmentId: 'dept-finance', title: '抄送人', supervisorId: 'qian-lin', roleGroupIds: ['role-finance'], enabled: true },
-    ],
-    roleGroups: [
-      { id: 'role-board', name: '董事长', memberIds: ['qin-an-tang'] },
-      { id: 'role-gm', name: '总经理', memberIds: ['fan-lu'] },
-      { id: 'role-finance', name: '财务', memberIds: ['qian-lin', 'hu-ning-fei', 'ye-fei', 'wang-tumiao', 'jiang-hua'] },
-      { id: 'role-sales', name: '销售', memberIds: ['yang-nan', 'hong-wei'] },
-      { id: 'role-admin', name: '行政人事', memberIds: ['lin-jin-biao'] },
-      { id: 'role-warehouse', name: '仓储物流', memberIds: ['huang-song-yuan'] },
-      { id: 'role-ops', name: '操作', memberIds: ['li-qi'] },
-      { id: 'role-assistant', name: '总助/抄送', memberIds: ['qin-sheng'] },
+      { id: 'qin-an-tang', name: '秦安堂', departmentId: 'dept-board', title: '董事长', enabled: true },
+      { id: 'fan-lu', name: '范璐', departmentId: 'dept-management', title: '总经理', supervisorId: 'qin-an-tang', enabled: true },
+      { id: 'yang-nan', name: '杨宿南', departmentId: 'dept-sales', title: '业务一部负责人', supervisorId: 'fan-lu', enabled: true },
+      { id: 'hong-wei', name: '洪伟', departmentId: 'dept-sales', title: '销售经理', supervisorId: 'yang-nan', enabled: true },
+      { id: 'qian-lin', name: '钱琳', departmentId: 'dept-finance', title: '财务总监', supervisorId: 'fan-lu', enabled: true },
+      { id: 'hu-ning-fei', name: '胡宁飞', departmentId: 'dept-finance', title: '财务助理', supervisorId: 'qian-lin', enabled: true },
+      { id: 'ye-fei', name: '叶飞', departmentId: 'dept-finance', title: '审批人', supervisorId: 'qian-lin', enabled: true },
+      { id: 'lin-jin-biao', name: '林金彪', departmentId: 'dept-admin', title: '行政人事', supervisorId: 'fan-lu', enabled: true },
+      { id: 'huang-song-yuan', name: '黄松源', departmentId: 'dept-warehouse', title: '仓储负责人', supervisorId: 'fan-lu', enabled: true },
+      { id: 'li-qi', name: '利祺', departmentId: 'dept-operations', title: '操作', supervisorId: 'fan-lu', enabled: true },
+      { id: 'qin-sheng', name: '秦笙', departmentId: 'dept-management', title: '抄送人', supervisorId: 'fan-lu', enabled: true },
+      { id: 'wang-tumiao', name: '王涂妙', departmentId: 'dept-finance', title: '抄送人', supervisorId: 'qian-lin', enabled: true },
+      { id: 'jiang-hua', name: '姜华', departmentId: 'dept-finance', title: '抄送人', supervisorId: 'qian-lin', enabled: true },
     ],
     updatedAt: '2026-05-08T00:00:00.000Z',
   };
@@ -674,8 +674,11 @@ function createDefaultCcRule() {
     timing: 'workflow_completed',
     memberIds: [],
     departmentIds: [],
-    roleGroupIds: [],
   };
+}
+
+function getLegacyRoleGroupMemberIds(roleGroupId) {
+  return LEGACY_ROLE_GROUP_MEMBERS[normalizeWorkflowText(roleGroupId)] || [];
 }
 
 function createDefaultApprovalStep(index = 1) {
@@ -713,7 +716,7 @@ function legacyRuleToApprovalStep(node, index = 0) {
   if (rule.type === 'specified') {
     approverRule = { type: 'specific_members', memberIds: Array.isArray(rule.memberIds) ? rule.memberIds : [] };
   } else if (rule.type === 'role') {
-    approverRule = { type: 'role_based', roleGroupId: rule.roleGroupId || '' };
+    approverRule = { type: 'specific_members', memberIds: getLegacyRoleGroupMemberIds(rule.roleGroupId) };
   } else if (rule.type === 'direct_supervisor') {
     approverRule = { type: 'submitter_manager' };
   } else if (rule.type === 'nth_supervisor' || rule.type === 'multi_supervisor') {
@@ -737,12 +740,6 @@ function approvalStepToLegacyNode(step, index = 0) {
     legacyRule = {
       type: 'specified',
       memberIds: Array.isArray(rule.memberIds) ? rule.memberIds : [],
-      emptyApproverAction: step?.emptyApproverAction || 'block_submit',
-    };
-  } else if (rule.type === 'role_based') {
-    legacyRule = {
-      type: 'role',
-      roleGroupId: rule.roleGroupId || '',
       emptyApproverAction: step?.emptyApproverAction || 'block_submit',
     };
   } else if (rule.type === 'submitter_manager' || rule.type === 'department_manager') {
@@ -796,16 +793,21 @@ function parseLegacyConditionExpression(expression, index = 0) {
 
 function normalizeApprovalStep(step, index = 0) {
   const rule = step?.approverRule || {};
+  const isLegacyRoleRule = rule.type === 'role_based' || rule.type === 'role';
+  const {
+    roleGroupId: legacyRoleGroupId,
+    roleGroupIds: _legacyRoleGroupIds,
+    ...ruleWithoutRoleGroups
+  } = rule;
   const ruleType = WORKFLOW_APPROVER_TYPES.has(rule.type) ? rule.type : 'specific_members';
   return {
     id: normalizeWorkflowText(step?.id) || createWorkflowId('step'),
     name: normalizeWorkflowText(step?.name) || `审批节点 ${index + 1}`,
     approverRule: {
-      ...rule,
+      ...ruleWithoutRoleGroups,
       type: ruleType,
-      memberIds: Array.isArray(rule.memberIds) ? rule.memberIds : [],
+      memberIds: isLegacyRoleRule ? getLegacyRoleGroupMemberIds(legacyRoleGroupId) : Array.isArray(rule.memberIds) ? rule.memberIds : [],
       departmentIds: Array.isArray(rule.departmentIds) ? rule.departmentIds : [],
-      roleGroupIds: Array.isArray(rule.roleGroupIds) ? rule.roleGroupIds : [],
     },
     approvalMode: WORKFLOW_APPROVAL_MODES.has(step?.approvalMode) ? step.approvalMode : 'one_of',
     emptyApproverAction: step?.emptyApproverAction === 'auto_pass' ? 'auto_pass' : 'block_submit',
@@ -918,7 +920,6 @@ function normalizeWorkflowDraft(draft) {
       ...(nextDraft.ccRule || {}),
       memberIds: Array.isArray(nextDraft.ccRule?.memberIds) ? nextDraft.ccRule.memberIds : [],
       departmentIds: Array.isArray(nextDraft.ccRule?.departmentIds) ? nextDraft.ccRule.departmentIds : [],
-      roleGroupIds: Array.isArray(nextDraft.ccRule?.roleGroupIds) ? nextDraft.ccRule.roleGroupIds : [],
       timing: 'workflow_completed',
     },
     formFields: Array.isArray(nextDraft.formFields) ? nextDraft.formFields : [],
@@ -1009,8 +1010,6 @@ function validateWorkflowDraftForPublish(draft) {
         errors.push(`${stepLabel} 必须配置审批人规则`);
       } else if (rule.type === 'specific_members' && (!Array.isArray(rule.memberIds) || rule.memberIds.length === 0)) {
         errors.push(`${stepLabel} 必须选择指定成员`);
-      } else if (rule.type === 'role_based' && !normalizeWorkflowText(rule.roleGroupId)) {
-        errors.push(`${stepLabel} 必须选择角色组`);
       }
     });
   });
@@ -1046,7 +1045,7 @@ function createDefaultWorkflowVersion(status = 'draft') {
       type: 'approver',
       title: '总经理',
       subtitle: '总经理会签',
-      rule: { type: 'role', roleGroupId: 'role-gm', emptyApproverAction: 'block_submit' },
+      rule: { type: 'specified', memberIds: ['fan-lu'], emptyApproverAction: 'block_submit' },
     },
   ];
 
@@ -1092,7 +1091,7 @@ function createDefaultWorkflowVersion(status = 'draft') {
             type: 'approver',
             title: '董事长',
             subtitle: '董事长会签',
-            rule: { type: 'role', roleGroupId: 'role-board', emptyApproverAction: 'block_submit' },
+            rule: { type: 'specified', memberIds: ['qin-an-tang'], emptyApproverAction: 'block_submit' },
           }, 0),
         ],
       },
@@ -1101,7 +1100,6 @@ function createDefaultWorkflowVersion(status = 'draft') {
       timing: 'workflow_completed',
       memberIds: ['qin-sheng', 'wang-tumiao', 'jiang-hua', 'qian-lin'],
       departmentIds: [],
-      roleGroupIds: [],
     },
     formFields: [
       { id: 'field-vendor', label: '供应商', type: 'text', required: true },
@@ -1133,7 +1131,7 @@ function createDefaultWorkflowVersion(status = 'draft') {
         type: 'approver',
         title: '董事长',
         subtitle: '董事长会签',
-        rule: { type: 'role', roleGroupId: 'role-board', emptyApproverAction: 'block_submit' },
+        rule: { type: 'specified', memberIds: ['qin-an-tang'], emptyApproverAction: 'block_submit' },
       },
       {
         id: 'node-copy',
@@ -1194,13 +1192,18 @@ async function readOrganizationDirectory() {
   const directory = await readJsonObjectFile(organizationFile, {});
   if (
     !Array.isArray(directory.departments) ||
-    !Array.isArray(directory.members) ||
-    !Array.isArray(directory.roleGroups)
+    !Array.isArray(directory.members)
   ) {
     return createDefaultOrganizationDirectory();
   }
 
-  return directory;
+  return {
+    ...normalizeOrganizationDirectoryInput({
+      departments: directory.departments,
+      members: directory.members,
+    }),
+    ...(directory.updatedAt ? { updatedAt: directory.updatedAt } : {}),
+  };
 }
 
 function assertUniqueIds(items, label) {
@@ -1232,7 +1235,7 @@ function hasParentCycle(items, id, parentKey) {
   return false;
 }
 
-function normalizeOrganizationDirectoryInput({ departments, members, roleGroups }) {
+function normalizeOrganizationDirectoryInput({ departments, members }) {
   const normalizedDepartments = departments.map((department) => ({
     id: normalizeWorkflowText(department?.id),
     name: normalizeWorkflowText(department?.name),
@@ -1248,23 +1251,12 @@ function normalizeOrganizationDirectoryInput({ departments, members, roleGroups 
     departmentId: normalizeWorkflowText(member?.departmentId),
     title: normalizeWorkflowText(member?.title),
     ...(normalizeWorkflowText(member?.supervisorId) ? { supervisorId: normalizeWorkflowText(member.supervisorId) } : {}),
-    roleGroupIds: Array.isArray(member?.roleGroupIds)
-      ? member.roleGroupIds.map(normalizeWorkflowText).filter(Boolean)
-      : [],
     enabled: member?.enabled !== false,
-  }));
-  const normalizedRoleGroups = roleGroups.map((roleGroup) => ({
-    id: normalizeWorkflowText(roleGroup?.id),
-    name: normalizeWorkflowText(roleGroup?.name),
-    memberIds: Array.isArray(roleGroup?.memberIds)
-      ? roleGroup.memberIds.map(normalizeWorkflowText).filter(Boolean)
-      : [],
   }));
 
   const directory = {
     departments: normalizedDepartments,
     members: normalizedMembers,
-    roleGroups: normalizedRoleGroups,
   };
 
   validateOrganizationDirectory(directory);
@@ -1274,11 +1266,9 @@ function normalizeOrganizationDirectoryInput({ departments, members, roleGroups 
 function validateOrganizationDirectory(directory) {
   assertUniqueIds(directory.departments, 'department');
   assertUniqueIds(directory.members, 'member');
-  assertUniqueIds(directory.roleGroups, 'role group');
 
   const departmentIds = new Set(directory.departments.map((department) => department.id));
   const memberIds = new Set(directory.members.map((member) => member.id));
-  const roleGroupIds = new Set(directory.roleGroups.map((roleGroup) => roleGroup.id));
   const accountUsernames = new Map();
 
   directory.departments.forEach((department) => {
@@ -1329,31 +1319,6 @@ function validateOrganizationDirectory(directory) {
       }
       accountUsernames.set(member.accountUsername, member.id);
     }
-
-    (member.roleGroupIds || []).forEach((roleGroupId) => {
-      if (!roleGroupIds.has(roleGroupId)) {
-        throw createHttpError(`member role group does not exist: ${member.name}`, 400);
-      }
-    });
-  });
-
-  directory.roleGroups.forEach((roleGroup) => {
-    if (!roleGroup.name) {
-      throw createHttpError('role group name is required', 400);
-    }
-
-    roleGroup.memberIds = [...new Set([
-      ...(roleGroup.memberIds || []),
-      ...directory.members
-        .filter((member) => (member.roleGroupIds || []).includes(roleGroup.id))
-        .map((member) => member.id),
-    ])];
-
-    roleGroup.memberIds.forEach((memberId) => {
-      if (!memberIds.has(memberId)) {
-        throw createHttpError(`role group member does not exist: ${roleGroup.name}`, 400);
-      }
-    });
   });
 }
 
@@ -1444,14 +1409,6 @@ function getWorkflowConditionValue(condition, context) {
   if (field === 'submitter.department') {
     const department = (directory?.departments || []).find((item) => item.id === applicantMember?.departmentId);
     return department ? `${department.id} ${department.name}` : applicantMember?.departmentId;
-  }
-
-  if (field === 'submitter.role') {
-    const roleTexts = (applicantMember?.roleGroupIds || []).map((roleGroupId) => {
-      const roleGroup = (directory?.roleGroups || []).find((item) => item.id === roleGroupId);
-      return roleGroup ? `${roleGroup.id} ${roleGroup.name}` : roleGroupId;
-    });
-    return roleTexts.join(' ');
   }
 
   if (field === 'amount') {
@@ -1558,18 +1515,6 @@ function uniqueMembers(members) {
   });
 }
 
-function getRoleGroupMembers(directory, roleGroupId) {
-  const roleGroup = (directory.roleGroups || []).find((item) => item.id === roleGroupId);
-  const memberIds = new Set([
-    ...(roleGroup?.memberIds || []),
-    ...(directory.members || [])
-      .filter((member) => Array.isArray(member.roleGroupIds) && member.roleGroupIds.includes(roleGroupId))
-      .map((member) => member.id),
-  ]);
-
-  return uniqueMembers([...memberIds].map((memberId) => findMemberById(directory, memberId)).filter(Boolean));
-}
-
 function getSupervisorAtLevel(directory, member, level) {
   let current = member;
   const targetLevel = Math.max(1, Number(level) || 1);
@@ -1604,7 +1549,7 @@ function resolveApproversForRule(rule, directory, applicantMember) {
   if (approverRule.type === 'specified') {
     members = (approverRule.memberIds || []).map((memberId) => findMemberById(directory, memberId)).filter(Boolean);
   } else if (approverRule.type === 'role') {
-    members = getRoleGroupMembers(directory, approverRule.roleGroupId);
+    members = getLegacyRoleGroupMemberIds(approverRule.roleGroupId).map((memberId) => findMemberById(directory, memberId)).filter(Boolean);
   } else if (approverRule.type === 'direct_supervisor') {
     if (!applicantMember) {
       throw createHttpError('Cannot resolve direct supervisor because applicant is not bound to organization.', 400);
@@ -2583,13 +2528,13 @@ app.get('/api/organization', authenticate, requireRoles('developer'), async (_re
 
 app.put('/api/organization', authenticate, requireRoles('developer'), async (req, res, next) => {
   try {
-    const { departments, members, roleGroups } = req.body || {};
+    const { departments, members } = req.body || {};
 
-    if (!Array.isArray(departments) || !Array.isArray(members) || !Array.isArray(roleGroups)) {
+    if (!Array.isArray(departments) || !Array.isArray(members)) {
       return res.status(400).json({ error: 'missing organization directory' });
     }
 
-    const nextDirectory = normalizeOrganizationDirectoryInput({ departments, members, roleGroups });
+    const nextDirectory = normalizeOrganizationDirectoryInput({ departments, members });
     const directory = await updateOrganizationDirectory(() => ({
       ...nextDirectory,
       updatedAt: new Date().toISOString(),

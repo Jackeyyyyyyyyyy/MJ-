@@ -1,13 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Building2, GitBranch, Link2, Plus, Save, Trash2, UserRound, Users } from 'lucide-react';
 import { storage } from '../storage';
-import { OrganizationDepartment, OrganizationDirectory, OrganizationMember, OrganizationRoleGroup, SystemAccount } from '../types';
+import { OrganizationDepartment, OrganizationDirectory, OrganizationMember, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
 
 const emptyDirectory: OrganizationDirectory = {
   departments: [],
   members: [],
-  roleGroups: [],
 };
 
 type ChartMode = 'departments' | 'reporting';
@@ -547,15 +546,6 @@ export default function OrganizationAdmin() {
     }));
   };
 
-  const updateRoleGroup = (id: string, patch: Partial<OrganizationRoleGroup>) => {
-    setDirectory((current) => ({
-      ...current,
-      roleGroups: current.roleGroups.map((roleGroup) => (
-        roleGroup.id === id ? { ...roleGroup, ...patch } : roleGroup
-      )),
-    }));
-  };
-
   const addDepartment = (parentId?: string) => {
     const id = createId('dept');
     setDirectory((current) => ({
@@ -593,7 +583,6 @@ export default function OrganizationAdmin() {
           name: '新成员',
           departmentId,
           title: '成员',
-          roleGroupIds: [],
           enabled: true,
         },
       ],
@@ -610,49 +599,6 @@ export default function OrganizationAdmin() {
         ...department,
         leaderIds: (department.leaderIds || []).filter((leaderId) => leaderId !== member.id),
       })),
-      roleGroups: current.roleGroups.map((roleGroup) => ({
-        ...roleGroup,
-        memberIds: roleGroup.memberIds.filter((memberId) => memberId !== member.id),
-      })),
-    }));
-  };
-
-  const addRoleGroup = () => {
-    setDirectory((current) => ({
-      ...current,
-      roleGroups: [
-        ...current.roleGroups,
-        { id: createId('role'), name: '新审批岗位组', memberIds: [] },
-      ],
-    }));
-  };
-
-  const removeRoleGroup = (roleGroup: OrganizationRoleGroup) => {
-    setDirectory((current) => ({
-      ...current,
-      roleGroups: current.roleGroups.filter((item) => item.id !== roleGroup.id),
-      members: current.members.map((member) => ({
-        ...member,
-        roleGroupIds: member.roleGroupIds.filter((roleGroupId) => roleGroupId !== roleGroup.id),
-      })),
-    }));
-  };
-
-  const toggleRoleForMember = (member: OrganizationMember, roleGroupId: string) => {
-    const nextRoleIds = member.roleGroupIds.includes(roleGroupId)
-      ? member.roleGroupIds.filter((id) => id !== roleGroupId)
-      : [...member.roleGroupIds, roleGroupId];
-
-    updateMember(member.id, { roleGroupIds: nextRoleIds });
-    setDirectory((current) => ({
-      ...current,
-      roleGroups: current.roleGroups.map((roleGroup) => {
-        if (roleGroup.id !== roleGroupId) return roleGroup;
-        const nextMemberIds = nextRoleIds.includes(roleGroupId)
-          ? [...new Set([...roleGroup.memberIds, member.id])]
-          : roleGroup.memberIds.filter((id) => id !== member.id);
-        return { ...roleGroup, memberIds: nextMemberIds };
-      }),
     }));
   };
 
@@ -680,7 +626,7 @@ export default function OrganizationAdmin() {
         <div>
           <p className="text-[11px] font-black text-light-gray uppercase tracking-[0.2em]">System Admin</p>
           <h1 className="text-2xl font-black text-midnight-graphite tracking-tight">组织架构</h1>
-          <p className="mt-2 text-[14px] font-medium text-medium-gray">维护公司部门、成员通讯录、登录账号绑定和审批岗位组。</p>
+          <p className="mt-2 text-[14px] font-medium text-medium-gray">维护公司部门、成员通讯录和登录账号绑定。</p>
         </div>
         <button
           onClick={handleSave}
@@ -1015,19 +961,6 @@ export default function OrganizationAdmin() {
                       </label>
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      {directory.roleGroups.map((roleGroup) => (
-                        <label key={roleGroup.id} className="px-3 py-2 rounded-full bg-lightest-gray-background text-[12px] font-bold flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={member.roleGroupIds.includes(roleGroup.id)}
-                            onChange={() => toggleRoleForMember(member, roleGroup.id)}
-                            className="accent-black"
-                          />
-                          {roleGroup.name}
-                        </label>
-                      ))}
-                    </div>
                   </article>
                 ))
               )}
@@ -1036,39 +969,6 @@ export default function OrganizationAdmin() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-border-silver flex items-center justify-between">
-          <div>
-            <h2 className="text-[18px] font-black">审批岗位组</h2>
-            <p className="mt-1 text-[12px] font-bold text-medium-gray">审批流里的“指定角色组”会从这里取人，不等同于账号角色。</p>
-          </div>
-          <button onClick={addRoleGroup} className="h-9 px-4 rounded-full bg-lightest-gray-background text-[12px] font-bold flex items-center gap-2">
-            <Plus size={14} /> 新增岗位组
-          </button>
-        </div>
-        <div className="divide-y divide-border-silver">
-          {directory.roleGroups.map((roleGroup) => (
-            <div key={roleGroup.id} className="grid gap-4 p-5 lg:grid-cols-[1fr_2fr_120px]">
-              <input
-                className="input-field"
-                value={roleGroup.name}
-                onChange={(event) => updateRoleGroup(roleGroup.id, { name: event.target.value })}
-                placeholder="岗位组名称"
-              />
-              <p className="text-[13px] font-bold text-medium-gray self-center">
-                {directory.members.filter((member) => member.roleGroupIds.includes(roleGroup.id)).map((member) => member.name).join('、') || '暂无成员'}
-              </p>
-              <button
-                type="button"
-                onClick={() => removeRoleGroup(roleGroup)}
-                className="h-11 px-4 rounded-lg bg-[#ffebee] text-[#c62828] text-[12px] font-bold flex items-center justify-center gap-2"
-              >
-                <Trash2 size={14} /> 删除
-              </button>
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
