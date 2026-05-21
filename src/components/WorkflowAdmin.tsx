@@ -1080,7 +1080,7 @@ function WorkflowFlowDesigner({
                 <FlowNode
                   tone="cc"
                   kicker="抄送"
-                  title="抄送人"
+                  title="抄送对象"
                   subtitle={[
                     ccRule.memberIds.length ? `${ccRule.memberIds.length} 个成员` : '',
                     ccRule.departmentIds.length ? `${ccRule.departmentIds.length} 个部门` : '',

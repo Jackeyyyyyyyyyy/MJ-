@@ -1,11 +1,12 @@
 import React from 'react';
-import { ClipboardList, FileText, LayoutDashboard } from 'lucide-react';
+import { ClipboardList, FileText, LayoutDashboard, Send } from 'lucide-react';
 import ApplicantHome from './ApplicantHome';
 import ApproverHome from './ApproverHome';
 import BossDashboard from './BossDashboard';
+import CcHome from './CcHome';
 import { cn } from '../lib/utils';
 
-type WorkTab = 'requests' | 'approvals' | 'global';
+type WorkTab = 'requests' | 'approvals' | 'cc' | 'global';
 
 interface WorkHomeProps {
   showGlobal?: boolean;
@@ -23,6 +24,7 @@ export default function WorkHome({ showGlobal = false }: WorkHomeProps) {
   const tabs: Array<{ id: WorkTab; label: string; icon: React.ElementType }> = [
     { id: 'requests', label: '我的申请', icon: FileText },
     { id: 'approvals', label: '我的待审批', icon: ClipboardList },
+    { id: 'cc', label: '我的抄送', icon: Send },
     ...(showGlobal ? [{ id: 'global' as const, label: '全部记录', icon: LayoutDashboard }] : []),
   ];
 
@@ -47,6 +49,7 @@ export default function WorkHome({ showGlobal = false }: WorkHomeProps) {
 
       {activeTab === 'requests' && <ApplicantHome />}
       {activeTab === 'approvals' && <ApproverHome />}
+      {activeTab === 'cc' && <CcHome />}
       {activeTab === 'global' && showGlobal && <BossDashboard />}
     </div>
   );

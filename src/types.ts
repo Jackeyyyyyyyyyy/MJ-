@@ -117,6 +117,12 @@ export interface WorkflowApproverSnapshot {
   accountUsername?: string;
 }
 
+export interface WorkflowCcRecipientSnapshot {
+  memberId: string;
+  name: string;
+  accountUsername?: string;
+}
+
 export interface WorkflowInstanceStep {
   stepId: string;
   name: string;
@@ -359,8 +365,10 @@ export interface ApprovalRecord {
   status: ApprovalStatus;
   applicant: string;
   workflowInstance?: WorkflowInstance;
+  ccRecipients?: WorkflowCcRecipientSnapshot[];
   currentUserCanApprove?: boolean;
   currentUserHasApproved?: boolean;
+  currentUserIsCc?: boolean;
   aiSuggestion?: AiSuggestion;
   createdAt: string;
   updatedAt: string;

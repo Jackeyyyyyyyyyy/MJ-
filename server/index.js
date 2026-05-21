@@ -648,9 +648,9 @@ function createDefaultOrganizationDirectory() {
       { id: 'lin-jin-biao', name: '林金彪', departmentId: 'dept-admin', title: '行政人事', supervisorId: 'fan-lu', enabled: true },
       { id: 'huang-song-yuan', name: '黄松源', departmentId: 'dept-warehouse', title: '仓储负责人', supervisorId: 'fan-lu', enabled: true },
       { id: 'li-qi', name: '利祺', departmentId: 'dept-operations', title: '操作', supervisorId: 'fan-lu', enabled: true },
-      { id: 'qin-sheng', name: '秦笙', departmentId: 'dept-management', title: '抄送人', supervisorId: 'fan-lu', enabled: true },
-      { id: 'wang-tumiao', name: '王涂妙', departmentId: 'dept-finance', title: '抄送人', supervisorId: 'qian-lin', enabled: true },
-      { id: 'jiang-hua', name: '姜华', departmentId: 'dept-finance', title: '抄送人', supervisorId: 'qian-lin', enabled: true },
+      { id: 'qin-sheng', name: '秦笙', departmentId: 'dept-management', title: '总助', supervisorId: 'fan-lu', enabled: true },
+      { id: 'wang-tumiao', name: '王涂妙', departmentId: 'dept-finance', title: '财务专员', supervisorId: 'qian-lin', enabled: true },
+      { id: 'jiang-hua', name: '姜华', departmentId: 'dept-finance', title: '财务专员', supervisorId: 'qian-lin', enabled: true },
     ],
     updatedAt: '2026-05-08T00:00:00.000Z',
   };
@@ -1136,7 +1136,7 @@ function createDefaultWorkflowVersion(status = 'draft') {
       {
         id: 'node-copy',
         type: 'cc',
-        title: '抄送人',
+        title: '抄送对象',
         subtitle: '秦笙、王涂妙、姜华、钱琳',
         rule: { type: 'specified', memberIds: ['qin-sheng', 'wang-tumiao', 'jiang-hua', 'qian-lin'] },
       },
@@ -1235,6 +1235,14 @@ function hasParentCycle(items, id, parentKey) {
   return false;
 }
 
+function normalizeOrganizationMemberTitle(member) {
+  const title = normalizeWorkflowText(member?.title);
+  if (title !== '抄送人') return title;
+  if (member?.id === 'qin-sheng') return '总助';
+  if (member?.departmentId === 'dept-finance') return '财务专员';
+  return '成员';
+}
+
 function normalizeOrganizationDirectoryInput({ departments, members }) {
   const normalizedDepartments = departments.map((department) => ({
     id: normalizeWorkflowText(department?.id),
@@ -1249,7 +1257,7 @@ function normalizeOrganizationDirectoryInput({ departments, members }) {
     name: normalizeWorkflowText(member?.name),
     ...(normalizeWorkflowText(member?.accountUsername) ? { accountUsername: normalizeWorkflowText(member.accountUsername) } : {}),
     departmentId: normalizeWorkflowText(member?.departmentId),
-    title: normalizeWorkflowText(member?.title),
+    title: normalizeOrganizationMemberTitle(member),
     ...(normalizeWorkflowText(member?.supervisorId) ? { supervisorId: normalizeWorkflowText(member.supervisorId) } : {}),
     enabled: member?.enabled !== false,
   }));
@@ -1506,6 +1514,14 @@ function toApproverSnapshot(member) {
   };
 }
 
+function toCcRecipientSnapshot(member) {
+  return {
+    memberId: member.id,
+    name: member.name,
+    ...(member.accountUsername ? { accountUsername: member.accountUsername } : {}),
+  };
+}
+
 function uniqueMembers(members) {
   const seen = new Set();
   return members.filter((member) => {
@@ -1570,6 +1586,26 @@ function resolveApproversForRule(rule, directory, applicantMember) {
   return uniqueMembers(members).filter((member) => normalizeWorkflowText(member.accountUsername));
 }
 
+function resolveCcRecipientsForRule(ccRule, directory) {
+  const rule = ccRule || createDefaultCcRule();
+  const members = [];
+  const departmentIds = new Set(Array.isArray(rule.departmentIds) ? rule.departmentIds : []);
+
+  (Array.isArray(rule.memberIds) ? rule.memberIds : []).forEach((memberId) => {
+    members.push(findMemberById(directory, memberId));
+  });
+
+  if (departmentIds.size > 0) {
+    (directory.members || []).forEach((member) => {
+      if (member.enabled !== false && departmentIds.has(member.departmentId)) {
+        members.push(member);
+      }
+    });
+  }
+
+  return uniqueMembers(members).map(toCcRecipientSnapshot);
+}
+
 function createWorkflowStep(node, order, approvers, status = STEP_NOT_STARTED, comment) {
   return {
     stepId: node.id || `step-${order}`,
@@ -1590,6 +1626,7 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
   const version = getPublishedVersion(template);
   const directory = await readOrganizationDirectory();
   const applicantMember = findMemberByAccount(directory, applicantUsername);
+  const ccRecipients = resolveCcRecipientsForRule(version.ccRule, directory);
   const nodes = getLinearApproverNodes(version, { businessData, directory, applicantMember });
   if (nodes.length === 0) {
     throw createHttpError('The matched approval workflow has no linear approval steps.', 400);
@@ -1626,6 +1663,7 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
       currentStepIndex: firstPendingIndex,
       steps,
     },
+    ccRecipients,
     initialStatus: firstPendingIndex >= 0 ? STATUS_PENDING : STATUS_APPROVED,
   };
 }
@@ -1659,6 +1697,18 @@ function hasUserHandledWorkflowRecord(user, record) {
   ));
 }
 
+function isWorkflowClosed(record) {
+  return [STATUS_APPROVED, STATUS_REJECTED].includes(record?.status);
+}
+
+function hasUserCcAccess(user, record) {
+  if (!user || !isWorkflowClosed(record)) return false;
+
+  return (record.ccRecipients || []).some((recipient) => (
+    normalizeWorkflowText(recipient.accountUsername).toLowerCase() === normalizeWorkflowText(user.username).toLowerCase()
+  ));
+}
+
 function canUserSeeRecord(user, record) {
   const role = normalizeRole(user?.role);
   if (role === 'boss' || role === 'developer') return true;
@@ -1669,6 +1719,7 @@ function canUserSeeRecord(user, record) {
     || record.approver === user.name
     || canUserApproveRecord(user, record)
     || hasUserHandledWorkflowRecord(user, record)
+    || hasUserCcAccess(user, record)
   );
 }
 
@@ -1681,6 +1732,19 @@ function appendApprovalLog(record, action, user, details, step) {
       ...(step ? { stepId: step.stepId, stepName: step.name } : {}),
     },
   ];
+}
+
+function getCcRecipientNames(record) {
+  return (record.ccRecipients || [])
+    .map((recipient) => recipient.name)
+    .filter(Boolean)
+    .join('、');
+}
+
+function appendCcLog(record, user) {
+  const recipientNames = getCcRecipientNames(record);
+  if (!recipientNames) return;
+  appendApprovalLog(record, '抄送', user, `流程结束，已同步给：${recipientNames}`);
 }
 
 function getActingApprover(user, step) {
@@ -1717,6 +1781,7 @@ function advanceWorkflowRecord(record, user, status, reason) {
     record.rejectedAt = now;
     record.rejectReason = comment;
     appendApprovalLog(record, '\u62d2\u7edd', user, comment, currentStep);
+    appendCcLog(record, user);
     return record;
   }
 
@@ -1733,6 +1798,7 @@ function advanceWorkflowRecord(record, user, status, reason) {
     record.status = STATUS_APPROVED;
     record.approvedAt = now;
     appendApprovalLog(record, '\u5b8c\u6210', user, 'Workflow approved', currentStep);
+    appendCcLog(record, user);
   }
 
   return record;
@@ -1872,6 +1938,7 @@ function toPublicRecord(record, user) {
     ...record,
     currentUserCanApprove: canUserApproveRecord(user, record),
     currentUserHasApproved: hasUserHandledWorkflowRecord(user, record) || record.approver === user?.name,
+    currentUserIsCc: hasUserCcAccess(user, record),
     ...(record.aiSuggestion && user?.role !== 'developer'
       ? { aiSuggestion: (({ rawText, ...aiSuggestion }) => aiSuggestion)(record.aiSuggestion) }
       : {}),
@@ -2944,6 +3011,7 @@ app.post('/api/records', authenticate, requireRoles('employee', 'boss'), async (
       status: workflow.initialStatus,
       applicant,
       workflowInstance: workflow.instance,
+      ccRecipients: workflow.ccRecipients,
       aiSuggestion: createGeneratingAiSuggestion(),
       createdAt: now,
       updatedAt: now,
@@ -2951,6 +3019,9 @@ app.post('/api/records', authenticate, requireRoles('employee', 'boss'), async (
       logs: [
         createLog('\u53d1\u8d77\u7533\u8bf7', applicant, '\u63d0\u4ea4\u4e86\u5ba1\u6279\u5355'),
         createLog('\u5339\u914d\u5ba1\u6279\u6d41', 'system', `Matched workflow: ${workflow.instance.workflowName} v${workflow.instance.workflowVersion}`),
+        ...(workflow.initialStatus === STATUS_APPROVED && workflow.ccRecipients.length > 0
+          ? [createLog('抄送', 'system', `流程结束，已同步给：${workflow.ccRecipients.map((recipient) => recipient.name).join('、')}`)]
+          : []),
       ],
     });
 
