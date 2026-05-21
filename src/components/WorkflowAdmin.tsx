@@ -849,7 +849,50 @@ function getEmptyApproverActionLabel(action: ApprovalStep['emptyApproverAction']
 function FlowConnector({ compact = false }: { compact?: boolean }) {
   return (
     <div className={cn("flex flex-col items-center", compact ? "h-8" : "h-12")}>
-      <span className="h-full w-px bg-border-silver" />
+      <span className="h-full w-px bg-[#bfc7d5]" />
+    </div>
+  );
+}
+
+function FlowBranchRail({ count }: { count: number }) {
+  if (count <= 1) return null;
+
+  const edgeInset = `${50 / count}%`;
+
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-0 h-12">
+      <span className="absolute left-1/2 top-0 h-6 w-px -translate-x-1/2 bg-[#bfc7d5]" />
+      <span className="absolute top-6 h-px bg-[#bfc7d5]" style={{ left: edgeInset, right: edgeInset }} />
+    </div>
+  );
+}
+
+function FlowBranchLane({
+  showTopConnector,
+  children,
+}: {
+  showTopConnector: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="relative mx-auto flex w-[300px] min-w-[300px] flex-col items-center">
+      {showTopConnector && <span className="mt-6 h-6 w-px bg-[#bfc7d5]" />}
+      <div className="relative z-10 flex w-full flex-col items-center">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function FlowMergeRail({ count }: { count: number }) {
+  if (count <= 1) return <FlowConnector />;
+
+  const edgeInset = `${50 / count}%`;
+
+  return (
+    <div className="pointer-events-none relative h-16 w-full">
+      <span className="absolute top-6 h-px bg-[#c8d0dc]" style={{ left: edgeInset, right: edgeInset }} />
+      <span className="absolute left-1/2 top-6 h-10 w-px -translate-x-1/2 bg-[#bfc7d5]" />
     </div>
   );
 }
@@ -1200,17 +1243,14 @@ function WorkflowFlowDesigner({
               <FlowAddButton label="添加条件" onClick={onAddBranch} />
               <FlowConnector compact />
 
-              <div className="relative w-full">
-                {flowBranches.length > 1 && (
-                  <div className="absolute left-[12%] right-[12%] top-5 h-px bg-border-silver" />
-                )}
+              <div className="relative w-full pt-0">
+                <FlowBranchRail count={flowBranches.length} />
                 <div
-                  className="relative grid gap-5"
+                  className="relative grid items-stretch gap-5"
                   style={{ gridTemplateColumns: `repeat(${Math.max(flowBranches.length, 1)}, minmax(300px, 1fr))` }}
                 >
                   {flowBranches.map((branch, branchIndex) => (
-                    <div key={branch.id} className="mx-auto flex w-[300px] min-w-[300px] flex-col items-center">
-                      {flowBranches.length > 1 && <span className="h-5 w-px bg-border-silver" />}
+                    <FlowBranchLane key={branch.id} showTopConnector={flowBranches.length > 1}>
                       <FlowNode
                         tone={branch.isDefault ? 'condition' : 'condition'}
                         kicker={branch.isDefault ? '默认条件' : `条件 ${branchIndex + 1}`}
@@ -1251,12 +1291,12 @@ function WorkflowFlowDesigner({
                           </React.Fragment>
                         ))}
                       </div>
-                    </div>
+                    </FlowBranchLane>
                   ))}
                 </div>
               </div>
 
-              <FlowConnector />
+              <FlowMergeRail count={flowBranches.length} />
               <div className="w-[300px]">
                 <FlowNode
                   tone="cc"
