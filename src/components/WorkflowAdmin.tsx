@@ -5,7 +5,6 @@ import {
   ArrowUp,
   Building2,
   CheckCircle2,
-  Copy,
   GitBranch,
   Plus,
   Save,
@@ -146,6 +145,10 @@ function getBusinessScopeByNames(moduleName?: string, approvalTypeName?: string)
   return businessScopeOptions.find((option) => (
     option.moduleName === moduleName && option.approvalTypeName === approvalTypeName
   )) || null;
+}
+
+function getGeneratedWorkflowName(scope: Pick<BusinessScopeOption, 'approvalTypeName'>) {
+  return `${scope.approvalTypeName}审批流`;
 }
 
 function getWorkflowScopeLabel(moduleName?: string, approvalTypeName?: string) {
@@ -547,6 +550,10 @@ function normalizeDraftForEditor(draft: WorkflowVersion): WorkflowVersion {
 
 function prepareDraftForSave(draft: WorkflowVersion): WorkflowVersion {
   const nextDraft = normalizeDraftForEditor(draft);
+  const scope = getBusinessScopeByNames(nextDraft.basic.moduleName, nextDraft.basic.approvalTypeName);
+  const generatedName = getGeneratedWorkflowName(scope || {
+    approvalTypeName: nextDraft.basic.approvalTypeName || '通用审批',
+  });
   const defaultWorkflowBranch = nextDraft.branches?.find((branch) => branch.isDefault);
   const legacyNodes: WorkflowNode[] = [
     { id: 'node-start', type: 'start', title: '发起人', subtitle: 'Applicant' },
@@ -555,6 +562,10 @@ function prepareDraftForSave(draft: WorkflowVersion): WorkflowVersion {
 
   return {
     ...nextDraft,
+    basic: {
+      ...nextDraft.basic,
+      name: generatedName,
+    },
     nodes: legacyNodes,
   };
 }
@@ -586,10 +597,6 @@ function addValidationError(
 function validateDraft(draft: WorkflowVersion | null): ValidationState {
   const state = createValidationState();
   if (!draft) return state;
-
-  if (!draft.basic.name.trim()) {
-    addValidationError(state, 'basic', '审批流名称不能为空');
-  }
 
   const submitPermission = draft.submitPermission || defaultSubmitPermission();
   const hasSubmitScope = submitPermission.type === 'all_members'
@@ -1891,7 +1898,6 @@ export default function WorkflowAdmin() {
   const [selectedId, setSelectedId] = useState('');
   const [draft, setDraft] = useState<WorkflowVersion | null>(null);
   const [createBusinessKey, setCreateBusinessKey] = useState(businessScopeOptions[0]?.key || '');
-  const [createName, setCreateName] = useState('');
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -1918,18 +1924,6 @@ export default function WorkflowAdmin() {
     () => getConditionFieldOptions(draft),
     [draft?.basic.moduleName, draft?.basic.approvalTypeName],
   );
-  const summaryLines = useMemo(() => {
-    if (!draft) return [];
-    const permission = draft.submitPermission || defaultSubmitPermission();
-    return (draft.branches || []).map((branch) => {
-      const conditionText = branch.isDefault
-        ? '未命中任何条件时'
-        : `当 ${branch.conditions.map(formatCondition).join('，')} 时`;
-      const steps = branch.approvalSteps.map((step) => formatStepRule(step, directory)).join('，再由 ');
-      return `适用于：${formatSubmitPermission(permission, directory)}；${conditionText}，${steps ? `先由 ${steps} 审批` : '尚未配置审批节点'}。`;
-    });
-  }, [directory, draft]);
-
   const loadData = async () => {
     setIsLoading(true);
     try {
@@ -2168,7 +2162,7 @@ export default function WorkflowAdmin() {
 
   const handleCreate = async () => {
     const scope = getBusinessScopeByKey(createBusinessKey);
-    const name = createName.trim() || `${scope.approvalTypeName}审批流`;
+    const name = getGeneratedWorkflowName(scope);
     setIsSaving(true);
     setMessage('');
     try {
@@ -2189,7 +2183,6 @@ export default function WorkflowAdmin() {
       setTemplates((current) => [normalized, ...current]);
       setSelectedId(normalized.id);
       setDraft(JSON.parse(JSON.stringify(normalized.draft)));
-      setCreateName('');
       setValidation(validateDraft(normalized.draft));
       setDesignerSelection(submitDesignerSelection);
       setMessage('审批流已创建');
@@ -2344,7 +2337,7 @@ export default function WorkflowAdmin() {
       )}
 
       <section className="rounded-xl border border-border-silver bg-white shadow-sm p-3">
-        <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
           <select
             className="input-field text-[13px]"
             value={createBusinessKey}
@@ -2354,12 +2347,6 @@ export default function WorkflowAdmin() {
               <option key={option.key} value={option.key}>{option.label}</option>
             ))}
           </select>
-          <input
-            className="input-field text-[13px]"
-            value={createName}
-            onChange={(event) => setCreateName(event.target.value)}
-            placeholder="新审批流名称"
-          />
           <button
             type="button"
             onClick={handleCreate}
@@ -2381,7 +2368,7 @@ export default function WorkflowAdmin() {
             </span>
           </div>
 
-          <div className="grid flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+          <div className="grid flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
             <select
               className="input-field text-[14px]"
               value={selectedId}
@@ -2395,7 +2382,7 @@ export default function WorkflowAdmin() {
                 <option value="">暂无审批流模板</option>
               ) : templates.map((template) => (
                 <option key={template.id} value={template.id}>
-                  {template.name} · {getTemplateScopeLabel(template)} · v{template.currentVersion || 1}
+                  {getTemplateScopeLabel(template)} · {statusLabels[template.status]} · v{template.currentVersion || 1}
                 </option>
               ))}
             </select>
@@ -2404,14 +2391,6 @@ export default function WorkflowAdmin() {
                 {statusLabels[selectedTemplate.status]}
               </span>
             )}
-            <button
-              type="button"
-              onClick={() => selectedTemplate && void handleDuplicate(selectedTemplate.id)}
-              disabled={!selectedTemplate || isSaving}
-              className="h-11 px-4 rounded-full bg-white border border-border-silver text-[12px] font-black text-medium-gray flex items-center justify-center gap-1.5 disabled:opacity-40"
-            >
-              <Copy size={13} /> 复制当前
-            </button>
           </div>
         </div>
       </section>
@@ -2433,7 +2412,9 @@ export default function WorkflowAdmin() {
                       {getWorkflowScopeLabel(draft.basic.moduleName, draft.basic.approvalTypeName)}
                     </span>
                   </div>
-                  <h2 className="mt-3 text-[24px] font-black text-midnight-graphite tracking-tight truncate">{draft.basic.name}</h2>
+                  <h2 className="mt-3 text-[24px] font-black text-midnight-graphite tracking-tight truncate">
+                    {getWorkflowScopeLabel(draft.basic.moduleName, draft.basic.approvalTypeName)}
+                  </h2>
                   <p className="mt-1 text-[12px] font-bold text-medium-gray">
                     当前版本 v{draft.version || 1}
                   </p>
@@ -2503,56 +2484,6 @@ export default function WorkflowAdmin() {
               )}
             </section>
 
-            <SectionCard
-              title="基础信息"
-              icon={<Workflow size={18} strokeWidth={2.5} />}
-              errors={validation.sections.basic}
-            >
-              <div className="grid gap-4 lg:grid-cols-[1fr_1.2fr_180px]">
-                <label className="space-y-2">
-                  <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">审批流名称</span>
-                  <input
-                    className={cn("input-field text-[15px]", validation.sections.basic?.length && "ring-2 ring-[#c62828]")}
-                    value={draft.basic.name}
-                    onChange={(event) => patchBasic({ name: event.target.value })}
-                    placeholder="审批流名称"
-                  />
-                </label>
-                <label className="space-y-2">
-                  <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">适用业务类型</span>
-                  <select
-                    className="input-field text-[15px]"
-                    value={getBusinessScopeKey(draft.basic.moduleName, draft.basic.approvalTypeName)}
-                    onChange={(event) => {
-                      const scope = getBusinessScopeByKey(event.target.value);
-                      patchDraft((current) => ({
-                        ...current,
-                        businessType: scope.businessType,
-                        basic: {
-                          ...current.basic,
-                          moduleName: scope.moduleName,
-                          approvalTypeName: scope.approvalTypeName,
-                        },
-                        branches: (current.branches || []).map((branch) => (
-                          branch.isDefault ? branch : {
-                            ...branch,
-                            conditions: branch.conditions.map((condition) => rebaseConditionToScope(condition, scope)),
-                          }
-                        )),
-                      }));
-                    }}
-                  >
-                    {businessScopeOptions.map((option) => (
-                      <option key={option.key} value={option.key}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="space-y-2">
-                  <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">版本状态</span>
-                  <input className="input-field text-[15px]" value={`v${draft.version || 1} / ${statusLabels[selectedTemplate.status]}`} readOnly />
-                </label>
-              </div>
-            </SectionCard>
 
             <WorkflowFlowDesigner
               draft={draft}
@@ -2945,18 +2876,6 @@ export default function WorkflowAdmin() {
             </SectionCard>
             </div>
 
-            <SectionCard
-              title="流程摘要"
-              icon={<CheckCircle2 size={18} strokeWidth={2.5} />}
-            >
-              <div className="space-y-3">
-                {summaryLines.map((line, index) => (
-                  <div key={`${line}-${index}`} className="rounded-2xl bg-canvas-white px-4 py-3 text-[13px] font-bold text-midnight-graphite leading-6">
-                    {line}
-                  </div>
-                ))}
-              </div>
-            </SectionCard>
         </div>
       )}
     </div>
