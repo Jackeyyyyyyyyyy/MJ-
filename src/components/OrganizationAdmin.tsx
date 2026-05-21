@@ -33,10 +33,12 @@ interface DepartmentChartNode {
 }
 
 interface ReportingChartNode {
-  member: OrganizationMember;
-  departmentName: string;
+  department: OrganizationDepartment;
+  members: OrganizationMember[];
   children: ReportingChartNode[];
-  hasMissingSupervisor: boolean;
+  memberCount: number;
+  boundCount: number;
+  hasMissingParent: boolean;
   hasCycle: boolean;
 }
 
@@ -91,49 +93,53 @@ function buildDepartmentChart(directory: OrganizationDirectory) {
 }
 
 function buildReportingChart(directory: OrganizationDirectory) {
-  const departmentNames = new Map(directory.departments.map((department) => [department.id, department.name]));
-  const membersById = new Map(directory.members.map((member) => [member.id, member]));
-  const childrenBySupervisor = new Map<string, OrganizationMember[]>();
+  const departmentsById = new Map(directory.departments.map((department) => [department.id, department]));
+  const childrenByParent = new Map<string, OrganizationDepartment[]>();
 
-  directory.members.forEach((member) => {
-    if (!member.supervisorId || !membersById.has(member.supervisorId)) return;
-    const children = childrenBySupervisor.get(member.supervisorId) || [];
-    children.push(member);
-    childrenBySupervisor.set(member.supervisorId, children);
+  directory.departments.forEach((department) => {
+    if (!department.parentId || !departmentsById.has(department.parentId)) return;
+    const children = childrenByParent.get(department.parentId) || [];
+    children.push(department);
+    childrenByParent.set(department.parentId, children);
   });
 
   const visited = new Set<string>();
-  const createNode = (member: OrganizationMember, ancestors = new Set<string>()): ReportingChartNode => {
-    const hasCycle = ancestors.has(member.id);
-    visited.add(member.id);
+  const createNode = (department: OrganizationDepartment, ancestors = new Set<string>()): ReportingChartNode => {
+    const hasCycle = ancestors.has(department.id);
+    visited.add(department.id);
+    const members = directory.members.filter((member) => member.departmentId === department.id && member.enabled !== false);
 
     if (hasCycle) {
       return {
-        member,
-        departmentName: departmentNames.get(member.departmentId) || '未配置部门',
+        department,
+        members,
         children: [],
-        hasMissingSupervisor: false,
+        memberCount: members.length,
+        boundCount: members.filter((member) => Boolean(member.accountUsername)).length,
+        hasMissingParent: false,
         hasCycle: true,
       };
     }
 
     const nextAncestors = new Set(ancestors);
-    nextAncestors.add(member.id);
+    nextAncestors.add(department.id);
 
     return {
-      member,
-      departmentName: departmentNames.get(member.departmentId) || '未配置部门',
-      children: (childrenBySupervisor.get(member.id) || []).map((child) => createNode(child, nextAncestors)),
-      hasMissingSupervisor: Boolean(member.supervisorId && !membersById.has(member.supervisorId)),
+      department,
+      members,
+      children: (childrenByParent.get(department.id) || []).map((child) => createNode(child, nextAncestors)),
+      memberCount: members.length,
+      boundCount: members.filter((member) => Boolean(member.accountUsername)).length,
+      hasMissingParent: Boolean(department.parentId && !departmentsById.has(department.parentId)),
       hasCycle: false,
     };
   };
 
-  const rootMembers = directory.members.filter((member) => !member.supervisorId || !membersById.has(member.supervisorId));
-  const roots = (rootMembers.length > 0 ? rootMembers : directory.members.slice(0, 1)).map((member) => createNode(member));
-  const detachedRoots = directory.members
-    .filter((member) => !visited.has(member.id))
-    .map((member) => createNode(member));
+  const rootDepartments = directory.departments.filter((department) => !department.parentId || !departmentsById.has(department.parentId));
+  const roots = (rootDepartments.length > 0 ? rootDepartments : directory.departments.slice(0, 1)).map((department) => createNode(department));
+  const detachedRoots = directory.departments
+    .filter((department) => !visited.has(department.id))
+    .map((department) => createNode(department));
 
   return [...roots, ...detachedRoots];
 }
@@ -143,7 +149,7 @@ function countDepartmentNodes(nodes: DepartmentChartNode[]): number {
 }
 
 function countReportingNodes(nodes: ReportingChartNode[]): number {
-  return nodes.reduce((total, node) => total + 1 + countReportingNodes(node.children), 0);
+  return nodes.reduce((total, node) => total + node.memberCount + countReportingNodes(node.children), 0);
 }
 
 function hasDepartmentCycle(directory: OrganizationDirectory, departmentId: string) {
@@ -240,6 +246,14 @@ function buildHealthMessages(directory: OrganizationDirectory) {
 
     if (member.supervisorId && !memberIds.has(member.supervisorId)) {
       messages.push({ tone: 'danger', text: `${member.name} 的直属上级不存在` });
+    }
+
+    if (member.supervisorId && memberIds.has(member.supervisorId)) {
+      const supervisor = directory.members.find((item) => item.id === member.supervisorId);
+      const allowedDepartmentIds = getAncestorDepartmentIds(directory, member.departmentId);
+      if (supervisor && !allowedDepartmentIds.has(supervisor.departmentId)) {
+        messages.push({ tone: 'danger', text: `${member.name} 的直属上级不符合部门层级` });
+      }
     }
 
     if (hasMemberCycle(directory, member.id)) {
@@ -403,36 +417,47 @@ function DepartmentChartCard({ node }: { node: DepartmentChartNode; key?: React.
   );
 }
 
-function ReportingChartCard({ node }: { node: ReportingChartNode; key?: React.Key }) {
-  const member = node.member;
-  const isBound = Boolean(member.accountUsername);
-  const warning = node.hasMissingSupervisor || node.hasCycle;
+function ReportingChartCard({ node, directory }: { node: ReportingChartNode; directory: OrganizationDirectory; key?: React.Key }) {
+  const warning = node.hasMissingParent || node.hasCycle;
 
   return (
     <div className="flex flex-col items-center shrink-0">
       <div className={cn(
-        "w-[220px] min-h-[120px] rounded-2xl border-2 bg-white p-4 shadow-sm flex flex-col gap-2",
-        warning ? "border-[#c62828]" : (isBound ? "border-border-silver" : "border-[#f0c36a]")
+        "w-[260px] min-h-[132px] rounded-2xl border-2 bg-white p-4 shadow-sm flex flex-col gap-3",
+        warning ? "border-[#c62828]" : "border-border-silver"
       )}>
         <div className="flex items-start justify-between gap-3">
-          <div className="w-9 h-9 rounded-xl bg-lightest-gray-background flex items-center justify-center text-[13px] font-black text-midnight-graphite shrink-0">
-            {member.name.charAt(0) || '?'}
+          <div className="w-9 h-9 rounded-xl bg-black text-white flex items-center justify-center shrink-0">
+            <Building2 size={16} strokeWidth={2.5} />
           </div>
-          <span className={cn(
-            "px-2 py-1 rounded-full text-[10px] font-black whitespace-nowrap",
-            isBound ? "bg-[#e8f5e9] text-[#2e7d32]" : "bg-[#fff7e6] text-[#9a5b00]"
-          )}>
-            {isBound ? '已绑定账号' : '未绑定账号'}
+          <span className="px-2 py-1 rounded-full bg-lightest-gray-background text-[10px] font-black text-medium-gray whitespace-nowrap">
+            {node.memberCount} 人
           </span>
         </div>
-        <div>
-          <p className="text-[15px] font-black text-midnight-graphite truncate">{member.name}</p>
-          <p className="text-[12px] font-bold text-medium-gray truncate">{member.title || '未配置职位'}</p>
-          <p className="text-[11px] font-bold text-light-gray truncate">{node.departmentName}</p>
+        <div className="space-y-2">
+          <p className="text-[16px] font-black text-midnight-graphite truncate">{node.department.name}</p>
+          <p className="text-[11px] font-bold text-light-gray truncate">
+            已绑定 {node.boundCount} / 未绑定 {Math.max(0, node.memberCount - node.boundCount)}
+          </p>
+          <div className="space-y-1">
+            {node.members.length === 0 ? (
+              <p className="text-[11px] font-bold text-light-gray">暂无成员</p>
+            ) : (
+              node.members.map((member) => (
+                <div key={member.id} className="rounded-xl bg-lightest-gray-background px-3 py-2">
+                  <p className="text-[12px] font-black text-midnight-graphite truncate">{member.name}</p>
+                  <p className="text-[11px] font-bold text-medium-gray truncate">{member.title || '未配置职位'}</p>
+                  <p className="text-[10px] font-bold text-light-gray truncate">
+                    上级：{member.supervisorId ? getMemberName(directory, member.supervisorId) : '无'}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
         </div>
         {warning && (
           <p className="text-[11px] font-bold text-[#c62828]">
-            {node.hasCycle ? '上级关系存在循环' : '上级不存在'}
+            {node.hasCycle ? '部门层级存在循环' : '上级部门不存在'}
           </p>
         )}
       </div>
@@ -445,9 +470,9 @@ function ReportingChartCard({ node }: { node: ReportingChartNode; key?: React.Ke
               <div className="absolute left-[110px] right-[110px] top-0 h-[3px] bg-slate-300 rounded-full" />
             )}
             {node.children.map((child) => (
-              <div key={`${member.id}-${child.member.id}`} className="relative flex flex-col items-center shrink-0">
+              <div key={`${node.department.id}-${child.department.id}`} className="relative flex flex-col items-center shrink-0">
                 <div className="absolute left-1/2 top-[-32px] h-8 w-[3px] -translate-x-1/2 bg-slate-300 rounded-full" />
-                <ReportingChartCard node={child} />
+                <ReportingChartCard node={child} directory={directory} />
               </div>
             ))}
           </div>
@@ -755,7 +780,7 @@ export default function OrganizationAdmin() {
           ) : (
             <ChartViewport>
               {reportingChartRoots.map((node) => (
-                <ReportingChartCard key={node.member.id} node={node} />
+                <ReportingChartCard key={node.department.id} node={node} directory={directory} />
               ))}
             </ChartViewport>
           )
