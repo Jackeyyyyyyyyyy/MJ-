@@ -874,14 +874,38 @@ function getEmptyApproverActionLabel(action: ApprovalStep['emptyApproverAction']
 }
 
 function FlowConnector({ compact = false }: { compact?: boolean }) {
+  const arrowId = React.useId();
+
   return (
     <div className={cn("flex flex-col items-center", compact ? "h-8" : "h-12")}>
-      <span className="h-full w-px bg-[#d6dde8]" />
+      <svg
+        aria-hidden="true"
+        className="h-full w-4 overflow-visible"
+        preserveAspectRatio="none"
+        viewBox="0 0 16 48"
+      >
+        <defs>
+          <marker id={arrowId} markerHeight="7" markerWidth="7" orient="auto" refX="3.5" refY="3.5">
+            <path d="M 0 0 L 7 3.5 L 0 7 Z" fill="#c8d1df" />
+          </marker>
+        </defs>
+        <path
+          d="M 8 0 V 42"
+          fill="none"
+          markerEnd={`url(#${arrowId})`}
+          stroke="#c8d1df"
+          strokeLinecap="round"
+          strokeWidth="1.5"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
     </div>
   );
 }
 
 function FlowBranchRail({ count }: { count: number }) {
+  const arrowId = React.useId();
+
   if (count <= 1) return null;
 
   const firstCenter = 50 / count;
@@ -895,17 +919,22 @@ function FlowBranchRail({ count }: { count: number }) {
       preserveAspectRatio="none"
       viewBox="0 0 100 64"
     >
+      <defs>
+        <marker id={arrowId} markerHeight="7" markerWidth="7" orient="auto" refX="3.5" refY="3.5">
+          <path d="M 0 0 L 7 3.5 L 0 7 Z" fill="#c8d1df" />
+        </marker>
+      </defs>
       <g
         fill="none"
-        stroke="#d6dde8"
+        stroke="#c8d1df"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="1.4"
+        strokeWidth="1.5"
         vectorEffect="non-scaling-stroke"
       >
         <path d={`M 50 0 V 28 M ${firstCenter} 28 H ${lastCenter}`} />
         {branchCenters.map((center) => (
-          <path key={center} d={`M ${center} 28 V 64`} />
+          <path key={center} d={`M ${center} 28 V 58`} markerEnd={`url(#${arrowId})`} />
         ))}
       </g>
     </svg>
@@ -919,26 +948,69 @@ const FlowBranchLane: React.FC<{
   showBottomConnector,
   children,
 }) => {
+  const arrowId = React.useId();
+
   return (
     <div className="relative mx-auto flex h-full w-[300px] min-w-[300px] flex-col items-center">
       <div className="relative z-10 flex w-full flex-col items-center">
         {children}
       </div>
-      {showBottomConnector && <span className="min-h-10 flex-1 w-px bg-[#d6dde8]" />}
+      {showBottomConnector && (
+        <svg
+          aria-hidden="true"
+          className="min-h-10 flex-1 w-4 overflow-visible"
+          preserveAspectRatio="none"
+          viewBox="0 0 16 48"
+        >
+          <defs>
+            <marker id={arrowId} markerHeight="7" markerWidth="7" orient="auto" refX="3.5" refY="3.5">
+              <path d="M 0 0 L 7 3.5 L 0 7 Z" fill="#c8d1df" />
+            </marker>
+          </defs>
+          <path
+            d="M 8 0 V 42"
+            fill="none"
+            markerEnd={`url(#${arrowId})`}
+            stroke="#c8d1df"
+            strokeLinecap="round"
+            strokeWidth="1.5"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+      )}
     </div>
   );
 };
 
 function FlowMergeRail({ count }: { count: number }) {
+  const arrowId = React.useId();
+
   if (count <= 1) return <FlowConnector />;
 
-  const edgeInset = `${50 / count}%`;
-
   return (
-    <div className="pointer-events-none relative h-16 w-full">
-      <span className="absolute top-0 h-px bg-[#d6dde8]" style={{ left: edgeInset, right: edgeInset }} />
-      <span className="absolute left-1/2 top-0 h-16 w-px -translate-x-1/2 bg-[#d6dde8]" />
-    </div>
+    <svg
+      aria-hidden="true"
+      className="pointer-events-none h-16 w-full overflow-visible"
+      preserveAspectRatio="none"
+      viewBox="0 0 100 64"
+    >
+      <defs>
+        <marker id={arrowId} markerHeight="7" markerWidth="7" orient="auto" refX="3.5" refY="3.5">
+          <path d="M 0 0 L 7 3.5 L 0 7 Z" fill="#c8d1df" />
+        </marker>
+      </defs>
+      <g
+        fill="none"
+        stroke="#c8d1df"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+        vectorEffect="non-scaling-stroke"
+      >
+        <path d={`M ${50 / count} 0 H ${100 - 50 / count}`} />
+        <path d="M 50 0 V 58" markerEnd={`url(#${arrowId})`} />
+      </g>
+    </svg>
   );
 }
 
