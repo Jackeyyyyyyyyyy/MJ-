@@ -1,9 +1,10 @@
 import React from 'react';
-import { AlertCircle, CheckCircle2, RefreshCw, Route } from 'lucide-react';
+import { AlertCircle, CheckCircle2, FileText, RefreshCw, Route } from 'lucide-react';
 import { storage } from '../storage';
-import { AiBranchDecisionLog } from '../types';
+import { AiBranchDecisionLog, ApprovalRecord } from '../types';
 import { cn } from '../lib/utils';
 import { formatLocalDateTime } from '../lib/time';
+import ApprovalDetailModal from './ApprovalDetailModal';
 
 function formatTime(value?: string) {
   return formatLocalDateTime(value, 'short') || '-';
@@ -18,14 +19,24 @@ function getStatusMeta(status: AiBranchDecisionLog['status']) {
 
 export default function AiBranchLogs() {
   const [logs, setLogs] = React.useState<AiBranchDecisionLog[]>([]);
+  const [records, setRecords] = React.useState<ApprovalRecord[]>([]);
+  const [selectedRecord, setSelectedRecord] = React.useState<ApprovalRecord | null>(null);
+  const [expandedReasonIds, setExpandedReasonIds] = React.useState<Set<string>>(() => new Set());
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState('');
+
+  const recordMap = React.useMemo(() => new Map(records.map((record) => [record.id, record])), [records]);
 
   const loadLogs = React.useCallback(async () => {
     setIsLoading(true);
     setError('');
     try {
-      setLogs(await storage.getAiBranchDecisionLogs());
+      const [nextLogs, nextRecords] = await Promise.all([
+        storage.getAiBranchDecisionLogs(),
+        storage.getRecords(),
+      ]);
+      setLogs(nextLogs);
+      setRecords(nextRecords);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : '日志加载失败');
     } finally {
@@ -36,6 +47,41 @@ export default function AiBranchLogs() {
   React.useEffect(() => {
     void loadLogs();
   }, [loadLogs]);
+
+  const openRecord = React.useCallback(async (recordId?: string) => {
+    if (!recordId) return;
+
+    const currentRecord = recordMap.get(recordId);
+    if (currentRecord) {
+      setSelectedRecord(currentRecord);
+      return;
+    }
+
+    try {
+      const nextRecords = await storage.getRecords();
+      setRecords(nextRecords);
+      const nextRecord = nextRecords.find((record) => record.id === recordId);
+      if (nextRecord) {
+        setSelectedRecord(nextRecord);
+        return;
+      }
+      setError('未找到对应卷宗，或当前账号无权限查看。');
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : '卷宗加载失败');
+    }
+  }, [recordMap]);
+
+  const toggleReason = React.useCallback((logId: string) => {
+    setExpandedReasonIds((current) => {
+      const next = new Set(current);
+      if (next.has(logId)) {
+        next.delete(logId);
+      } else {
+        next.add(logId);
+      }
+      return next;
+    });
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -75,11 +121,27 @@ export default function AiBranchLogs() {
             {logs.map((log) => {
               const status = getStatusMeta(log.status);
               const StatusIcon = status.icon;
+              const record = log.recordId ? recordMap.get(log.recordId) : null;
+              const reasonText = log.reason || log.error || log.rawText || '-';
+              const isReasonExpanded = expandedReasonIds.has(log.id);
+              const canToggleReason = reasonText.length > 54;
               return (
                 <div key={log.id} className="grid grid-cols-[140px_1.2fr_1fr_110px_1.5fr] gap-4 px-5 py-4 text-[13px]">
                   <span className="font-bold text-medium-gray">{formatTime(log.createdAt)}</span>
                   <span className="min-w-0">
-                    <span className="block truncate font-black text-midnight-graphite">{log.recordId || '-'}</span>
+                    <button
+                      type="button"
+                      onClick={() => void openRecord(log.recordId)}
+                      disabled={!log.recordId}
+                      className={cn(
+                        'group inline-flex max-w-full items-center gap-2 text-left font-black text-midnight-graphite transition-colors',
+                        log.recordId ? 'hover:text-interactive-blue disabled:cursor-not-allowed' : 'cursor-default',
+                      )}
+                      title={record ? '查看对应卷宗' : (log.recordId ? '查看对应卷宗' : undefined)}
+                    >
+                      <FileText size={14} strokeWidth={2.4} className="shrink-0 text-light-silver transition-colors group-hover:text-interactive-blue" />
+                      <span className="truncate">{log.recordId || '-'}</span>
+                    </button>
                     <span className="mt-1 block truncate text-[11px] font-bold text-medium-gray">
                       {[log.moduleName, log.approvalTypeName].filter(Boolean).join(' / ') || log.workflowName || '-'}
                     </span>
@@ -100,7 +162,18 @@ export default function AiBranchLogs() {
                     </span>
                   </span>
                   <span className="min-w-0 text-medium-gray">
-                    <span className="line-clamp-2">{log.reason || log.error || log.rawText || '-'}</span>
+                    <span className={cn('block whitespace-pre-wrap break-words leading-6', !isReasonExpanded && 'line-clamp-3')}>
+                      {reasonText}
+                    </span>
+                    {canToggleReason && (
+                      <button
+                        type="button"
+                        onClick={() => toggleReason(log.id)}
+                        className="mt-1 text-[11px] font-black text-midnight-graphite underline decoration-border-silver underline-offset-4 transition-colors hover:text-interactive-blue"
+                      >
+                        {isReasonExpanded ? '收起' : '查看完整'}
+                      </button>
+                    )}
                   </span>
                 </div>
               );
@@ -108,6 +181,13 @@ export default function AiBranchLogs() {
           </div>
         )}
       </div>
+
+      <ApprovalDetailModal
+        record={selectedRecord}
+        onClose={() => setSelectedRecord(null)}
+        showAiSuggestion
+        showAiRawResponse
+      />
     </div>
   );
 }
