@@ -713,8 +713,8 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                             step.state === 'pending' ? "text-medium-gray" : "text-black"
                           )}>{step.title}</h4>
                           <p className="text-[12px] font-bold text-medium-gray">{step.desc}</p>
-                          {'approvers' in step && step.approvers && (
-                            <ApprovalParallelApprovers approvers={step.approvers} title={step.title} />
+                          {Array.isArray((step as { approvers?: unknown }).approvers) && (
+                            <ApprovalParallelApprovers approvers={(step as unknown as { approvers: NonNullable<ApprovalRecord['workflowInstance']>['steps'][number]['approvers'] }).approvers} title={step.title} />
                           )}
                           {step.time && (
                             <p className="text-[10px] font-black text-light-gray font-mono mt-2 uppercase tracking-widest">

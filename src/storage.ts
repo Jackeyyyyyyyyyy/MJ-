@@ -13,6 +13,7 @@ import {
   WorkflowTemplate,
   WorkflowTemplateInput,
   WorkflowVersion,
+  Schema,
 } from './types';
 import { auth } from './auth';
 
@@ -74,6 +75,17 @@ async function download(url: string): Promise<Blob> {
 }
 
 export const storage = {
+  getApprovalSchema(): Promise<Schema> {
+    return request<Schema>('/approval-schema');
+  },
+
+  createBusinessForm(input: { moduleName: string; approvalTypeName: string; businessFields: string[] }): Promise<Schema> {
+    return request<Schema>('/business-forms', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
   getRecords(): Promise<ApprovalRecord[]> {
     return request<ApprovalRecord[]>('/records');
   },

@@ -5,23 +5,25 @@ import WorkHome, { WorkTab } from './components/WorkHome';
 import AccountPermissionAdmin from './components/AccountPermissionAdmin';
 import OrganizationAdmin from './components/OrganizationAdmin';
 import WorkflowAdmin from './components/WorkflowAdmin';
+import BusinessFormAdmin from './components/BusinessFormAdmin';
 import AiBranchLogs from './components/AiBranchLogs';
 import ApprovalTable from './components/ApprovalTable';
 import ApprovalDetailModal from './components/ApprovalDetailModal';
 import ApprovalProgressModal from './components/ApprovalProgressModal';
 import AiPromptEditor from './components/AiPromptEditor';
 import AiAssistantHome from './components/AiAssistantHome';
+import AiAssistantNewHome from './components/AiAssistantNewHome';
 import { auth } from './auth';
 import { storage } from './storage';
 import { AdminView, Role, ApprovalRecord, ApprovalStatus } from './types';
-import { approvalSchema } from './approvalSchema';
+import { approvalSchema, replaceApprovalSchema } from './approvalSchema';
 
 type AppRoute =
   | { kind: 'work'; tab: WorkTab }
   | { kind: 'admin'; view: AdminView }
   | { kind: 'module'; moduleName: string; typeName: string };
 
-const adminRouteViews: AdminView[] = ['accounts', 'ai-assistant', 'organization', 'workflows', 'ai-branch-logs'];
+const adminRouteViews: AdminView[] = ['accounts', 'ai-assistant', 'ai-assistant-new', 'organization', 'workflows', 'business-forms', 'ai-branch-logs'];
 const workRouteTabs: WorkTab[] = ['requests', 'approvals', 'cc', 'global'];
 
 function decodeRoutePart(part?: string) {
@@ -93,6 +95,7 @@ export default function App() {
   const [selectedType, setSelectedType] = useState<string>(initialRoute.kind === 'module' ? initialRoute.typeName : '');
   const [activeAdminView, setActiveAdminView] = useState<AdminView | null>(initialRoute.kind === 'admin' ? initialRoute.view : null);
   const [activeWorkTab, setActiveWorkTab] = useState<WorkTab>(initialRoute.kind === 'work' ? initialRoute.tab : 'requests');
+  const [schemaVersion, setSchemaVersion] = useState(0);
   
   // Dynamic list state
   const [dynamicRecords, setDynamicRecords] = useState<ApprovalRecord[]>([]);
@@ -144,6 +147,11 @@ export default function App() {
     pushRoute({ kind: 'admin', view: 'ai-assistant' });
   };
 
+  const handleOpenAiAssistantNew = () => {
+    applyRoute({ kind: 'admin', view: 'ai-assistant-new' });
+    pushRoute({ kind: 'admin', view: 'ai-assistant-new' });
+  };
+
   const handleOpenOrganizationAdmin = () => {
     applyRoute({ kind: 'admin', view: 'organization' });
     pushRoute({ kind: 'admin', view: 'organization' });
@@ -152,6 +160,11 @@ export default function App() {
   const handleOpenWorkflowAdmin = () => {
     applyRoute({ kind: 'admin', view: 'workflows' });
     pushRoute({ kind: 'admin', view: 'workflows' });
+  };
+
+  const handleOpenBusinessFormAdmin = () => {
+    applyRoute({ kind: 'admin', view: 'business-forms' });
+    pushRoute({ kind: 'admin', view: 'business-forms' });
   };
 
   const handleOpenAiBranchLogs = () => {
@@ -219,6 +232,30 @@ export default function App() {
   }, [selectedModule, selectedType, activeUsername]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let isMounted = true;
+
+    const handleSchemaUpdated = () => setSchemaVersion((version) => version + 1);
+    window.addEventListener('approval-schema-updated', handleSchemaUpdated);
+
+    storage.getApprovalSchema()
+      .then((nextSchema) => {
+        if (!isMounted) return;
+        replaceApprovalSchema(nextSchema);
+        applyRoute(parseRoute());
+      })
+      .catch(() => {
+        // Keep the bundled schema when the API is unavailable.
+      });
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('approval-schema-updated', handleSchemaUpdated);
+    };
+  }, [isAuthenticated]);
+
+  useEffect(() => {
     const handlePopState = () => applyRoute(parseRoute());
     window.addEventListener('popstate', handlePopState);
     const route = parseRoute();
@@ -233,7 +270,7 @@ export default function App() {
 
     const isSuperAdminPerspective = auth.getSessionUser()?.role === 'developer' && perspective === 'developer';
     const canUseAiAssistant = perspective === 'boss' || isSuperAdminPerspective;
-    const canAccessAdminView = activeAdminView === 'ai-assistant' ? canUseAiAssistant : isSuperAdminPerspective;
+    const canAccessAdminView = activeAdminView === 'ai-assistant' || activeAdminView === 'ai-assistant-new' ? canUseAiAssistant : isSuperAdminPerspective;
 
     if (!canAccessAdminView) {
       const fallbackRoute: AppRoute = { kind: 'work', tab: perspective === 'boss' || perspective === 'developer' ? 'global' : 'requests' };
@@ -258,12 +295,20 @@ export default function App() {
       return <AiAssistantHome />;
     }
 
+    if (activeAdminView === 'ai-assistant-new' && canUseAiAssistant) {
+      return <AiAssistantNewHome />;
+    }
+
     if (activeAdminView === 'organization' && isSuperAdminPerspective) {
       return <OrganizationAdmin />;
     }
 
     if (activeAdminView === 'workflows' && isSuperAdminPerspective) {
       return <WorkflowAdmin />;
+    }
+
+    if (activeAdminView === 'business-forms' && isSuperAdminPerspective) {
+      return <BusinessFormAdmin />;
     }
 
     if (activeAdminView === 'ai-branch-logs' && isSuperAdminPerspective) {
@@ -331,14 +376,16 @@ export default function App() {
       activeAdminView={activeAdminView}
       onOpenAccountAdmin={handleOpenAccountAdmin}
       onOpenAiAssistant={handleOpenAiAssistant}
+      onOpenAiAssistantNew={handleOpenAiAssistantNew}
       onOpenOrganizationAdmin={handleOpenOrganizationAdmin}
       onOpenWorkflowAdmin={handleOpenWorkflowAdmin}
+      onOpenBusinessFormAdmin={handleOpenBusinessFormAdmin}
       onOpenAiBranchLogs={handleOpenAiBranchLogs}
       selectedModule={selectedModule}
       selectedType={selectedType}
       onSelectType={handleSelectType}
     >
-      {renderContent()}
+      <React.Fragment key={schemaVersion}>{renderContent()}</React.Fragment>
     </AppLayout>
   );
 }

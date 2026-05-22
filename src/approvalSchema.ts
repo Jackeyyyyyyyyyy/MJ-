@@ -568,3 +568,12 @@ export const approvalSchema: Schema = {
     }
   ]
 };
+
+export function replaceApprovalSchema(nextSchema: Schema) {
+  approvalSchema.systemName = nextSchema.systemName;
+  approvalSchema.commonFields = nextSchema.commonFields;
+  approvalSchema.modules = nextSchema.modules;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('approval-schema-updated'));
+  }
+}

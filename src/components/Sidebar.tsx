@@ -8,10 +8,12 @@ import {
   ClipboardList,
   ChevronRight, 
   ChevronDown, 
+  FilePlus2,
   Layers, 
   Home,
   LayoutDashboard,
   ShieldCheck,
+  Sparkles,
   Building2,
   Workflow,
   X
@@ -26,8 +28,10 @@ interface SidebarProps {
   activeAdminView?: AdminView | null;
   onOpenAccountAdmin?: () => void;
   onOpenAiAssistant?: () => void;
+  onOpenAiAssistantNew?: () => void;
   onOpenOrganizationAdmin?: () => void;
   onOpenWorkflowAdmin?: () => void;
+  onOpenBusinessFormAdmin?: () => void;
   onOpenAiBranchLogs?: () => void;
   isOpen?: boolean;
   isDesktopCollapsed?: boolean;
@@ -43,8 +47,10 @@ export default function Sidebar({
   activeAdminView,
   onOpenAccountAdmin,
   onOpenAiAssistant,
+  onOpenAiAssistantNew,
   onOpenOrganizationAdmin,
   onOpenWorkflowAdmin,
+  onOpenBusinessFormAdmin,
   onOpenAiBranchLogs,
   isOpen,
   isDesktopCollapsed,
@@ -80,6 +86,12 @@ export default function Sidebar({
             icon: Bot,
             onClick: onOpenAiAssistant,
           },
+          {
+            id: 'ai-assistant-new',
+            label: 'AI 助手新',
+            icon: Sparkles,
+            onClick: onOpenAiAssistantNew,
+          },
         ]
       : []),
     ...(isSuperAdminPerspective
@@ -107,6 +119,12 @@ export default function Sidebar({
             label: 'AI 条件分化日志',
             icon: ClipboardList,
             onClick: onOpenAiBranchLogs,
+          },
+          {
+            id: 'business-forms',
+            label: '业务表单',
+            icon: FilePlus2,
+            onClick: onOpenBusinessFormAdmin,
           },
         ]
       : []),

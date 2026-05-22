@@ -154,7 +154,7 @@ function getBusinessScopeKey(moduleName?: string, approvalTypeName?: string) {
 }
 
 function getBusinessScopeByNames(moduleName?: string, approvalTypeName?: string) {
-  return businessScopeOptions.find((option) => (
+  return getBusinessScopeOptions().find((option) => (
     option.moduleName === moduleName && option.approvalTypeName === approvalTypeName
   )) || null;
 }
@@ -168,7 +168,7 @@ function normalizeTemplateForEditor(template: WorkflowTemplate): WorkflowTemplat
 }
 
 function sortWorkflowTemplatesByBusinessScope(templates: WorkflowTemplate[]) {
-  const orderByScope = new Map(businessScopeOptions.map((option, index) => [option.key, index]));
+  const orderByScope = new Map(getBusinessScopeOptions().map((option, index) => [option.key, index]));
 
   return [...templates].sort((left, right) => {
     const leftKey = getBusinessScopeKey(left.moduleName || left.draft?.basic?.moduleName, left.approvalTypeName || left.draft?.basic?.approvalTypeName);
@@ -730,8 +730,8 @@ function normalizeBranches(draft: WorkflowVersion): WorkflowBranch[] {
 function normalizeDraftForEditor(draft: WorkflowVersion): WorkflowVersion {
   const scope = getBusinessScopeByNames(draft.basic?.moduleName, draft.basic?.approvalTypeName);
   const fallbackScope = scope
-    || businessScopeOptions.find((option) => option.businessType === draft.businessType)
-    || businessScopeOptions[0];
+    || getBusinessScopeOptions().find((option) => option.businessType === draft.businessType)
+    || getBusinessScopeOptions()[0];
   const businessType = fallbackScope?.businessType || getBusinessTypeMeta(draft.businessType).value;
   const isFlexibleFlow = draft.flowMode === 'flexible';
   const normalizedBranches = normalizeBranches(draft).map((branch) => (
@@ -3318,7 +3318,7 @@ export default function WorkflowAdmin() {
         template.approvalTypeName || template.draft?.basic?.approvalTypeName,
       )),
     );
-    const missingScopes = businessScopeOptions.filter((scope) => !templatesByScope.has(scope.key));
+    const missingScopes = getBusinessScopeOptions().filter((scope) => !templatesByScope.has(scope.key));
     if (missingScopes.length === 0) return sourceTemplates;
 
     const createdTemplates: WorkflowTemplate[] = [];

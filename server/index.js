@@ -23,6 +23,7 @@ const aiAssistantConfigFile = path.join(dataDir, 'ai-assistant-config.json');
 const aiBranchLogsFile = path.join(dataDir, 'ai-branch-decision-logs.json');
 const workflowTemplatesFile = path.join(dataDir, 'workflow-templates.json');
 const organizationFile = path.join(dataDir, 'organization-directory.json');
+const approvalSchemaFile = path.join(dataDir, 'approval-schema.json');
 const STATUS_DRAFT = '\u8349\u7a3f';
 const STATUS_PENDING = '\u5f85\u5ba1\u6279';
 const STATUS_APPROVED = '\u5df2\u6279\u51c6';
@@ -424,6 +425,97 @@ async function writeJsonObjectFile(file, data) {
   const tempFile = `${file}.tmp`;
   await fs.writeFile(tempFile, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
   await fs.rename(tempFile, file);
+}
+
+async function readBundledApprovalSchema() {
+  const schemaSourceFile = path.resolve(__dirname, '..', 'src', 'approvalSchema.ts');
+  const content = await fs.readFile(schemaSourceFile, 'utf8');
+  const match = content.match(/export\s+const\s+approvalSchema\s*:\s*Schema\s*=\s*([\s\S]*?);\s*(?:export\s+function|$)/);
+
+  if (!match?.[1]) {
+    throw new Error('bundled approval schema not found');
+  }
+
+  return JSON.parse(match[1]);
+}
+
+function normalizeStringList(items) {
+  return [...new Set(
+    (Array.isArray(items) ? items : [])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean),
+  )];
+}
+
+function normalizeApprovalSchema(schema) {
+  const modules = Array.isArray(schema?.modules) ? schema.modules : [];
+
+  return {
+    systemName: String(schema?.systemName || 'MJ审批').trim() || 'MJ审批',
+    commonFields: normalizeStringList(schema?.commonFields),
+    modules: modules
+      .map((module) => ({
+        name: String(module?.name || '').trim(),
+        approvalTypes: (Array.isArray(module?.approvalTypes) ? module.approvalTypes : [])
+          .map((approvalType) => ({
+            name: String(approvalType?.name || '').trim(),
+            businessFields: normalizeStringList(approvalType?.businessFields),
+            commonFields: normalizeStringList(approvalType?.commonFields),
+            ...(String(approvalType?.notes || '').trim() ? { notes: String(approvalType.notes).trim() } : {}),
+          }))
+          .filter((approvalType) => approvalType.name && approvalType.businessFields.length > 0),
+      }))
+      .filter((module) => module.name && module.approvalTypes.length > 0),
+  };
+}
+
+async function readApprovalSchema() {
+  const fallbackSchema = await readBundledApprovalSchema();
+  const schema = await readJsonObjectFile(approvalSchemaFile, fallbackSchema);
+  return normalizeApprovalSchema(schema);
+}
+
+async function writeApprovalSchema(schema) {
+  const normalized = normalizeApprovalSchema(schema);
+  if (normalized.modules.length === 0) {
+    throw createHttpError('approval schema must contain at least one business form', 400);
+  }
+
+  await writeJsonObjectFile(approvalSchemaFile, normalized);
+  return normalized;
+}
+
+async function createBusinessForm({ moduleName, approvalTypeName, businessFields }) {
+  const schema = await readApprovalSchema();
+  const nextModuleName = String(moduleName || '').trim();
+  const nextApprovalTypeName = String(approvalTypeName || '').trim();
+  const nextBusinessFields = normalizeStringList(businessFields);
+
+  if (!nextModuleName || !nextApprovalTypeName || nextBusinessFields.length === 0) {
+    throw createHttpError('missing business form fields', 400);
+  }
+
+  const commonFields = schema.commonFields.length > 0
+    ? schema.commonFields
+    : ['状态', '发起人', '发起时间', '操作'];
+  let module = schema.modules.find((item) => item.name === nextModuleName);
+
+  if (!module) {
+    module = { name: nextModuleName, approvalTypes: [] };
+    schema.modules.push(module);
+  }
+
+  if (module.approvalTypes.some((item) => item.name === nextApprovalTypeName)) {
+    throw createHttpError('business form already exists', 409);
+  }
+
+  module.approvalTypes.push({
+    name: nextApprovalTypeName,
+    businessFields: nextBusinessFields,
+    commonFields,
+  });
+
+  return writeApprovalSchema(schema);
 }
 
 async function listBusinessRecordFiles() {
@@ -2988,6 +3080,28 @@ app.put('/api/organization', authenticate, requireRoles('developer'), async (req
     }));
 
     res.json(directory);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/approval-schema', authenticate, async (_req, res, next) => {
+  try {
+    res.json(await readApprovalSchema());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/business-forms', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const schema = await createBusinessForm({
+      moduleName: req.body?.moduleName,
+      approvalTypeName: req.body?.approvalTypeName,
+      businessFields: req.body?.businessFields,
+    });
+
+    res.status(201).json(schema);
   } catch (error) {
     next(error);
   }
