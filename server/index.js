@@ -20,6 +20,7 @@ const uploadsIndexFile = path.join(dataDir, 'approval-uploads.json');
 const businessRecordsDir = path.join(dataDir, 'business-records');
 const aiPromptConfigsFile = path.join(dataDir, 'ai-prompt-configs.json');
 const aiAssistantConfigFile = path.join(dataDir, 'ai-assistant-config.json');
+const aiBranchLogsFile = path.join(dataDir, 'ai-branch-decision-logs.json');
 const workflowTemplatesFile = path.join(dataDir, 'workflow-templates.json');
 const organizationFile = path.join(dataDir, 'organization-directory.json');
 const STATUS_DRAFT = '\u8349\u7a3f';
@@ -512,6 +513,7 @@ let accountWriteQueue = Promise.resolve();
 let promptWriteQueue = Promise.resolve();
 let assistantConfigWriteQueue = Promise.resolve();
 let workflowWriteQueue = Promise.resolve();
+let aiBranchLogWriteQueue = Promise.resolve();
 let organizationWriteQueue = Promise.resolve();
 
 function createBusinessRecord(record) {
@@ -625,6 +627,25 @@ function updateAiAssistantConfig(mutator) {
   });
 
   assistantConfigWriteQueue = operation.catch(() => undefined);
+  return operation;
+}
+
+async function readAiBranchDecisionLogs() {
+  return readJsonArrayFile(aiBranchLogsFile, 'AI branch decision logs', { optional: true });
+}
+
+async function appendAiBranchDecisionLog(log) {
+  const operation = aiBranchLogWriteQueue.catch(() => undefined).then(async () => {
+    const logs = await readAiBranchDecisionLogs();
+    logs.unshift({
+      id: normalizeWorkflowText(log.id) || createWorkflowId('ai-branch-log'),
+      createdAt: new Date().toISOString(),
+      ...log,
+    });
+    await writeJsonArrayFile(aiBranchLogsFile, logs.slice(0, 500));
+  });
+
+  aiBranchLogWriteQueue = operation.catch(() => undefined);
   return operation;
 }
 
@@ -1514,7 +1535,169 @@ function selectWorkflowBranch(version, context) {
   return matchedBranch || defaultBranch || branches[0];
 }
 
-function getLinearApproverNodes(version, context = {}) {
+function getAiBranchCandidates(branches) {
+  return (Array.isArray(branches) ? branches : []).map((branch, index) => ({
+    id: normalizeWorkflowText(branch?.id) || `branch-${index + 1}`,
+    title: normalizeWorkflowText(branch?.title || branch?.name) || (branch?.isDefault ? 'Else' : `Branch ${index + 1}`),
+    description: normalizeWorkflowText(branch?.aiDescription || branch?.expression) || normalizeWorkflowText(branch?.title || branch?.name),
+    isDefault: Boolean(branch?.isDefault),
+  }));
+}
+
+function parseAiBranchDecision(rawText, branches) {
+  const text = String(rawText || '').trim();
+  let parsed = null;
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch {
+      parsed = null;
+    }
+  }
+
+  const selected = normalizeWorkflowText(parsed?.branch_id || parsed?.selected_branch || parsed?.branch || parsed?.id);
+  const byId = branches.find((branch) => normalizeWorkflowText(branch.id) === selected);
+  const byTitle = branches.find((branch) => normalizeWorkflowText(branch.title) === selected);
+  const byRawText = branches.find((branch) => text.includes(branch.id) || text.includes(branch.title));
+
+  return {
+    branch: byId || byTitle || byRawText || null,
+    reason: normalizeWorkflowText(parsed?.reason) || text.slice(0, 300),
+    confidence: Number.isFinite(Number(parsed?.confidence)) ? Math.max(0, Math.min(1, Number(parsed.confidence))) : undefined,
+    rawText: text,
+  };
+}
+
+async function selectAiWorkflowBranch(node, context = {}) {
+  const branches = Array.isArray(node?.conditions) ? node.conditions : [];
+  const candidates = getAiBranchCandidates(branches);
+  const fallback = candidates.find((branch) => branch.isDefault) || candidates[1] || candidates[0] || null;
+  const prompt = normalizeWorkflowText(node?.aiBranchRule?.prompt);
+  const startedAt = Date.now();
+  const baseLog = {
+    id: createWorkflowId('ai-branch-log'),
+    recordId: context.recordId,
+    moduleName: context.moduleName,
+    approvalTypeName: context.approvalTypeName,
+    workflowId: context.workflowId,
+    workflowName: context.workflowName,
+    workflowVersion: context.workflowVersion,
+    nodeId: node?.id,
+    nodeTitle: node?.title,
+    prompt,
+    applicant: context.applicantName,
+    branches: candidates,
+    fallbackBranchId: fallback?.id,
+    fallbackBranchTitle: fallback?.title,
+    businessData: sanitizeForAi(context.businessData || {}),
+  };
+
+  if (!prompt || candidates.length < 2) {
+    await appendAiBranchDecisionLog({
+      ...baseLog,
+      status: 'skipped',
+      selectedBranchId: fallback?.id,
+      selectedBranchTitle: fallback?.title,
+      reason: 'AI branch prompt or branch candidates are incomplete.',
+      durationMs: Date.now() - startedAt,
+    });
+    return branches.find((branch) => branch?.id === fallback?.id) || branches[0] || null;
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const apiBase = process.env.OPENAI_API_BASE?.trim();
+  const model = process.env.OPENAI_MODEL?.trim();
+  if (!apiKey || !apiBase || !model) {
+    await appendAiBranchDecisionLog({
+      ...baseLog,
+      status: 'fallback',
+      selectedBranchId: fallback?.id,
+      selectedBranchTitle: fallback?.title,
+      reason: 'AI environment variables are missing.',
+      durationMs: Date.now() - startedAt,
+    });
+    return branches.find((branch) => branch?.id === fallback?.id) || branches[0] || null;
+  }
+
+  const controller = new AbortController();
+  const configuredTimeout = Number(process.env.AI_REQUEST_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 12000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${apiBase.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              'You are a workflow branch classifier. Choose exactly one branch from the provided candidates.',
+              'Return compact JSON only: {"branch_id":"...","reason":"...","confidence":0.0}.',
+              'Never invent a branch id.',
+            ].join('\n'),
+          },
+          {
+            role: 'user',
+            content: limitText(JSON.stringify({
+              instruction: prompt,
+              applicant: context.applicantName,
+              moduleName: context.moduleName,
+              approvalTypeName: context.approvalTypeName,
+              branches: candidates,
+              form: sanitizeForAi(context.businessData || {}),
+            }, null, 2), 7000),
+          },
+        ],
+        temperature: 0,
+        max_tokens: 180,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) throw new Error(`AI branch request failed: ${response.status}`);
+
+    const body = await response.json();
+    const message = body?.choices?.[0]?.message?.content;
+    const decision = parseAiBranchDecision(message, candidates);
+    const selected = decision.branch || fallback;
+    const status = decision.branch ? 'success' : 'fallback';
+
+    await appendAiBranchDecisionLog({
+      ...baseLog,
+      status,
+      selectedBranchId: selected?.id,
+      selectedBranchTitle: selected?.title,
+      reason: decision.reason || (status === 'fallback' ? 'AI returned an invalid branch; fallback branch was used.' : ''),
+      confidence: decision.confidence,
+      rawText: decision.rawText,
+      durationMs: Date.now() - startedAt,
+    });
+
+    return branches.find((branch) => branch?.id === selected?.id) || branches[0] || null;
+  } catch (error) {
+    await appendAiBranchDecisionLog({
+      ...baseLog,
+      status: 'failed',
+      selectedBranchId: fallback?.id,
+      selectedBranchTitle: fallback?.title,
+      reason: 'AI branch decision failed; fallback branch was used.',
+      error: error instanceof Error ? error.message.slice(0, 180) : 'AI branch request failed',
+      durationMs: Date.now() - startedAt,
+    });
+    return branches.find((branch) => branch?.id === fallback?.id) || branches[0] || null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function getLinearApproverNodes(version, context = {}) {
   const flowNodes = Array.isArray(version?.nodes)
     ? version.nodes.filter((node) => node?.type !== 'start')
     : [];
@@ -1532,27 +1715,33 @@ function getLinearApproverNodes(version, context = {}) {
     : [];
 }
 
-function getLinearApproverNodesFromFlow(nodes, context = {}) {
+async function getLinearApproverNodesFromFlow(nodes, context = {}) {
   const result = [];
 
-  (Array.isArray(nodes) ? nodes : []).forEach((node) => {
+  for (const node of (Array.isArray(nodes) ? nodes : [])) {
     if (node?.type === 'approver') {
       result.push(node);
-      return;
+      continue;
     }
 
-    if (node?.type !== 'condition') return;
+    if (node?.type !== 'condition') continue;
 
     const branches = Array.isArray(node.conditions) ? node.conditions : [];
-    const defaultBranch = branches.find((branch) => branch?.isDefault) || null;
-    const matchedBranch = branches.find((branch) => {
-      if (branch?.isDefault) return false;
-      const structuredConditions = Array.isArray(branch.workflowConditions) ? branch.workflowConditions : [];
-      if (structuredConditions.length === 0) return false;
-      return structuredConditions.every((condition) => workflowConditionMatches(condition, context));
-    });
-    result.push(...getLinearApproverNodesFromFlow((matchedBranch || defaultBranch || branches[0])?.nodes || [], context));
-  });
+    let selectedBranch = null;
+    if (node.conditionMode === 'ai') {
+      selectedBranch = await selectAiWorkflowBranch(node, context);
+    } else {
+      const defaultBranch = branches.find((branch) => branch?.isDefault) || null;
+      const matchedBranch = branches.find((branch) => {
+        if (branch?.isDefault) return false;
+        const structuredConditions = Array.isArray(branch.workflowConditions) ? branch.workflowConditions : [];
+        if (structuredConditions.length === 0) return false;
+        return structuredConditions.every((condition) => workflowConditionMatches(condition, context));
+      });
+      selectedBranch = matchedBranch || defaultBranch || branches[0];
+    }
+    result.push(...await getLinearApproverNodesFromFlow(selectedBranch?.nodes || [], context));
+  }
 
   return result;
 }
@@ -1703,7 +1892,7 @@ function createSupervisorChainWorkflowSteps(node, startOrder, directory, applica
   ));
 }
 
-async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, applicantUsername, businessData }) {
+async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, applicantUsername, businessData, recordId }) {
   const template = await findPublishedWorkflow(moduleName, approvalTypeName);
   if (!template) {
     throw createHttpError('No published approval workflow matches this business type. Please ask an administrator to configure and publish one.', 400);
@@ -1713,7 +1902,18 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
   const directory = await readOrganizationDirectory();
   const applicantMember = findMemberByAccount(directory, applicantUsername);
   const ccRecipients = resolveCcRecipientsForRule(version.ccRule, directory);
-  const nodes = getLinearApproverNodes(version, { businessData, directory, applicantMember });
+  const nodes = await getLinearApproverNodes(version, {
+    businessData,
+    directory,
+    applicantMember,
+    applicantName: applicantMember?.name || applicantUsername,
+    moduleName,
+    approvalTypeName,
+    recordId,
+    workflowId: template.id,
+    workflowName: version.basic?.name || template.name,
+    workflowVersion: Number(version.version || template.currentVersion || 1),
+  });
 
   const steps = [];
 
@@ -2855,6 +3055,15 @@ app.patch('/api/ai-assistant/prompt', authenticate, requireRoles('developer'), a
   }
 });
 
+app.get('/api/ai-branch-logs', authenticate, requireRoles('developer'), async (_req, res, next) => {
+  try {
+    const logs = await readAiBranchDecisionLogs();
+    res.json(logs.slice(0, 500));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/accounts', authenticate, requireRoles('developer'), async (_req, res, next) => {
   try {
     const accounts = await readAccounts();
@@ -3119,14 +3328,16 @@ app.post('/api/records', authenticate, requireRoles('employee', 'boss'), async (
     }
 
     const now = new Date().toISOString();
+    const recordId = `APP-${Date.now()}`;
     const workflow = await createWorkflowInstanceForRecord({
       moduleName,
       approvalTypeName,
       applicantUsername: req.user.username,
       businessData,
+      recordId,
     });
     const record = await createBusinessRecord({
-      id: `APP-${Date.now()}`,
+      id: recordId,
       moduleName,
       approvalTypeName,
       businessData,

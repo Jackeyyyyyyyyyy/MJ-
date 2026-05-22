@@ -5,6 +5,7 @@ import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Bot,
+  ClipboardList,
   ChevronRight, 
   ChevronDown, 
   Layers, 
@@ -27,6 +28,7 @@ interface SidebarProps {
   onOpenAiAssistant?: () => void;
   onOpenOrganizationAdmin?: () => void;
   onOpenWorkflowAdmin?: () => void;
+  onOpenAiBranchLogs?: () => void;
   isOpen?: boolean;
   isDesktopCollapsed?: boolean;
   onClose?: () => void;
@@ -43,6 +45,7 @@ export default function Sidebar({
   onOpenAiAssistant,
   onOpenOrganizationAdmin,
   onOpenWorkflowAdmin,
+  onOpenAiBranchLogs,
   isOpen,
   isDesktopCollapsed,
   onClose,
@@ -98,6 +101,12 @@ export default function Sidebar({
             label: '审批流配置',
             icon: Workflow,
             onClick: onOpenWorkflowAdmin,
+          },
+          {
+            id: 'ai-branch-logs',
+            label: 'AI 条件分化日志',
+            icon: ClipboardList,
+            onClick: onOpenAiBranchLogs,
           },
         ]
       : []),

@@ -5,6 +5,7 @@ import WorkHome, { WorkTab } from './components/WorkHome';
 import AccountPermissionAdmin from './components/AccountPermissionAdmin';
 import OrganizationAdmin from './components/OrganizationAdmin';
 import WorkflowAdmin from './components/WorkflowAdmin';
+import AiBranchLogs from './components/AiBranchLogs';
 import ApprovalTable from './components/ApprovalTable';
 import ApprovalDetailModal from './components/ApprovalDetailModal';
 import ApprovalProgressModal from './components/ApprovalProgressModal';
@@ -20,7 +21,7 @@ type AppRoute =
   | { kind: 'admin'; view: AdminView }
   | { kind: 'module'; moduleName: string; typeName: string };
 
-const adminRouteViews: AdminView[] = ['accounts', 'ai-assistant', 'organization', 'workflows'];
+const adminRouteViews: AdminView[] = ['accounts', 'ai-assistant', 'organization', 'workflows', 'ai-branch-logs'];
 const workRouteTabs: WorkTab[] = ['requests', 'approvals', 'cc', 'global'];
 
 function decodeRoutePart(part?: string) {
@@ -153,6 +154,11 @@ export default function App() {
     pushRoute({ kind: 'admin', view: 'workflows' });
   };
 
+  const handleOpenAiBranchLogs = () => {
+    applyRoute({ kind: 'admin', view: 'ai-branch-logs' });
+    pushRoute({ kind: 'admin', view: 'ai-branch-logs' });
+  };
+
   const handleWorkTabChange = (tab: WorkTab) => {
     setSelectedModule('');
     setSelectedType('');
@@ -260,6 +266,10 @@ export default function App() {
       return <WorkflowAdmin />;
     }
 
+    if (activeAdminView === 'ai-branch-logs' && isSuperAdminPerspective) {
+      return <AiBranchLogs />;
+    }
+
     if (selectedType) {
       const canReview = perspective === 'employee' || perspective === 'boss';
       const canSeeAiSuggestion = canReview || isSuperAdminPerspective;
@@ -323,6 +333,7 @@ export default function App() {
       onOpenAiAssistant={handleOpenAiAssistant}
       onOpenOrganizationAdmin={handleOpenOrganizationAdmin}
       onOpenWorkflowAdmin={handleOpenWorkflowAdmin}
+      onOpenAiBranchLogs={handleOpenAiBranchLogs}
       selectedModule={selectedModule}
       selectedType={selectedType}
       onSelectType={handleSelectType}

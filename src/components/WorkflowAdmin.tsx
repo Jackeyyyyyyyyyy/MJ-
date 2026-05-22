@@ -3,6 +3,7 @@ import {
   AlertCircle,
   ArrowDown,
   ArrowUp,
+  Bot,
   Building2,
   CheckCircle2,
   Crosshair,
@@ -574,7 +575,11 @@ function branchesFromFlowNodes(nodes: WorkflowNode[]): WorkflowBranch[] {
       id: condition.id || createId('branch'),
       name: condition.title || (condition.isDefault ? 'Default Branch' : `Branch ${index + 1}`),
       isDefault: Boolean(condition.isDefault),
-      conditions: condition.isDefault ? [] : (condition.workflowConditions || [parseLegacyCondition(condition.expression)]),
+      conditions: condition.isDefault
+        ? []
+        : conditionNode.conditionMode === 'ai'
+          ? [defaultCondition('category')]
+          : (condition.workflowConditions || [parseLegacyCondition(condition.expression)]),
       approvalSteps: collectFlowSteps(condition.nodes || []),
     }));
   }
@@ -1350,16 +1355,19 @@ function FlowAddButton({
 function FlowInsertButton({
   onApproval,
   onCondition,
+  onAiCondition,
   onCc,
 }: {
   onApproval: () => void;
   onCondition: () => void;
+  onAiCondition: () => void;
   onCc: () => void;
 }) {
   const [isOpen, setIsOpen] = React.useState(false);
   const items = [
     { label: '添加审批', icon: <CheckCircle2 size={14} strokeWidth={2.4} />, onClick: onApproval },
     { label: '添加条件分化', icon: <GitBranch size={14} strokeWidth={2.4} />, onClick: onCondition },
+    { label: '添加 AI 条件分化', icon: <Bot size={14} strokeWidth={2.4} />, onClick: onAiCondition },
     { label: '添加抄送', icon: <Send size={14} strokeWidth={2.4} />, onClick: onCc },
   ];
 
@@ -1474,7 +1482,7 @@ function FlowNode({
   );
 }
 
-type FlowInsertKind = 'approval' | 'condition' | 'cc';
+type FlowInsertKind = 'approval' | 'condition' | 'ai-condition' | 'cc';
 
 function FlowGap({
   onInsert,
@@ -1489,6 +1497,7 @@ function FlowGap({
       <FlowInsertButton
         onApproval={() => onInsert('approval')}
         onCondition={() => onInsert('condition')}
+        onAiCondition={() => onInsert('ai-condition')}
         onCc={() => onInsert('cc')}
       />
       <FlowConnector compact={compact} />
@@ -1503,12 +1512,14 @@ function getFlowNodeTone(node: WorkflowNode): 'approval' | 'condition' | 'cc' {
 }
 
 function getFlowNodeIcon(node: WorkflowNode) {
+  if (node.type === 'condition' && node.conditionMode === 'ai') return <Bot size={17} strokeWidth={2.5} />;
   if (node.type === 'condition') return <GitBranch size={17} strokeWidth={2.5} />;
   if (node.type === 'cc') return <Send size={17} strokeWidth={2.5} />;
   return <CheckCircle2 size={17} strokeWidth={2.5} />;
 }
 
 function getFlowNodeSubtitle(node: WorkflowNode, directory: OrganizationDirectory) {
+  if (node.type === 'condition' && node.conditionMode === 'ai') return `AI 二选一 · ${node.conditions?.length || 0} 个分支`;
   if (node.type === 'condition') return `${node.conditions?.length || 0} 个分支`;
   if (node.type === 'cc') {
     const rule = node.ccRule || defaultCcRule();
@@ -1551,8 +1562,8 @@ function FlowSequence({
           <div className="w-[300px]">
             <FlowNode
               tone={getFlowNodeTone(node)}
-              kicker={node.type === 'condition' ? '条件分化' : node.type === 'cc' ? '抄送' : `审批 ${index + 1}`}
-              title={node.title || (node.type === 'condition' ? '条件分化' : node.type === 'cc' ? '抄送对象' : `审批节点 ${index + 1}`)}
+              kicker={node.type === 'condition' ? (node.conditionMode === 'ai' ? 'AI 条件分化' : '条件分化') : node.type === 'cc' ? '抄送' : `审批 ${index + 1}`}
+              title={node.title || (node.type === 'condition' ? (node.conditionMode === 'ai' ? 'AI 条件分化' : '条件分化') : node.type === 'cc' ? '抄送对象' : `审批节点 ${index + 1}`)}
               subtitle={getFlowNodeSubtitle(node, directory)}
               icon={getFlowNodeIcon(node)}
               selected={selection.type === 'flow-node' && selection.nodeId === node.id}
@@ -2235,6 +2246,7 @@ function FlowConditionBranchEditor({
   nodeId,
   branch,
   index,
+  isAiCondition,
   fieldOptions,
   memberOptions,
   departmentOptions,
@@ -2246,6 +2258,7 @@ function FlowConditionBranchEditor({
   nodeId: string;
   branch: WorkflowConditionBranch;
   index: number;
+  isAiCondition?: boolean;
   fieldOptions: ConditionFieldOption[];
   memberOptions: Array<{ value: string; label: string }>;
   departmentOptions: Array<{ value: string; label: string }>;
@@ -2267,7 +2280,17 @@ function FlowConditionBranchEditor({
     return (
       <div className="rounded-2xl border border-border-silver bg-white px-4 py-3">
         <p className="text-[13px] font-black text-midnight-graphite">{branch.title || '其余情况'}</p>
-        <p className="mt-1 text-[11px] font-bold text-medium-gray">其他条件都不命中时，自动进入这条分支。</p>
+        <p className="mt-1 text-[11px] font-bold text-medium-gray">
+          {isAiCondition ? 'AI 未选择其他分支，或判断失败时，进入这条兜底分支。' : '其他条件都不命中时，自动进入这条分支。'}
+        </p>
+        {isAiCondition && (
+          <textarea
+            className="input-field mt-3 min-h-[76px] resize-none text-[13px]"
+            value={branch.aiDescription || ''}
+            onChange={(event) => onUpdateFlowBranch(nodeId, branch.id, { aiDescription: event.target.value })}
+            placeholder="写给 AI 看的 B 分支说明"
+          />
+        )}
       </div>
     );
   }
@@ -2286,12 +2309,23 @@ function FlowConditionBranchEditor({
         <button
           type="button"
           onClick={() => onAddFlowBranchCondition(nodeId, branch.id)}
-          className="mt-6 h-9 shrink-0 rounded-full bg-black px-3 text-[12px] font-black text-white"
+          className={cn("mt-6 h-9 shrink-0 rounded-full bg-black px-3 text-[12px] font-black text-white", isAiCondition && "hidden")}
         >
           添加条件
         </button>
       </div>
 
+      {isAiCondition ? (
+        <label className="block space-y-2">
+          <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">写给 AI 看的分支说明</span>
+          <textarea
+            className="input-field min-h-[88px] resize-none text-[13px]"
+            value={branch.aiDescription || ''}
+            onChange={(event) => onUpdateFlowBranch(nodeId, branch.id, { aiDescription: event.target.value })}
+            placeholder="例如：表单内容涉及合同、退款争议、客户投诉或其他风险时选择 A 分支"
+          />
+        </label>
+      ) : (
       <div className="space-y-3">
         {conditions.map((condition, conditionIndex) => (
           <React.Fragment key={condition.id}>
@@ -2308,6 +2342,7 @@ function FlowConditionBranchEditor({
           </React.Fragment>
         ))}
       </div>
+      )}
     </div>
   );
 }
@@ -2600,9 +2635,14 @@ function DesignerInspector({
     }
 
     if (selectedFlowNode.type === 'condition') {
+      const isAiCondition = selectedFlowNode.conditionMode === 'ai';
       return (
         <aside className={inspectorClassName}>
-          <InspectorHeader label="条件分化" title={selectedFlowNode.title || '条件分化'} description="条件分化会按命中的分支继续执行。" />
+          <InspectorHeader
+            label={isAiCondition ? 'AI 条件分化' : '条件分化'}
+            title={selectedFlowNode.title || (isAiCondition ? 'AI 条件分化' : '条件分化')}
+            description={isAiCondition ? 'AI 只负责在 A/B 分支中做选择，后续审批节点仍按人工配置执行。' : '条件分化会按命中的分支继续执行。'}
+          />
           <div className="space-y-5 p-5">
             <label className="block space-y-2">
               <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">节点名称</span>
@@ -2612,6 +2652,41 @@ function DesignerInspector({
                 onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, { title: event.target.value })}
               />
             </label>
+            <div className="grid grid-cols-2 gap-2">
+              <SegmentedButton
+                isActive={!isAiCondition}
+                onClick={() => onUpdateFlowNode(selectedFlowNode.id, {
+                  conditionMode: 'rules',
+                  aiBranchRule: undefined,
+                  title: selectedFlowNode.title === 'AI 条件分化' ? '条件分化' : selectedFlowNode.title,
+                })}
+              >
+                普通条件
+              </SegmentedButton>
+              <SegmentedButton
+                isActive={isAiCondition}
+                onClick={() => onUpdateFlowNode(selectedFlowNode.id, {
+                  conditionMode: 'ai',
+                  aiBranchRule: selectedFlowNode.aiBranchRule || { prompt: '请根据申请表单内容判断应该进入哪个分支。' },
+                  title: selectedFlowNode.title === '条件分化' ? 'AI 条件分化' : selectedFlowNode.title,
+                })}
+              >
+                AI 条件
+              </SegmentedButton>
+            </div>
+            {isAiCondition && (
+              <label className="block space-y-2">
+                <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">AI 判断提示词</span>
+                <textarea
+                  className="input-field min-h-[120px] resize-none text-[13px]"
+                  value={selectedFlowNode.aiBranchRule?.prompt || ''}
+                  onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, {
+                    aiBranchRule: { prompt: event.target.value },
+                  })}
+                  placeholder="例如：判断申请是否涉及法务风险；涉及合同、退款争议、客户投诉选择 A，否则选择 B。"
+                />
+              </label>
+            )}
             <div className="space-y-3">
               {(selectedFlowNode.conditions || []).map((condition, conditionIndex) => (
                 <React.Fragment key={condition.id}>
@@ -2619,6 +2694,7 @@ function DesignerInspector({
                     nodeId={selectedFlowNode.id}
                     branch={condition}
                     index={conditionIndex}
+                    isAiCondition={selectedFlowNode.conditionMode === 'ai'}
                     fieldOptions={fieldOptions}
                     memberOptions={memberOptions}
                     departmentOptions={departmentOptions}
@@ -3275,7 +3351,8 @@ export default function WorkflowAdmin() {
   };
 
   const createFlowNode = (kind: FlowInsertKind, index: number): WorkflowNode => {
-    if (kind === 'condition') {
+    if (kind === 'condition' || kind === 'ai-condition') {
+      const isAiCondition = kind === 'ai-condition';
       const field = conditionFieldOptionsForDraft.find((option) => option.kind === 'number')?.value
         || conditionFieldOptionsForDraft[0]?.value
         || 'submitter.department';
@@ -3285,24 +3362,28 @@ export default function WorkflowAdmin() {
       return {
         id: createId('flow-condition'),
         type: 'condition',
-        title: '条件分化',
-        subtitle: '按条件进入不同分支',
+        title: isAiCondition ? 'AI 条件分化' : '条件分化',
+        subtitle: isAiCondition ? 'AI 根据提示词选择 A/B 分支' : '按条件进入不同分支',
+        conditionMode: isAiCondition ? 'ai' : 'rules',
+        ...(isAiCondition ? { aiBranchRule: { prompt: '请根据申请表单内容判断应该进入哪个分支。' } } : {}),
         conditions: [
           {
             id: createId('flow-branch'),
-            title: '条件 1',
-            expression,
+            title: isAiCondition ? 'A 分支' : '条件 1',
+            expression: isAiCondition ? 'AI 选择 A' : expression,
             priority: 1,
             isDefault: false,
-            workflowConditions: [condition],
+            aiDescription: isAiCondition ? '符合 AI 判断规则时进入此分支' : undefined,
+            workflowConditions: isAiCondition ? [] : [condition],
             nodes: [],
           },
           {
             id: createId('flow-else'),
-            title: '其余情况',
-            expression: '',
+            title: isAiCondition ? 'B 分支' : '其余情况',
+            expression: isAiCondition ? 'AI 选择 B，或 AI 失败时兜底' : '',
             priority: 999,
             isDefault: true,
+            aiDescription: isAiCondition ? '不符合 A 分支，或 AI 无法判断时进入此分支' : undefined,
             workflowConditions: [],
             nodes: [],
           },

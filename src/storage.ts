@@ -3,6 +3,7 @@ import {
   AiAssistantChatResponse,
   AiAssistantOverview,
   AiAssistantPromptConfig,
+  AiBranchDecisionLog,
   AiPromptConfig,
   ApprovalAttachment,
   ApprovalRecord,
@@ -131,6 +132,10 @@ export const storage = {
       method: 'PATCH',
       body: JSON.stringify({ prompt }),
     });
+  },
+
+  getAiBranchDecisionLogs(): Promise<AiBranchDecisionLog[]> {
+    return request<AiBranchDecisionLog[]>('/ai-branch-logs');
   },
 
   getOrganizationDirectory(): Promise<OrganizationDirectory> {

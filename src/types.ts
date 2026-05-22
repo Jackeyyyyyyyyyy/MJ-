@@ -14,7 +14,7 @@ export enum ApprovalStatus {
 
 export type Role = 'employee' | 'boss' | 'developer';
 
-export type AdminView = 'accounts' | 'ai-assistant' | 'organization' | 'workflows';
+export type AdminView = 'accounts' | 'ai-assistant' | 'organization' | 'workflows' | 'ai-branch-logs';
 
 export type ApproverRuleType =
   | 'specific_members'
@@ -110,6 +110,10 @@ export interface WorkflowBranch {
   approvalSteps: ApprovalStep[];
 }
 
+export interface AiBranchRule {
+  prompt: string;
+}
+
 export interface CcRule {
   timing: 'workflow_completed';
   memberIds: string[];
@@ -167,6 +171,8 @@ export interface WorkflowNode {
   type: 'start' | 'approver' | 'condition' | 'cc';
   title: string;
   subtitle?: string;
+  conditionMode?: 'rules' | 'ai';
+  aiBranchRule?: AiBranchRule;
   rule?: ApproverRule;
   approvalMode?: ApprovalMode;
   emptyApproverAction?: 'auto_pass' | 'block_submit';
@@ -177,6 +183,7 @@ export interface WorkflowNode {
     expression: string;
     priority: number;
     isDefault?: boolean;
+    aiDescription?: string;
     workflowConditions?: WorkflowCondition[];
     nodes: WorkflowNode[];
   }>;
@@ -372,6 +379,33 @@ export interface AiAssistantPromptConfig {
   updatedAt?: string;
   updatedBy?: string;
   isDefault?: boolean;
+}
+
+export interface AiBranchDecisionLog {
+  id: string;
+  recordId?: string;
+  moduleName?: string;
+  approvalTypeName?: string;
+  workflowId?: string;
+  workflowName?: string;
+  workflowVersion?: number;
+  nodeId?: string;
+  nodeTitle?: string;
+  prompt?: string;
+  applicant?: string;
+  selectedBranchId?: string;
+  selectedBranchTitle?: string;
+  fallbackBranchId?: string;
+  fallbackBranchTitle?: string;
+  reason?: string;
+  confidence?: number;
+  status: 'success' | 'fallback' | 'failed' | 'skipped';
+  error?: string;
+  rawText?: string;
+  branches?: Array<{ id: string; title: string; description?: string; isDefault?: boolean }>;
+  businessData?: Record<string, any>;
+  createdAt: string;
+  durationMs?: number;
 }
 
 export interface ApprovalRecord {

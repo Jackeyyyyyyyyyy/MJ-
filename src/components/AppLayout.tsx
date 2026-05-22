@@ -17,6 +17,7 @@ interface AppLayoutProps {
   onOpenAiAssistant: () => void;
   onOpenOrganizationAdmin: () => void;
   onOpenWorkflowAdmin: () => void;
+  onOpenAiBranchLogs: () => void;
   selectedModule?: string;
   selectedType?: string;
   onSelectType: (module: string, type: string) => void;
@@ -200,6 +201,7 @@ export default function AppLayout({
   onOpenAiAssistant,
   onOpenOrganizationAdmin,
   onOpenWorkflowAdmin,
+  onOpenAiBranchLogs,
   selectedModule,
   selectedType,
   onSelectType
@@ -267,6 +269,10 @@ export default function AppLayout({
         }}
         onOpenWorkflowAdmin={() => {
           onOpenWorkflowAdmin();
+          setIsSidebarOpen(false);
+        }}
+        onOpenAiBranchLogs={() => {
+          onOpenAiBranchLogs();
           setIsSidebarOpen(false);
         }}
         onSelectType={(m, t) => {
