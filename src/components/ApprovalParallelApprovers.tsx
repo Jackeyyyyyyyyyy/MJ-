@@ -1,12 +1,17 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Check, Clock, X } from 'lucide-react';
-import { WorkflowApproverSnapshot } from '../types';
+import { ApprovalMode, WorkflowApproverSnapshot } from '../types';
 import { cn } from '../lib/utils';
 
 interface ApprovalParallelApproversProps {
   approvers: WorkflowApproverSnapshot[];
   title: string;
+  approvalMode?: ApprovalMode;
+}
+
+function getApprovalModeLabel(mode?: ApprovalMode) {
+  return mode === 'all_of' ? '所有人通过' : '任意一人通过';
 }
 
 function getApproverStatusLabel(approver: WorkflowApproverSnapshot) {
@@ -39,11 +44,14 @@ function getApproverStatusStyle(approver: WorkflowApproverSnapshot) {
   };
 }
 
-export default function ApprovalParallelApprovers({ approvers, title }: ApprovalParallelApproversProps) {
+export default function ApprovalParallelApprovers({ approvers, title, approvalMode }: ApprovalParallelApproversProps) {
   if (approvers.length <= 1) return null;
 
   return (
     <div className="mt-4 w-full max-w-[520px]">
+      <div className="mb-2 inline-flex h-7 items-center rounded-full bg-black px-3 text-[11px] font-black text-white">
+        {getApprovalModeLabel(approvalMode)}
+      </div>
       <div className="relative flex items-stretch gap-3 overflow-x-auto pb-1 pt-5">
         <motion.div
           initial={{ scaleX: 0 }}

@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, CheckCircle2, Clock, Check } from 'lucide-react';
-import { ApprovalRecord, ApprovalStatus, WorkflowApproverSnapshot } from '../types';
+import { ApprovalMode, ApprovalRecord, ApprovalStatus, WorkflowApproverSnapshot } from '../types';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import ApprovalParallelApprovers from './ApprovalParallelApprovers';
@@ -19,7 +19,12 @@ interface ProgressStep {
   time?: string;
   status: ProgressStepStatus;
   approvers?: WorkflowApproverSnapshot[];
+  approvalMode?: ApprovalMode;
   isFinal?: boolean;
+}
+
+function getApprovalModeDesc(mode?: ApprovalMode) {
+  return mode === 'all_of' ? '通过方式：所有人都要通过' : '通过方式：任意一人通过';
 }
 
 function getCcProgressStep(record: ApprovalRecord): ProgressStep | null {
@@ -54,12 +59,13 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
           title: step.name,
           desc: [
             `审批人：${step.approvers.map((approver) => approver.name).join('、') || '未解析'}`,
-            step.approvalMode === 'all_of' ? '所有人都要通过' : '',
+            step.approvers.length > 1 ? getApprovalModeDesc(step.approvalMode) : '',
             step.actedByName ? `操作人：${step.actedByName}` : '',
             step.comment ? `意见：${step.comment}` : '',
           ].filter(Boolean).join(' ｜ '),
           time: step.actedAt,
           approvers: step.approvers || [],
+          approvalMode: step.approvalMode,
           status: step.status === 'approved' || step.status === 'skipped'
             ? 'completed'
             : (step.status === 'pending' ? 'current' : (step.status === 'rejected' ? 'failed' : 'pending')),
@@ -164,7 +170,7 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
                     )}>{step.title}</h3>
                     <p className="text-[12px] font-bold text-medium-gray">{step.desc}</p>
                     {step.approvers && step.approvers.length > 1 && (
-                      <ApprovalParallelApprovers approvers={step.approvers} title={step.title} />
+                      <ApprovalParallelApprovers approvers={step.approvers} title={step.title} approvalMode={step.approvalMode} />
                     )}
                     {step.time && (
                       <p className="text-[10px] font-black text-light-gray font-mono mt-2 uppercase tracking-widest">

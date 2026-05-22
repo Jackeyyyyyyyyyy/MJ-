@@ -2931,6 +2931,19 @@ function DesignerInspector({
               />
             </label>
           )}
+          {rule.type === 'specific_members' && (
+            <label className="block space-y-2">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">通过方式</span>
+              <select
+                className="input-field text-[13px]"
+                value={selectedFlowNode.approvalMode || 'one_of'}
+                onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, { approvalMode: event.target.value as ApprovalMode })}
+              >
+                <option value="one_of">多人任意一人通过</option>
+                <option value="all_of">所有人都要通过</option>
+              </select>
+            </label>
+          )}
           {rule.type === 'multi_supervisor' && (
             <div className="space-y-2">
               <label className="block space-y-2">

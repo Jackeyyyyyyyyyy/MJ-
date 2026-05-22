@@ -1,5 +1,5 @@
 import React from 'react';
-import { ApprovalAttachment, ApprovalRecord, ApprovalStatus } from '../types';
+import { ApprovalAttachment, ApprovalMode, ApprovalRecord, ApprovalStatus } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle, Download, Eye, Check, Clock, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -188,13 +188,17 @@ function getCcTimelineItem(record: ApprovalRecord, finishedAt?: string) {
 function formatWorkflowStepDesc(step: NonNullable<ApprovalRecord['workflowInstance']>['steps'][number]) {
   return [
     `审批人：${step.approvers.map((approver) => approver.name).join('、') || '未解析'}`,
-    step.approvalMode === 'all_of' ? '所有人都要通过' : '',
+    step.approvers.length > 1 ? getApprovalModeDesc(step.approvalMode) : '',
     step.actedByName ? `操作人：${step.actedByName}` : '',
     step.comment ? `意见：${step.comment}` : '',
   ].filter(Boolean).join(' ｜ ');
 }
 
-export default function ApprovalDetailModal({ record, onClose, onApprove, onReject, showAiSuggestion = false, showAiRawResponse = false }: ApprovalDetailModalProps) {
+function getApprovalModeDesc(mode?: ApprovalMode) {
+  return mode === 'all_of' ? '通过方式：所有人都要通过' : '通过方式：任意一人通过';
+}
+
+export default function ApprovalDetailModal({ record, onClose, onApprove, onReject, showAiSuggestion = false }: ApprovalDetailModalProps) {
   const [preview, setPreview] = React.useState<PreviewState | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = React.useState(false);
 
@@ -208,7 +212,6 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
 
   const canReview = record.status === ApprovalStatus.PENDING && record.currentUserCanApprove !== false && !!onApprove && !!onReject;
   const aiSuggestion = getAiSuggestionDisplay(record);
-  const aiRawText = typeof record.aiSuggestion?.rawText === 'string' ? record.aiSuggestion.rawText.trim() : '';
   const finishedAt = record.approvedAt || record.rejectedAt;
   const workflowSteps = record.workflowInstance?.steps;
   const ccTimelineItem = getCcTimelineItem(record, finishedAt);
@@ -225,6 +228,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
           desc: formatWorkflowStepDesc(step),
           time: step.actedAt,
           approvers: step.approvers || [],
+          approvalMode: step.approvalMode,
           state: step.status === 'approved' || step.status === 'skipped'
             ? 'done'
             : (step.status === 'pending' ? 'active' : (step.status === 'rejected' ? 'failed' : 'pending')),
@@ -528,12 +532,6 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                       <p className="text-[16px] font-black text-black leading-snug tracking-tight">
                         {aiSuggestion.text}
                       </p>
-                      {showAiRawResponse && aiRawText && (
-                        <div className="mt-5 pt-5 border-t border-black/[0.08]">
-                          <p className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em] mb-2">AI完整返回</p>
-                          <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[12px] font-semibold leading-5 text-midnight-graphite">{aiRawText}</pre>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -714,7 +712,11 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                           )}>{step.title}</h4>
                           <p className="text-[12px] font-bold text-medium-gray">{step.desc}</p>
                           {Array.isArray((step as { approvers?: unknown }).approvers) && (
-                            <ApprovalParallelApprovers approvers={(step as unknown as { approvers: NonNullable<ApprovalRecord['workflowInstance']>['steps'][number]['approvers'] }).approvers} title={step.title} />
+                            <ApprovalParallelApprovers
+                              approvers={(step as unknown as { approvers: NonNullable<ApprovalRecord['workflowInstance']>['steps'][number]['approvers'] }).approvers}
+                              title={step.title}
+                              approvalMode={(step as { approvalMode?: ApprovalMode }).approvalMode}
+                            />
                           )}
                           {step.time && (
                             <p className="text-[10px] font-black text-light-gray font-mono mt-2 uppercase tracking-widest">
