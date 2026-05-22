@@ -229,6 +229,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
           time: step.actedAt,
           approvers: step.approvers || [],
           approvalMode: step.approvalMode,
+          stepStatus: step.status,
           state: step.status === 'approved' || step.status === 'skipped'
             ? 'done'
             : (step.status === 'pending' ? 'active' : (step.status === 'rejected' ? 'failed' : 'pending')),
@@ -716,6 +717,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                               approvers={(step as unknown as { approvers: NonNullable<ApprovalRecord['workflowInstance']>['steps'][number]['approvers'] }).approvers}
                               title={step.title}
                               approvalMode={(step as { approvalMode?: ApprovalMode }).approvalMode}
+                              stepStatus={(step as { stepStatus?: NonNullable<ApprovalRecord['workflowInstance']>['steps'][number]['status'] }).stepStatus}
                             />
                           )}
                           {step.time && (

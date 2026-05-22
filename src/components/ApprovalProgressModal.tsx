@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, CheckCircle2, Clock, Check } from 'lucide-react';
-import { ApprovalMode, ApprovalRecord, ApprovalStatus, WorkflowApproverSnapshot } from '../types';
+import { ApprovalMode, ApprovalRecord, ApprovalStatus, WorkflowApproverSnapshot, WorkflowStepStatus } from '../types';
 import { cn } from '../lib/utils';
 import { formatLocalDateTime } from '../lib/time';
 import ApprovalParallelApprovers from './ApprovalParallelApprovers';
@@ -20,6 +20,7 @@ interface ProgressStep {
   status: ProgressStepStatus;
   approvers?: WorkflowApproverSnapshot[];
   approvalMode?: ApprovalMode;
+  stepStatus?: WorkflowStepStatus;
   isFinal?: boolean;
 }
 
@@ -66,6 +67,7 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
           time: step.actedAt,
           approvers: step.approvers || [],
           approvalMode: step.approvalMode,
+          stepStatus: step.status,
           status: step.status === 'approved' || step.status === 'skipped'
             ? 'completed'
             : (step.status === 'pending' ? 'current' : (step.status === 'rejected' ? 'failed' : 'pending')),
@@ -170,7 +172,7 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
                     )}>{step.title}</h3>
                     <p className="text-[12px] font-bold text-medium-gray">{step.desc}</p>
                     {step.approvers && step.approvers.length > 1 && (
-                      <ApprovalParallelApprovers approvers={step.approvers} title={step.title} approvalMode={step.approvalMode} />
+                      <ApprovalParallelApprovers approvers={step.approvers} title={step.title} approvalMode={step.approvalMode} stepStatus={step.stepStatus} />
                     )}
                     {step.time && (
                       <p className="text-[10px] font-black text-light-gray font-mono mt-2 uppercase tracking-widest">

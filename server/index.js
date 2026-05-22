@@ -2238,6 +2238,7 @@ function canUserApproveRecord(user, record) {
     normalizeWorkflowText(approver.accountUsername).toLowerCase() === normalizeWorkflowText(user.username).toLowerCase()
     && approver.status !== 'approved'
     && approver.status !== 'rejected'
+    && approver.status !== 'closed'
   ));
 }
 
@@ -2309,6 +2310,17 @@ function getActingApprover(user, step) {
   )) || null;
 }
 
+function closeRemainingOneOfApprovers(step, actedAt) {
+  if (step?.approvalMode !== 'one_of') return;
+
+  (step.approvers || []).forEach((approver) => {
+    if (!approver || approver.status !== 'pending') return;
+    approver.status = 'closed';
+    approver.actedAt = actedAt;
+    approver.comment = '已关闭：同节点已有其他审批人通过';
+  });
+}
+
 function advanceWorkflowRecord(record, user, status, reason) {
   const currentStep = getCurrentWorkflowStep(record);
   if (!currentStep) {
@@ -2359,6 +2371,7 @@ function advanceWorkflowRecord(record, user, status, reason) {
     return record;
   }
 
+  closeRemainingOneOfApprovers(currentStep, now);
   currentStep.status = STEP_APPROVED;
   currentStep.comment = requiresAllApprovers ? '所有审批人已通过' : currentStep.comment;
 

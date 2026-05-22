@@ -1,26 +1,36 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Check, Clock, X } from 'lucide-react';
-import { ApprovalMode, WorkflowApproverSnapshot } from '../types';
+import { Check, Clock, Lock, X } from 'lucide-react';
+import { ApprovalMode, WorkflowApproverSnapshot, WorkflowStepStatus } from '../types';
 import { cn } from '../lib/utils';
 
 interface ApprovalParallelApproversProps {
   approvers: WorkflowApproverSnapshot[];
   title: string;
   approvalMode?: ApprovalMode;
+  stepStatus?: WorkflowStepStatus;
 }
 
 function getApprovalModeLabel(mode?: ApprovalMode) {
   return mode === 'all_of' ? '所有人通过' : '任意一人通过';
 }
 
-function getApproverStatusLabel(approver: WorkflowApproverSnapshot) {
+function isApproverClosed(approver: WorkflowApproverSnapshot, approvalMode?: ApprovalMode, stepStatus?: WorkflowStepStatus) {
+  return approver.status === 'closed' || (
+    approvalMode === 'one_of'
+    && stepStatus === 'approved'
+    && (!approver.status || approver.status === 'pending')
+  );
+}
+
+function getApproverStatusLabel(approver: WorkflowApproverSnapshot, approvalMode?: ApprovalMode, stepStatus?: WorkflowStepStatus) {
   if (approver.status === 'approved') return '已同意';
   if (approver.status === 'rejected') return '已拒绝';
+  if (isApproverClosed(approver, approvalMode, stepStatus)) return '已关闭';
   return '待处理';
 }
 
-function getApproverStatusStyle(approver: WorkflowApproverSnapshot) {
+function getApproverStatusStyle(approver: WorkflowApproverSnapshot, approvalMode?: ApprovalMode, stepStatus?: WorkflowStepStatus) {
   if (approver.status === 'approved') {
     return {
       card: 'border-[#2e7d32]/15 bg-[#f1f8f2] text-[#1b5e20]',
@@ -37,6 +47,14 @@ function getApproverStatusStyle(approver: WorkflowApproverSnapshot) {
     };
   }
 
+  if (isApproverClosed(approver, approvalMode, stepStatus)) {
+    return {
+      card: 'border-slate-200 bg-slate-50 text-medium-gray',
+      dot: 'bg-slate-100 text-medium-gray border border-slate-200',
+      line: 'bg-slate-200',
+    };
+  }
+
   return {
     card: 'border-black/[0.06] bg-white text-medium-gray',
     dot: 'bg-white text-medium-gray border border-border-silver',
@@ -44,7 +62,7 @@ function getApproverStatusStyle(approver: WorkflowApproverSnapshot) {
   };
 }
 
-export default function ApprovalParallelApprovers({ approvers, title, approvalMode }: ApprovalParallelApproversProps) {
+export default function ApprovalParallelApprovers({ approvers, title, approvalMode, stepStatus }: ApprovalParallelApproversProps) {
   if (approvers.length <= 1) return null;
 
   return (
@@ -60,7 +78,8 @@ export default function ApprovalParallelApprovers({ approvers, title, approvalMo
           className="absolute left-8 right-8 top-[28px] h-[1.5px] origin-left bg-black/15"
         />
         {approvers.map((approver, index) => {
-          const style = getApproverStatusStyle(approver);
+          const style = getApproverStatusStyle(approver, approvalMode, stepStatus);
+          const isClosed = isApproverClosed(approver, approvalMode, stepStatus);
 
           return (
             <motion.div
@@ -80,7 +99,8 @@ export default function ApprovalParallelApprovers({ approvers, title, approvalMo
                 <div className={cn('absolute -top-5 left-1/2 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-2xl shadow-sm', style.dot)}>
                   {approver.status === 'approved' && <Check size={15} strokeWidth={3} />}
                   {approver.status === 'rejected' && <X size={15} strokeWidth={3} />}
-                  {!approver.status || approver.status === 'pending' ? (
+                  {isClosed && <Lock size={14} strokeWidth={3} />}
+                  {!isClosed && (!approver.status || approver.status === 'pending') ? (
                     <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 4, ease: 'linear' }}>
                       <Clock size={14} strokeWidth={3} />
                     </motion.div>
@@ -88,7 +108,7 @@ export default function ApprovalParallelApprovers({ approvers, title, approvalMo
                 </div>
                 <div className="pt-2">
                   <p className="truncate text-center text-[12px] font-black text-black">{approver.name || '未解析'}</p>
-                  <p className="mt-1 text-center text-[10px] font-black uppercase tracking-widest">{getApproverStatusLabel(approver)}</p>
+                  <p className="mt-1 text-center text-[10px] font-black uppercase tracking-widest">{getApproverStatusLabel(approver, approvalMode, stepStatus)}</p>
                   {approver.comment && (
                     <p className="mt-2 line-clamp-2 text-center text-[10px] font-bold text-medium-gray">{approver.comment}</p>
                   )}

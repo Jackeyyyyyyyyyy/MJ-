@@ -129,7 +129,7 @@ export interface WorkflowApproverSnapshot {
   memberId: string;
   name: string;
   accountUsername?: string;
-  status?: 'pending' | 'approved' | 'rejected';
+  status?: 'pending' | 'approved' | 'rejected' | 'closed';
   actedAt?: string;
   comment?: string;
 }
