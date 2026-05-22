@@ -5,6 +5,7 @@ import {
   ArrowUp,
   Building2,
   CheckCircle2,
+  Crosshair,
   GitBranch,
   Maximize2,
   Minimize2,
@@ -1692,6 +1693,7 @@ function WorkflowFlowDesigner({
   const [isPanning, setIsPanning] = React.useState(false);
   const canvasMinWidth = Math.max(1080, branchFlowWidth + 160);
   const canvasContentHeight = 980;
+  const fullscreenDesignerRef = React.useRef<HTMLElement | null>(null);
   const canvasFrameRef = React.useRef<HTMLDivElement | null>(null);
   const canvasContentRef = React.useRef<HTMLDivElement | null>(null);
   const canvasFlowRef = React.useRef<HTMLDivElement | null>(null);
@@ -1743,7 +1745,7 @@ function WorkflowFlowDesigner({
 
   React.useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsCanvasFullscreen(document.fullscreenElement === canvasFrameRef.current);
+      setIsCanvasFullscreen(document.fullscreenElement === fullscreenDesignerRef.current);
       window.requestAnimationFrame(fitWorkflowCanvas);
     };
 
@@ -1808,19 +1810,22 @@ function WorkflowFlowDesigner({
   };
 
   const toggleCanvasFullscreen = async () => {
-    const frame = canvasFrameRef.current;
-    if (!frame) return;
+    const designer = fullscreenDesignerRef.current;
+    if (!designer) return;
 
-    if (document.fullscreenElement === frame) {
+    if (document.fullscreenElement === designer) {
       await document.exitFullscreen();
       return;
     }
 
-    await frame.requestFullscreen();
+    await designer.requestFullscreen();
   };
 
   return (
-    <section className="rounded-xl border border-border-silver bg-white shadow-sm overflow-visible">
+    <section
+      ref={fullscreenDesignerRef}
+      className="diagram-fullscreen-workspace rounded-xl border border-border-silver bg-white shadow-sm overflow-visible"
+    >
       <div className="px-5 py-4 border-b border-border-silver flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-black text-white flex items-center justify-center">
@@ -1858,7 +1863,7 @@ function WorkflowFlowDesigner({
         </div>
       )}
 
-      <div className="grid min-h-[680px] items-start lg:grid-cols-[minmax(720px,1fr)_360px]">
+      <div className="workflow-designer-grid grid min-h-[680px] items-start lg:grid-cols-[minmax(720px,1fr)_360px]">
         <div
           ref={canvasFrameRef}
           onPointerDown={handleCanvasPointerDown}
@@ -1870,7 +1875,7 @@ function WorkflowFlowDesigner({
             zoomWorkflowCanvas(canvasView.scale * (event.deltaY > 0 ? 0.9 : 1.1), event.clientX, event.clientY);
           }}
           className={cn(
-            "diagram-fullscreen-surface relative min-h-[680px] overflow-hidden bg-[#f7f8fa] cursor-grab select-none touch-none",
+            "workflow-canvas-frame relative min-h-[680px] overflow-hidden bg-[#f7f8fa] cursor-grab select-none touch-none",
             isPanning && "cursor-grabbing"
           )}
         >
@@ -1883,7 +1888,7 @@ function WorkflowFlowDesigner({
               <Plus size={14} />
             </button>
             <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={fitWorkflowCanvas}>
-              <Maximize2 size={14} />
+              <Crosshair size={14} />
             </button>
             <button
               type="button"
@@ -1951,22 +1956,23 @@ function WorkflowFlowDesigner({
           </div>
         </div>
 
-        <DesignerInspector
-          selection={activeSelection}
-          selectedFlowNode={selectedFlowNode}
-          selectedBranch={selectedBranch}
-          selectedStep={selectedStep}
-          branches={branches}
-          submitPermission={submitPermission}
-          ccRule={ccRule}
-          directory={directory}
-          validation={validation}
-          memberOptions={memberOptions}
-          departmentOptions={departmentOptions}
-          fieldOptions={fieldOptions}
-          previewSubmitter={previewSubmitter}
-          onSelect={onSelect}
-          onRemoveBranch={onRemoveBranch}
+        <div className="workflow-inspector-panel min-h-0">
+          <DesignerInspector
+            selection={activeSelection}
+            selectedFlowNode={selectedFlowNode}
+            selectedBranch={selectedBranch}
+            selectedStep={selectedStep}
+            branches={branches}
+            submitPermission={submitPermission}
+            ccRule={ccRule}
+            directory={directory}
+            validation={validation}
+            memberOptions={memberOptions}
+            departmentOptions={departmentOptions}
+            fieldOptions={fieldOptions}
+            previewSubmitter={previewSubmitter}
+            onSelect={onSelect}
+            onRemoveBranch={onRemoveBranch}
           onUpdateBranch={onUpdateBranch}
           onAddCondition={onAddCondition}
           onRemoveCondition={onRemoveCondition}
@@ -1984,6 +1990,7 @@ function WorkflowFlowDesigner({
           onUpdateFlowBranchCondition={onUpdateFlowBranchCondition}
           onRemoveFlowNode={onRemoveFlowNode}
         />
+      </div>
       </div>
     </section>
   );

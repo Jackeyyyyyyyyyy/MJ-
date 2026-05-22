@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Building2, GitBranch, Link2, Maximize2, Minimize2, Minus, Plus, Save, Trash2, UserRound, Users } from 'lucide-react';
+import { Building2, Crosshair, GitBranch, Link2, Maximize2, Minimize2, Minus, Plus, Save, Trash2, UserRound, Users } from 'lucide-react';
 import { storage } from '../storage';
 import { OrganizationDepartment, OrganizationDirectory, OrganizationMember, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
@@ -468,7 +468,7 @@ function ChartViewport({ children }: { children: React.ReactNode }) {
           <Plus size={14} />
         </button>
         <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={fitToView}>
-          <Maximize2 size={14} />
+          <Crosshair size={14} />
         </button>
         <button
           type="button"

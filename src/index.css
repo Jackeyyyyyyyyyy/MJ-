@@ -80,4 +80,38 @@
     min-height: 100vh;
     border-radius: 0;
   }
+
+  .diagram-fullscreen-workspace:fullscreen {
+    display: flex;
+    width: 100vw;
+    height: 100vh;
+    min-height: 100vh;
+    flex-direction: column;
+    border-radius: 0;
+    overflow: hidden;
+  }
+
+  .diagram-fullscreen-workspace:fullscreen .workflow-designer-grid {
+    flex: 1;
+    min-height: 0;
+    align-items: stretch;
+  }
+
+  .diagram-fullscreen-workspace:fullscreen .workflow-canvas-frame {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .diagram-fullscreen-workspace:fullscreen .workflow-inspector-panel {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .diagram-fullscreen-workspace:fullscreen .workflow-inspector-panel > * {
+    position: static;
+    height: 100%;
+    max-height: none;
+    overflow-y: auto;
+  }
 }
