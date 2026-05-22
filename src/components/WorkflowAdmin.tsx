@@ -50,6 +50,7 @@ interface BusinessScopeOption {
 }
 
 type ConditionFieldKind = 'number' | 'text' | 'member' | 'department';
+type WorkflowConditionBranch = NonNullable<WorkflowNode['conditions']>[number];
 
 interface ConditionFieldOption {
   value: WorkflowConditionField;
@@ -548,6 +549,10 @@ function findFlowNode(nodes: WorkflowNode[], nodeId: string): WorkflowNode | nul
   return null;
 }
 
+function getFlowBranchExpression(conditions: WorkflowCondition[] = []) {
+  return conditions.map(formatCondition).join(' 且 ');
+}
+
 function branchesFromFlowNodes(nodes: WorkflowNode[]): WorkflowBranch[] {
   const conditionNode = nodes.find((node) => node.type === 'condition');
   if (conditionNode?.conditions?.length) {
@@ -1000,6 +1005,60 @@ function getSupervisorChainPreview(
   }
 
   return { submitter, chain };
+}
+
+function SupervisorChainPreview({
+  rule,
+  directory,
+  previewSubmitter,
+  previewKey,
+  compact = false,
+}: {
+  rule: ApproverRule;
+  directory: OrganizationDirectory;
+  previewSubmitter: OrganizationDirectory['members'][number] | null;
+  previewKey: string;
+  compact?: boolean;
+}) {
+  if (rule.type !== 'multi_supervisor') return null;
+
+  const depth = Math.max(1, Number(rule.supervisorDepth) || 1);
+  if (!previewSubmitter) {
+    return (
+      <div className="mt-3 rounded-md bg-lightest-gray-background px-3 py-2 text-[11px] font-bold text-medium-gray">
+        暂无可预览的发起人
+      </div>
+    );
+  }
+
+  const preview = getSupervisorChainPreview(directory, previewSubmitter.id, depth);
+  return (
+    <div className={cn(
+      "mt-3 space-y-2 rounded-md bg-lightest-gray-background px-3 py-2",
+      compact ? "text-[10px]" : "text-[11px]"
+    )}>
+      <p className="text-[10px] font-black text-light-gray">
+        {depth}级直接主管 · 以 {preview.submitter?.name || previewSubmitter.name} 预览
+      </p>
+      <div className="space-y-1.5">
+        {preview.chain.map((item) => (
+          <div
+            key={`${previewKey}-supervisor-${item.level}`}
+            className={cn(
+              "flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 font-black",
+              compact ? "text-[10px]" : "text-[11px]",
+              item.isMissing
+                ? "border-transparent bg-[#ffebee] text-[#c62828]"
+                : "border-border-silver bg-white text-midnight-graphite"
+            )}
+          >
+            <span className="shrink-0 text-medium-gray">{item.label}</span>
+            <span className="min-w-0 truncate">{item.name}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function getApprovalModeLabel(mode: ApprovalMode) {
@@ -1459,6 +1518,7 @@ function FlowSequence({
   nodes,
   path,
   directory,
+  previewSubmitter,
   selection,
   onSelect,
   onInsert,
@@ -1466,6 +1526,7 @@ function FlowSequence({
   nodes: WorkflowNode[];
   path: string[];
   directory: OrganizationDirectory;
+  previewSubmitter: OrganizationDirectory['members'][number] | null;
   selection: DesignerSelection;
   onSelect: (selection: DesignerSelection) => void;
   onInsert: (path: string[], index: number, kind: FlowInsertKind) => void;
@@ -1484,7 +1545,17 @@ function FlowSequence({
               icon={getFlowNodeIcon(node)}
               selected={selection.type === 'flow-node' && selection.nodeId === node.id}
               onClick={() => onSelect({ type: 'flow-node', nodeId: node.id })}
-            />
+            >
+              {node.type === 'approver' && (
+                <SupervisorChainPreview
+                  rule={node.rule || { type: 'specific_members', memberIds: [] }}
+                  directory={directory}
+                  previewSubmitter={previewSubmitter}
+                  previewKey={node.id}
+                  compact
+                />
+              )}
+            </FlowNode>
           </div>
 
           {node.type === 'condition' && (
@@ -1510,6 +1581,7 @@ function FlowSequence({
                       nodes={condition.nodes || []}
                       path={[...path, condition.id]}
                       directory={directory}
+                      previewSubmitter={previewSubmitter}
                       selection={selection}
                       onSelect={onSelect}
                       onInsert={onInsert}
@@ -1556,6 +1628,11 @@ function WorkflowFlowDesigner({
   flowNodes,
   onInsertFlowNode,
   onUpdateFlowNode,
+  onUpdateFlowBranch,
+  onAddFlowBranchCondition,
+  onRemoveFlowBranchCondition,
+  onUpdateFlowBranchCondition,
+  onRemoveFlowNode,
 }: {
   draft: WorkflowVersion;
   directory: OrganizationDirectory;
@@ -1584,6 +1661,11 @@ function WorkflowFlowDesigner({
   flowNodes: WorkflowNode[];
   onInsertFlowNode: (path: string[], index: number, kind: FlowInsertKind) => void;
   onUpdateFlowNode: (nodeId: string, patch: Partial<WorkflowNode>) => void;
+  onUpdateFlowBranch: (nodeId: string, branchId: string, patch: Partial<WorkflowConditionBranch>) => void;
+  onAddFlowBranchCondition: (nodeId: string, branchId: string) => void;
+  onRemoveFlowBranchCondition: (nodeId: string, branchId: string, conditionId: string) => void;
+  onUpdateFlowBranchCondition: (nodeId: string, branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
+  onRemoveFlowNode: (nodeId: string) => void;
 }) {
   const defaultBranch = branches.find((branch) => branch.isDefault) || branches[branches.length - 1];
   const conditionalBranches = branches.filter((branch) => !branch.isDefault);
@@ -1713,44 +1795,6 @@ function WorkflowFlowDesigner({
     }
   };
 
-  const renderSupervisorPreview = (step: ApprovalStep) => {
-    if (step.approverRule.type !== 'multi_supervisor') return null;
-
-    const depth = Math.max(1, Number(step.approverRule.supervisorDepth) || 1);
-    if (!previewSubmitter) {
-      return (
-        <div className="mt-3 rounded-md bg-lightest-gray-background px-3 py-2 text-[11px] font-bold text-medium-gray">
-          暂无可预览的发起人
-        </div>
-      );
-    }
-
-    const preview = getSupervisorChainPreview(directory, previewSubmitter.id, depth);
-    return (
-      <div className="mt-3 space-y-2 rounded-md bg-lightest-gray-background px-3 py-2">
-        <p className="text-[10px] font-black text-light-gray">
-          {depth}级直接主管 · 以 {preview.submitter?.name || previewSubmitter.name} 预览
-        </p>
-        <div className="space-y-1.5">
-          {preview.chain.map((item) => (
-            <div
-              key={`${step.id}-supervisor-${item.level}`}
-              className={cn(
-                "flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-[11px] font-black",
-                item.isMissing
-                  ? "bg-[#ffebee] text-[#c62828]"
-                  : "bg-white text-midnight-graphite border-border-silver"
-              )}
-            >
-              <span className="shrink-0 text-medium-gray">{item.label}</span>
-              <span className="min-w-0 truncate">{item.name}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <section className="rounded-xl border border-border-silver bg-white shadow-sm overflow-visible">
       <div className="px-5 py-4 border-b border-border-silver flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1856,6 +1900,7 @@ function WorkflowFlowDesigner({
                 nodes={flowNodes}
                 path={[]}
                 directory={directory}
+                previewSubmitter={previewSubmitter}
                 selection={activeSelection}
                 onSelect={onSelect}
                 onInsert={onInsertFlowNode}
@@ -1886,6 +1931,7 @@ function WorkflowFlowDesigner({
           memberOptions={memberOptions}
           departmentOptions={departmentOptions}
           fieldOptions={fieldOptions}
+          previewSubmitter={previewSubmitter}
           onSelect={onSelect}
           onRemoveBranch={onRemoveBranch}
           onUpdateBranch={onUpdateBranch}
@@ -1899,6 +1945,11 @@ function WorkflowFlowDesigner({
           onRemoveStep={onRemoveStep}
           onMoveStep={onMoveStep}
           onUpdateFlowNode={onUpdateFlowNode}
+          onUpdateFlowBranch={onUpdateFlowBranch}
+          onAddFlowBranchCondition={onAddFlowBranchCondition}
+          onRemoveFlowBranchCondition={onRemoveFlowBranchCondition}
+          onUpdateFlowBranchCondition={onUpdateFlowBranchCondition}
+          onRemoveFlowNode={onRemoveFlowNode}
         />
       </div>
     </section>
@@ -2117,11 +2168,94 @@ function ConditionEditor({
   );
 }
 
+function FlowConditionBranchEditor({
+  nodeId,
+  branch,
+  index,
+  fieldOptions,
+  memberOptions,
+  departmentOptions,
+  onUpdateFlowBranch,
+  onAddFlowBranchCondition,
+  onRemoveFlowBranchCondition,
+  onUpdateFlowBranchCondition,
+}: {
+  nodeId: string;
+  branch: WorkflowConditionBranch;
+  index: number;
+  fieldOptions: ConditionFieldOption[];
+  memberOptions: Array<{ value: string; label: string }>;
+  departmentOptions: Array<{ value: string; label: string }>;
+  onUpdateFlowBranch: (nodeId: string, branchId: string, patch: Partial<WorkflowConditionBranch>) => void;
+  onAddFlowBranchCondition: (nodeId: string, branchId: string) => void;
+  onRemoveFlowBranchCondition: (nodeId: string, branchId: string, conditionId: string) => void;
+  onUpdateFlowBranchCondition: (nodeId: string, branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
+}) {
+  const conditions = branch.workflowConditions || [];
+  const editorBranch: WorkflowBranch = {
+    id: branch.id,
+    name: branch.title,
+    isDefault: Boolean(branch.isDefault),
+    conditions,
+    approvalSteps: [],
+  };
+
+  if (branch.isDefault) {
+    return (
+      <div className="rounded-2xl border border-border-silver bg-white px-4 py-3">
+        <p className="text-[13px] font-black text-midnight-graphite">{branch.title || '其余情况'}</p>
+        <p className="mt-1 text-[11px] font-bold text-medium-gray">其他条件都不命中时，自动进入这条分支。</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-border-silver bg-white p-4">
+      <div className="flex items-center justify-between gap-3">
+        <label className="min-w-0 flex-1 space-y-2">
+          <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">分支名称</span>
+          <input
+            className="input-field text-[14px]"
+            value={branch.title || `条件 ${index + 1}`}
+            onChange={(event) => onUpdateFlowBranch(nodeId, branch.id, { title: event.target.value })}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => onAddFlowBranchCondition(nodeId, branch.id)}
+          className="mt-6 h-9 shrink-0 rounded-full bg-black px-3 text-[12px] font-black text-white"
+        >
+          添加条件
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {conditions.map((condition, conditionIndex) => (
+          <React.Fragment key={condition.id}>
+            <ConditionEditor
+              branch={editorBranch}
+              condition={condition}
+              index={conditionIndex}
+              fieldOptions={fieldOptions}
+              memberOptions={memberOptions}
+              departmentOptions={departmentOptions}
+              onRemoveCondition={(branchId, conditionId) => onRemoveFlowBranchCondition(nodeId, branchId, conditionId)}
+              onUpdateCondition={(branchId, conditionId, patch) => onUpdateFlowBranchCondition(nodeId, branchId, conditionId, patch)}
+            />
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function StepEditor({
   branch,
   step,
   stepIndex,
   memberOptions,
+  directory,
+  previewSubmitter,
   validation,
   onSelect,
   onUpdateStep,
@@ -2132,6 +2266,8 @@ function StepEditor({
   step: ApprovalStep;
   stepIndex: number;
   memberOptions: Array<{ value: string; label: string }>;
+  directory: OrganizationDirectory;
+  previewSubmitter: OrganizationDirectory['members'][number] | null;
   validation: ValidationState;
   onSelect: (selection: DesignerSelection) => void;
   onUpdateStep: (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => void;
@@ -2204,23 +2340,31 @@ function StepEditor({
         )}
 
         {step.approverRule.type === 'multi_supervisor' && (
-          <label className="block space-y-2">
-            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">主管层级</span>
-            <input
-              className="input-field text-[14px]"
-              type="number"
-              min={1}
-              max={20}
-              value={Math.max(1, Number(step.approverRule.supervisorDepth) || 1)}
-              onChange={(event) => onUpdateStep(branch.id, step.id, {
-                approverRule: {
-                  ...step.approverRule,
-                  supervisorDepth: Math.max(1, Math.min(20, Number(event.target.value) || 1)),
-                },
-                approvalMode: 'one_of',
-              })}
+          <div className="space-y-2">
+            <label className="block space-y-2">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">主管层级</span>
+              <input
+                className="input-field text-[14px]"
+                type="number"
+                min={1}
+                max={20}
+                value={Math.max(1, Number(step.approverRule.supervisorDepth) || 1)}
+                onChange={(event) => onUpdateStep(branch.id, step.id, {
+                  approverRule: {
+                    ...step.approverRule,
+                    supervisorDepth: Math.max(1, Math.min(20, Number(event.target.value) || 1)),
+                  },
+                  approvalMode: 'one_of',
+                })}
+              />
+            </label>
+            <SupervisorChainPreview
+              rule={step.approverRule}
+              directory={directory}
+              previewSubmitter={previewSubmitter}
+              previewKey={step.id}
             />
-          </label>
+          </div>
         )}
 
         {step.approverRule.type === 'specific_members' && (
@@ -2301,6 +2445,7 @@ function DesignerInspector({
   memberOptions,
   departmentOptions,
   fieldOptions,
+  previewSubmitter,
   onSelect,
   onRemoveBranch,
   onUpdateBranch,
@@ -2314,6 +2459,11 @@ function DesignerInspector({
   onRemoveStep,
   onMoveStep,
   onUpdateFlowNode,
+  onUpdateFlowBranch,
+  onAddFlowBranchCondition,
+  onRemoveFlowBranchCondition,
+  onUpdateFlowBranchCondition,
+  onRemoveFlowNode,
 }: {
   selection: DesignerSelection;
   selectedBranch: WorkflowBranch | null;
@@ -2327,6 +2477,7 @@ function DesignerInspector({
   memberOptions: Array<{ value: string; label: string }>;
   departmentOptions: Array<{ value: string; label: string }>;
   fieldOptions: ConditionFieldOption[];
+  previewSubmitter: OrganizationDirectory['members'][number] | null;
   onSelect: (selection: DesignerSelection) => void;
   onRemoveBranch: (branchId: string) => void;
   onUpdateBranch: (branchId: string, patch: Partial<WorkflowBranch>) => void;
@@ -2340,6 +2491,11 @@ function DesignerInspector({
   onRemoveStep: (branchId: string, stepId: string) => void;
   onMoveStep: (branchId: string, stepId: string, direction: -1 | 1) => void;
   onUpdateFlowNode: (nodeId: string, patch: Partial<WorkflowNode>) => void;
+  onUpdateFlowBranch: (nodeId: string, branchId: string, patch: Partial<WorkflowConditionBranch>) => void;
+  onAddFlowBranchCondition: (nodeId: string, branchId: string) => void;
+  onRemoveFlowBranchCondition: (nodeId: string, branchId: string, conditionId: string) => void;
+  onUpdateFlowBranchCondition: (nodeId: string, branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
+  onRemoveFlowNode: (nodeId: string) => void;
 }) {
   const inspectorClassName = "border-t border-border-silver bg-white lg:sticky lg:top-20 lg:self-start lg:border-l lg:border-t-0 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto";
 
@@ -2368,6 +2524,13 @@ function DesignerInspector({
                 emptyText="暂无部门"
               />
             </label>
+            <button
+              type="button"
+              onClick={() => onRemoveFlowNode(selectedFlowNode.id)}
+              className="h-11 w-full rounded-full bg-[#ffebee] text-[13px] font-black text-[#c62828]"
+            >
+              删除这个节点
+            </button>
           </div>
         </aside>
       );
@@ -2386,7 +2549,32 @@ function DesignerInspector({
                 onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, { title: event.target.value })}
               />
             </label>
-            <div className="space-y-2">
+            <div className="space-y-3">
+              {(selectedFlowNode.conditions || []).map((condition, conditionIndex) => (
+                <React.Fragment key={condition.id}>
+                  <FlowConditionBranchEditor
+                    nodeId={selectedFlowNode.id}
+                    branch={condition}
+                    index={conditionIndex}
+                    fieldOptions={fieldOptions}
+                    memberOptions={memberOptions}
+                    departmentOptions={departmentOptions}
+                    onUpdateFlowBranch={onUpdateFlowBranch}
+                    onAddFlowBranchCondition={onAddFlowBranchCondition}
+                    onRemoveFlowBranchCondition={onRemoveFlowBranchCondition}
+                    onUpdateFlowBranchCondition={onUpdateFlowBranchCondition}
+                  />
+                </React.Fragment>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => onRemoveFlowNode(selectedFlowNode.id)}
+              className="h-11 w-full rounded-full bg-[#ffebee] text-[13px] font-black text-[#c62828]"
+            >
+              删除这个条件分化
+            </button>
+            <div className="hidden">
               {(selectedFlowNode.conditions || []).map((condition) => (
                 <div key={condition.id} className="rounded-2xl border border-border-silver bg-white px-4 py-3">
                   <p className="text-[13px] font-black text-midnight-graphite">{condition.title}</p>
@@ -2446,21 +2634,36 @@ function DesignerInspector({
             </label>
           )}
           {rule.type === 'multi_supervisor' && (
-            <label className="block space-y-2">
-              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">主管层级</span>
-              <input
-                className="input-field text-[14px]"
-                type="number"
-                min={1}
-                max={20}
-                value={Math.max(1, Number(rule.supervisorDepth) || 1)}
-                onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, {
-                  rule: { ...rule, supervisorDepth: Math.max(1, Math.min(20, Number(event.target.value) || 1)) },
-                  approvalMode: 'one_of',
-                })}
+            <div className="space-y-2">
+              <label className="block space-y-2">
+                <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">主管层级</span>
+                <input
+                  className="input-field text-[14px]"
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={Math.max(1, Number(rule.supervisorDepth) || 1)}
+                  onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, {
+                    rule: { ...rule, supervisorDepth: Math.max(1, Math.min(20, Number(event.target.value) || 1)) },
+                    approvalMode: 'one_of',
+                  })}
+                />
+              </label>
+              <SupervisorChainPreview
+                rule={rule}
+                directory={directory}
+                previewSubmitter={previewSubmitter}
+                previewKey={selectedFlowNode.id}
               />
-            </label>
+            </div>
           )}
+          <button
+            type="button"
+            onClick={() => onRemoveFlowNode(selectedFlowNode.id)}
+            className="h-11 w-full rounded-full bg-[#ffebee] text-[13px] font-black text-[#c62828]"
+          >
+            删除这个节点
+          </button>
         </div>
       </aside>
     );
@@ -2474,6 +2677,8 @@ function DesignerInspector({
           step={selectedStep}
           stepIndex={selectedBranch.approvalSteps.findIndex((step) => step.id === selectedStep.id)}
           memberOptions={memberOptions}
+          directory={directory}
+          previewSubmitter={previewSubmitter}
           validation={validation}
           onSelect={onSelect}
           onUpdateStep={onUpdateStep}
@@ -3105,6 +3310,44 @@ export default function WorkflowAdmin() {
     };
   });
 
+  const updateFlowBranchInTree = (
+    nodes: WorkflowNode[],
+    nodeId: string,
+    branchId: string,
+    updater: (branch: WorkflowConditionBranch) => WorkflowConditionBranch,
+  ): WorkflowNode[] => nodes.map((node) => {
+    if (node.type === 'condition' && node.id === nodeId) {
+      return {
+        ...node,
+        conditions: (node.conditions || []).map((condition) => (
+          condition.id === branchId ? updater(condition) : condition
+        )),
+      };
+    }
+
+    if (node.type !== 'condition') return node;
+    return {
+      ...node,
+      conditions: (node.conditions || []).map((condition) => ({
+        ...condition,
+        nodes: updateFlowBranchInTree(condition.nodes || [], nodeId, branchId, updater),
+      })),
+    };
+  });
+
+  const removeFlowNodeFromTree = (nodes: WorkflowNode[], nodeId: string): WorkflowNode[] => nodes
+    .filter((node) => node.id !== nodeId)
+    .map((node) => {
+      if (node.type !== 'condition') return node;
+      return {
+        ...node,
+        conditions: (node.conditions || []).map((condition) => ({
+          ...condition,
+          nodes: removeFlowNodeFromTree(condition.nodes || [], nodeId),
+        })),
+      };
+    });
+
   const syncFlowDraft = (current: WorkflowVersion, nextNodes: WorkflowNode[]): WorkflowVersion => ({
     ...current,
     flowMode: 'flexible',
@@ -3129,6 +3372,74 @@ export default function WorkflowAdmin() {
       const nextNodes = updateFlowNodeInTree(currentNodes, nodeId, patch);
       return syncFlowDraft(current, nextNodes);
     });
+  };
+
+  const updateFlowBranch = (nodeId: string, branchId: string, patch: Partial<WorkflowConditionBranch>) => {
+    patchDraft((current) => {
+      const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
+      const nextNodes = updateFlowBranchInTree(currentNodes, nodeId, branchId, (branch) => ({
+        ...branch,
+        ...patch,
+      }));
+      return syncFlowDraft(current, nextNodes);
+    });
+  };
+
+  const addFlowBranchCondition = (nodeId: string, branchId: string) => {
+    const defaultField = conditionFieldOptionsForDraft[0]?.value || 'submitter.department';
+    patchDraft((current) => {
+      const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
+      const nextNodes = updateFlowBranchInTree(currentNodes, nodeId, branchId, (branch) => {
+        const workflowConditions = [...(branch.workflowConditions || []), defaultCondition(defaultField)];
+        return {
+          ...branch,
+          workflowConditions,
+          expression: getFlowBranchExpression(workflowConditions),
+        };
+      });
+      return syncFlowDraft(current, nextNodes);
+    });
+  };
+
+  const removeFlowBranchCondition = (nodeId: string, branchId: string, conditionId: string) => {
+    patchDraft((current) => {
+      const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
+      const nextNodes = updateFlowBranchInTree(currentNodes, nodeId, branchId, (branch) => {
+        const workflowConditions = (branch.workflowConditions || []).filter((condition) => condition.id !== conditionId);
+        return {
+          ...branch,
+          workflowConditions,
+          expression: getFlowBranchExpression(workflowConditions),
+        };
+      });
+      return syncFlowDraft(current, nextNodes);
+    });
+  };
+
+  const updateFlowBranchCondition = (nodeId: string, branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => {
+    patchDraft((current) => {
+      const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
+      const nextNodes = updateFlowBranchInTree(currentNodes, nodeId, branchId, (branch) => {
+        const workflowConditions = (branch.workflowConditions || []).map((condition) => (
+          condition.id === conditionId ? normalizeCondition({ ...condition, ...patch }) : condition
+        ));
+        return {
+          ...branch,
+          workflowConditions,
+          expression: getFlowBranchExpression(workflowConditions),
+        };
+      });
+      return syncFlowDraft(current, nextNodes);
+    });
+  };
+
+  const removeFlowNode = (nodeId: string) => {
+    patchDraft((current) => {
+      const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
+      const nextNodes = removeFlowNodeFromTree(currentNodes, nodeId);
+      return syncFlowDraft(current, nextNodes);
+    });
+    setDesignerSelection(submitDesignerSelection);
   };
 
   const updateStep = (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => {
@@ -3415,6 +3726,11 @@ export default function WorkflowAdmin() {
               flowNodes={flowNodes}
               onInsertFlowNode={insertFlowNode}
               onUpdateFlowNode={updateFlowNode}
+              onUpdateFlowBranch={updateFlowBranch}
+              onAddFlowBranchCondition={addFlowBranchCondition}
+              onRemoveFlowBranchCondition={removeFlowBranchCondition}
+              onUpdateFlowBranchCondition={updateFlowBranchCondition}
+              onRemoveFlowNode={removeFlowNode}
             />
 
             <div className="hidden">
