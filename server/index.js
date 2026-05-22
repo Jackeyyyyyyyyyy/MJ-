@@ -866,6 +866,7 @@ function normalizeWorkflowCondition(condition, index = 0) {
     field,
     operator,
     ...(condition?.value !== undefined && condition?.value !== null ? { value: String(condition.value) } : {}),
+    ...(condition?.currencyValue ? { currencyValue: String(condition.currencyValue) } : {}),
     ...(Number.isFinite(Number(condition?.amountMin)) ? { amountMin: Number(condition.amountMin) } : {}),
     ...(Number.isFinite(Number(condition?.amountMax)) ? { amountMax: Number(condition.amountMax) } : {}),
     ...(condition?.expression ? { expression: String(condition.expression) } : {}),
@@ -1487,6 +1488,12 @@ function workflowConditionMatches(condition, context) {
   }
 
   if (isNumericWorkflowConditionField(condition.field) || actualNumber !== undefined) {
+    if (condition.currencyValue) {
+      const expectedSymbol = parseWorkflowCurrencySymbol(condition.currencyValue) || normalizeWorkflowText(condition.currencyValue);
+      const actualSymbol = parseWorkflowCurrencySymbol(findWorkflowCurrencyValue(context?.businessData)) || normalizeWorkflowText(findWorkflowCurrencyValue(context?.businessData));
+      if (!expectedSymbol || !actualSymbol || actualSymbol !== expectedSymbol) return false;
+    }
+
     if (condition.operator === 'between') {
       return actualNumber !== undefined
         && actualNumber > Number(condition.amountMin)
@@ -1817,7 +1824,7 @@ function resolveApproversForRule(rule, directory, applicantMember) {
   const approverRule = rule || { type: 'specified', memberIds: [] };
   let members = [];
 
-  if (approverRule.type === 'specified') {
+  if (approverRule.type === 'specified' || approverRule.type === 'specific_members') {
     members = (approverRule.memberIds || []).map((memberId) => findMemberById(directory, memberId)).filter(Boolean);
   } else if (approverRule.type === 'role') {
     members = getLegacyRoleGroupMemberIds(approverRule.roleGroupId).map((memberId) => findMemberById(directory, memberId)).filter(Boolean);

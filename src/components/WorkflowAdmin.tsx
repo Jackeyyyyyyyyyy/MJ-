@@ -636,6 +636,7 @@ function normalizeCondition(condition: Partial<WorkflowCondition> | undefined): 
     field,
     operator,
     value: condition?.value,
+    currencyValue: condition?.currencyValue,
     amountMin: Number.isFinite(Number(condition?.amountMin)) ? Number(condition?.amountMin) : undefined,
     amountMax: Number.isFinite(Number(condition?.amountMax)) ? Number(condition?.amountMax) : undefined,
     expression: condition?.expression,
@@ -897,13 +898,14 @@ function formatDate(value?: string) {
 function formatCondition(condition: WorkflowCondition) {
   const fieldLabel = getConditionFieldLabel(condition.field);
   if (isNumericConditionFieldValue(condition.field)) {
-    if (condition.operator === 'between') return `${fieldLabel} > ${condition.amountMin ?? '?'} 且 <= ${condition.amountMax ?? '?'}`;
-    if (condition.operator === 'lt') return `${fieldLabel} < ${condition.amountMax ?? '?'}`;
-    if (condition.operator === 'gt') return `${fieldLabel} > ${condition.amountMin ?? '?'}`;
-    if (condition.operator === 'gte') return `${fieldLabel} >= ${condition.amountMin ?? '?'}`;
-    if (condition.operator === 'lte') return `${fieldLabel} <= ${condition.amountMax ?? '?'}`;
-    if (condition.operator === 'neq') return `${fieldLabel} != ${condition.value || '?'}`;
-    return `${fieldLabel} = ${condition.value || '?'}`;
+    const currencyText = condition.currencyValue ? ` 且 币种 = ${condition.currencyValue}` : '';
+    if (condition.operator === 'between') return `${fieldLabel} > ${condition.amountMin ?? '?'} 且 <= ${condition.amountMax ?? '?'}${currencyText}`;
+    if (condition.operator === 'lt') return `${fieldLabel} < ${condition.amountMax ?? '?'}${currencyText}`;
+    if (condition.operator === 'gt') return `${fieldLabel} > ${condition.amountMin ?? '?'}${currencyText}`;
+    if (condition.operator === 'gte') return `${fieldLabel} >= ${condition.amountMin ?? '?'}${currencyText}`;
+    if (condition.operator === 'lte') return `${fieldLabel} <= ${condition.amountMax ?? '?'}${currencyText}`;
+    if (condition.operator === 'neq') return `${fieldLabel} != ${condition.value || '?'}${currencyText}`;
+    return `${fieldLabel} = ${condition.value || '?'}${currencyText}`;
   }
 
   const operator = conditionOperatorOptions.find((item) => item.value === condition.operator)?.label.split(' ')[0] || '=';
@@ -2077,6 +2079,17 @@ function ConditionValueControl({
   onUpdateCondition: (branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
 }) {
   const kind = getConditionFieldKind(condition.field);
+  const amountCurrencySelect = kind === 'number' ? (
+    <select
+      className="input-field text-[13px]"
+      value={condition.currencyValue || ''}
+      onChange={(event) => onUpdateCondition(branchId, condition.id, { currencyValue: event.target.value || undefined })}
+    >
+      <option value="">不限币种</option>
+      <option value="¥">¥</option>
+      <option value="$">$</option>
+    </select>
+  ) : null;
 
   if (kind === 'currency') {
     return (
@@ -2093,7 +2106,7 @@ function ConditionValueControl({
 
   if (kind === 'number' && condition.operator === 'between') {
     return (
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <input
           className="input-field text-[13px]"
           type="number"
@@ -2108,43 +2121,53 @@ function ConditionValueControl({
           onChange={(event) => onUpdateCondition(branchId, condition.id, { amountMax: event.target.value === '' ? undefined : Number(event.target.value) })}
           placeholder="上限"
         />
+        {amountCurrencySelect}
       </div>
     );
   }
 
   if (kind === 'number' && ['gt', 'gte'].includes(condition.operator)) {
     return (
-      <input
-        className="input-field text-[13px]"
-        type="number"
-        value={condition.amountMin ?? ''}
-        onChange={(event) => onUpdateCondition(branchId, condition.id, { amountMin: event.target.value === '' ? undefined : Number(event.target.value) })}
-        placeholder="金额下限"
-      />
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          className="input-field text-[13px]"
+          type="number"
+          value={condition.amountMin ?? ''}
+          onChange={(event) => onUpdateCondition(branchId, condition.id, { amountMin: event.target.value === '' ? undefined : Number(event.target.value) })}
+          placeholder="金额下限"
+        />
+        {amountCurrencySelect}
+      </div>
     );
   }
 
   if (kind === 'number' && ['lt', 'lte'].includes(condition.operator)) {
     return (
-      <input
-        className="input-field text-[13px]"
-        type="number"
-        value={condition.amountMax ?? ''}
-        onChange={(event) => onUpdateCondition(branchId, condition.id, { amountMax: event.target.value === '' ? undefined : Number(event.target.value) })}
-        placeholder="金额上限"
-      />
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          className="input-field text-[13px]"
+          type="number"
+          value={condition.amountMax ?? ''}
+          onChange={(event) => onUpdateCondition(branchId, condition.id, { amountMax: event.target.value === '' ? undefined : Number(event.target.value) })}
+          placeholder="金额上限"
+        />
+        {amountCurrencySelect}
+      </div>
     );
   }
 
   if (kind === 'number') {
     return (
-      <input
-        className="input-field text-[13px]"
-        type="number"
-        value={condition.value || ''}
-        onChange={(event) => onUpdateCondition(branchId, condition.id, { value: event.target.value })}
-        placeholder={`${getConditionFieldLabel(condition.field)}的值`}
-      />
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          className="input-field text-[13px]"
+          type="number"
+          value={condition.value || ''}
+          onChange={(event) => onUpdateCondition(branchId, condition.id, { value: event.target.value })}
+          placeholder={`${getConditionFieldLabel(condition.field)}的值`}
+        />
+        {amountCurrencySelect}
+      </div>
     );
   }
 

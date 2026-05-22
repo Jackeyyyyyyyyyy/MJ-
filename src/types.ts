@@ -87,6 +87,7 @@ export interface WorkflowCondition {
   field: WorkflowConditionField;
   operator: WorkflowConditionOperator;
   value?: string;
+  currencyValue?: string;
   amountMin?: number;
   amountMax?: number;
   expression?: string;
