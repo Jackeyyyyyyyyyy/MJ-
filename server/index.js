@@ -64,7 +64,7 @@ const protectedBusinessForms = new Set([
 const defaultAiAssistantPrompt =
   '你是 MJ 审批系统的管理助手，只做只读分析。你负责总结审批风险、发现异常、解释待办优先级，并引用相关审批单。不得编造数据，不得替用户做审批决定，不得建议绕过流程。回答要先给简短结论，再列关键原因；如果涉及具体单据，请在 relatedRecordIds 中返回对应 recordId。';
 const defaultAiPromptBase =
-  '你是 MJ 审批风控助手。请只根据申请字段判断资料完整性、业务合理性和明显风险，输出“低/中/高风险：建议……”，不超过 45 字，不编造未提供信息。';
+  '你是 MJ 审批风控助手。请只根据申请字段判断资料完整性、业务合理性和明显风险，输出“低/中/高风险：建议……”。请尽量简洁，但要把判断原因和建议讲清楚，不编造未提供信息。';
 const defaultAiPromptFocus = {
   '班列|班列供应商变更': '核对班列名称、发车日期、供应商与服务模式变更是否合理。',
   '任务|线路询价': '核对班列信息是否完整、询价是否必要。',
@@ -2487,10 +2487,6 @@ function normalizeAiSuggestionText(rawText) {
     displayText = `中风险：${displayText.replace(/^建议[:：]?/, '建议')}`;
   }
 
-  if (displayText.length > 90) {
-    displayText = `${displayText.slice(0, 89)}…`;
-  }
-
   return displayText;
 }
 
@@ -2517,9 +2513,6 @@ function toPublicRecord(record, user) {
     currentUserCanApprove: canUserApproveRecord(user, record),
     currentUserHasApproved: hasUserHandledWorkflowRecord(user, record) || record.approver === user?.name,
     currentUserIsCc: hasUserCcAccess(user, record),
-    ...(record.aiSuggestion && user?.role !== 'developer'
-      ? { aiSuggestion: (({ rawText, ...aiSuggestion }) => aiSuggestion)(record.aiSuggestion) }
-      : {}),
   };
 }
 
@@ -2575,7 +2568,7 @@ async function generateAiSuggestion({ moduleName, approvalTypeName, applicant, b
           },
         ],
         temperature: 0.2,
-        max_tokens: 120,
+        max_tokens: 800,
       }),
       signal: controller.signal,
     });

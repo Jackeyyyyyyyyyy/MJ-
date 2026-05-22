@@ -348,7 +348,7 @@ export default function App() {
             record={selectedOne}
             onClose={() => { setSelectedOne(null); setShowD(false); }}
             showAiSuggestion={canSeeAiSuggestion}
-            showAiRawResponse={isSuperAdminPerspective}
+            showAiRawResponse={canSeeAiSuggestion}
             onApprove={canReview && selectedOne?.currentUserCanApprove ? (record) => { setShowD(false); void handleDynamicApprove(record); } : undefined}
             onReject={canReview && selectedOne?.currentUserCanApprove ? (record) => { setShowD(false); void handleDynamicReject(record); } : undefined}
           />
