@@ -88,7 +88,7 @@ export default function AiBranchLogs() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-[11px] font-black uppercase tracking-[0.2em] text-light-gray">System Admin</p>
-          <h1 className="mt-1 text-2xl font-bold text-midnight-graphite">AI 条件分化日志</h1>
+          <h1 className="mt-1 text-2xl font-black text-midnight-graphite tracking-tight">AI 条件分化日志</h1>
         </div>
         <button
           type="button"

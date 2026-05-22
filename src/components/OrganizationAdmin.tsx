@@ -776,8 +776,7 @@ export default function OrganizationAdmin() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-[11px] font-black text-light-gray uppercase tracking-[0.2em]">System Admin</p>
-          <h1 className="text-2xl font-black text-midnight-graphite tracking-tight">组织架构</h1>
-          <p className="mt-2 text-[14px] font-medium text-medium-gray">维护公司部门、成员通讯录和登录账号绑定。</p>
+          <h1 className="mt-1 text-2xl font-black text-midnight-graphite tracking-tight">组织架构</h1>
         </div>
         <button
           onClick={handleSave}

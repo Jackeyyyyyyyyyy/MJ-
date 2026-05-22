@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Check, KeyRound, Plus, RefreshCw, ShieldCheck, UserCog, Users } from 'lucide-react';
 import { storage } from '../storage';
 import { AccountInput, Role, SystemAccount } from '../types';
-import StatsOverview from './StatsOverview';
 import { cn } from '../lib/utils';
 
 type ManagedRole = Exclude<Role, 'developer'>;
@@ -159,11 +158,28 @@ export default function AccountPermissionAdmin() {
 
   return (
     <div className="space-y-8 pb-40 animate-in fade-in duration-700">
-      <StatsOverview
-        title="账号权限管理"
-        subtitle="账号是登录标识，姓名和职位优先来自组织架构"
-        items={summaryItems}
-      />
+      <div>
+        <p className="text-[11px] font-black uppercase tracking-[0.2em] text-light-gray">System Admin</p>
+        <h1 className="mt-1 text-2xl font-black text-midnight-graphite tracking-tight">账号权限管理</h1>
+      </div>
+
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {summaryItems.map((item) => (
+          <div key={item.label} className="min-h-[86px] rounded-lg border border-border-silver bg-white px-4 py-3 flex items-center justify-between gap-3">
+            <div className="min-w-0 flex flex-col gap-1">
+              <span className="text-[11px] font-bold text-light-gray tracking-widest">{item.label}</span>
+              <span className="text-[24px] leading-none font-bold text-midnight-graphite tracking-tight">{item.value}</span>
+            </div>
+            <div className={cn(
+              "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+              item.bg || "bg-lightest-gray-background",
+              item.tone || "text-midnight-graphite",
+            )}>
+              <item.icon size={16} strokeWidth={2.5} />
+            </div>
+          </div>
+        ))}
+      </section>
 
       <section className="bg-white border border-border-silver rounded-lg overflow-hidden">
         <div className="px-5 py-4 border-b border-border-silver flex items-center justify-between gap-4">

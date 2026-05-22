@@ -1,5 +1,5 @@
 import React from 'react';
-import { Edit3, FilePlus2, Loader2, Lock, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
+import { Edit3, Loader2, Lock, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
 import { approvalSchema, replaceApprovalSchema } from '../approvalSchema';
 import { storage } from '../storage';
 import { ApprovalType, Module } from '../types';
@@ -146,12 +146,9 @@ export default function BusinessFormAdmin() {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-3 text-[12px] font-black uppercase tracking-wider text-interactive-blue">
-          <FilePlus2 size={16} strokeWidth={2.5} />
-          <span>业务表单</span>
-        </div>
-        <h1 className="text-[30px] font-black tracking-tight text-midnight-graphite">
+      <div>
+        <p className="text-[11px] font-black uppercase tracking-[0.2em] text-light-gray">System Admin</p>
+        <h1 className="mt-1 text-2xl font-black tracking-tight text-midnight-graphite">
           {isEditing ? '编辑业务表单' : '新建业务表单'}
         </h1>
       </div>

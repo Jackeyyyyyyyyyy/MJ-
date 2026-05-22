@@ -3912,8 +3912,8 @@ export default function WorkflowAdmin() {
     <div className="space-y-4 pb-16 animate-in fade-in duration-500">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <p className="text-[11px] font-black text-light-gray uppercase tracking-[0.2em]">Workflow Config</p>
-          <h1 className="text-2xl font-black text-midnight-graphite tracking-tight">审批流配置</h1>
+          <p className="text-[11px] font-black text-light-gray uppercase tracking-[0.2em]">System Admin</p>
+          <h1 className="mt-1 text-2xl font-black text-midnight-graphite tracking-tight">审批流配置</h1>
           <p className="hidden">配置模板、提交范围、条件分支、审批节点与抄送规则。</p>
         </div>
         <div className="hidden">
