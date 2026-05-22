@@ -89,6 +89,11 @@ interface SupplierQuotationInfoValue {
   attachments: ApprovalAttachment[];
 }
 
+interface MoneyInputValue {
+  currency: string;
+  amount: string;
+}
+
 interface CreateApprovalModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -135,6 +140,7 @@ const supplierRoleServiceColumns: Array<{ key: keyof SupplierRoleServiceRow; lab
 ];
 
 const projectCargoOptions = ['项目货', '非项目货'];
+const currencyOptions = ['CNY', 'USD', 'EUR', 'HKD', 'JPY', 'GBP'];
 
 const supplierQuotationColumns: Array<{ key: keyof SupplierQuotationRow; label: string; placeholder: string }> = [
   { key: 'truckType', label: '拖车类型', placeholder: '输入拖车类型' },
@@ -251,6 +257,41 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error(`读取文件失败：${file.name}`));
     reader.readAsDataURL(file);
   });
+}
+
+function isMoneyField(field: string) {
+  return /金额|价格|利润|总额/.test(field);
+}
+
+function isNumericField(field: string) {
+  return isMoneyField(field) || field.includes('汇率');
+}
+
+function isMoneyInputValue(value: unknown): value is MoneyInputValue {
+  return !!value
+    && typeof value === 'object'
+    && 'currency' in value
+    && 'amount' in value;
+}
+
+function toMoneyInputValue(value: unknown): MoneyInputValue {
+  if (isMoneyInputValue(value)) {
+    return {
+      currency: String(value.currency || 'CNY'),
+      amount: String(value.amount || ''),
+    };
+  }
+
+  if (typeof value === 'string') {
+    const matchedCurrency = currencyOptions.find((currency) => value.toUpperCase().includes(currency));
+    const matchedAmount = value.replace(/,/g, '').match(/-?\d+(?:\.\d+)?/)?.[0] || '';
+    return {
+      currency: matchedCurrency || (value.includes('$') ? 'USD' : 'CNY'),
+      amount: matchedAmount || value,
+    };
+  }
+
+  return { currency: 'CNY', amount: '' };
 }
 
 export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: CreateApprovalModalProps) {
@@ -462,6 +503,21 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
 
         if (hasEmptyCargoChoice) {
           newErrors[field] = '请选择项目货类型';
+        }
+        return;
+      }
+
+      if (isMoneyField(field)) {
+        const moneyValue = toMoneyInputValue(value);
+        if (!moneyValue.currency || !moneyValue.amount || !Number.isFinite(Number(moneyValue.amount))) {
+          newErrors[field] = '请填写币种和数字金额';
+        }
+        return;
+      }
+
+      if (isNumericField(field)) {
+        if (!String(value || '').trim() || !Number.isFinite(Number(value))) {
+          newErrors[field] = '请填写数字';
         }
         return;
       }
@@ -1069,7 +1125,8 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
                 {columns.map((column) => (
                   <div key={column.key} className="p-2">
                     <input
-                      type="text"
+                      type={column.type === 'number' ? 'number' : 'text'}
+                      inputMode={column.type === 'number' ? 'decimal' : undefined}
                       value={row[column.key]}
                       onChange={(event) => updateStructuredDetail(field, rowIndex, String(column.key), event.target.value)}
                       className="w-full h-10 px-2 bg-canvas-white border border-transparent focus:border-interactive-blue outline-none text-[13px] font-semibold"
@@ -1126,7 +1183,8 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     const isDate = field.includes('日期') || field.includes('时间');
-    const isMoney = field.includes('金额') || field.includes('价格') || field.includes('利润') || field.includes('汇率');
+    const isMoney = isMoneyField(field);
+    const isNumeric = isNumericField(field);
     const isFile = field.includes('附件');
 
     if (isFile) {
@@ -1161,10 +1219,53 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       );
     }
 
+    if (isMoney) {
+      const moneyValue = toMoneyInputValue(formData[field]);
+
+      return (
+        <div className={cn(
+          "grid grid-cols-[110px_minmax(0,1fr)] gap-3 border-b border-border-silver focus-within:border-interactive-blue transition-colors",
+          errors[field] && "border-rose-500"
+        )}>
+          <select
+            value={moneyValue.currency}
+            onChange={(event) => handleInputChange(field, {
+              ...moneyValue,
+              currency: event.target.value,
+            })}
+            className="h-12 bg-transparent outline-none text-[14px] font-bold text-midnight-graphite"
+            aria-label={`${field}币种`}
+          >
+            {currencyOptions.map((currency) => (
+              <option key={currency} value={currency}>{currency}</option>
+            ))}
+          </select>
+          <div className="relative">
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              min="0"
+              className="input-field border-0 px-0 pr-9 focus:border-transparent"
+              placeholder={`输入${field}`}
+              value={moneyValue.amount}
+              onChange={(event) => handleInputChange(field, {
+                ...moneyValue,
+                amount: event.target.value,
+              })}
+            />
+            <DollarSign className="absolute right-1 top-1/2 -translate-y-1/2 text-light-silver w-4 h-4" />
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="relative">
         <input
-          type={isDate ? 'date' : 'text'}
+          type={isDate ? 'date' : (isNumeric ? 'number' : 'text')}
+          inputMode={isNumeric ? 'decimal' : undefined}
+          step={isNumeric ? '0.01' : undefined}
           className={cn(
             "input-field border-b border-border-silver focus:border-interactive-blue transition-colors",
             errors[field] && "border-rose-500"
@@ -1173,7 +1274,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
           value={formData[field]}
           onChange={(e) => handleInputChange(field, e.target.value)}
         />
-        {isMoney && <DollarSign className="absolute right-4 top-1/2 -translate-y-1/2 text-light-silver w-4 h-4" />}
+        {isNumeric && <DollarSign className="absolute right-4 top-1/2 -translate-y-1/2 text-light-silver w-4 h-4" />}
         {isDate && <Calendar className="absolute right-4 top-1/2 -translate-y-1/2 text-light-silver w-4 h-4 pointer-events-none" />}
       </div>
     );

@@ -90,6 +90,7 @@ const numericConditionOperators = new Set<WorkflowConditionOperator>(['lt', 'lte
 const currencyConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'neq']);
 const textConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'neq', 'contains', 'not_contains']);
 const identityConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'neq']);
+const workflowCurrencyOptions = ['CNY', 'USD', 'EUR', 'HKD', 'JPY', 'GBP'];
 
 function getBusinessScopeOptions(): BusinessScopeOption[] {
   return approvalSchema.modules.flatMap((module) => (
@@ -221,9 +222,17 @@ function isNumericConditionFieldValue(field: string) {
   return field === 'amount' || /金额|价格|费用|利润|汇率|数量|总额|时长|天数|小时/.test(field);
 }
 
+function isAmountCurrencyBusinessField(field: string) {
+  return /金额|价格|利润|总额/.test(field);
+}
+
+function scopeSupportsAmountCurrencyConditions(scope?: BusinessScopeOption | null) {
+  return Boolean(scope?.fields?.some(isAmountCurrencyBusinessField));
+}
+
 function getConditionFieldLabel(field: string) {
   if (field === 'amount') return '金额';
-  if (field === 'currency') return '币种符号';
+  if (field === 'currency') return '币种';
   if (field === 'amount') return '金额';
   if (field === 'submitter.member') return '提交人';
   if (field === 'submitter.department') return '提交人部门';
@@ -251,21 +260,12 @@ function getFallbackConditionOperator(field: string): WorkflowConditionOperator 
 }
 
 function getConditionFieldOptions(draft: WorkflowVersion | null): ConditionFieldOption[] {
-  return [
-    { value: 'amount', label: '金额', kind: 'number' },
-    { value: 'currency', label: '币种符号', kind: 'currency' },
-  ];
   const scope = draft ? getBusinessScopeByNames(draft.basic.moduleName, draft.basic.approvalTypeName) : null;
-  const formFieldOptions = (scope?.fields || []).map((field) => ({
-    value: `${FORM_FIELD_PREFIX}${field}`,
-    label: `表单 / ${field}`,
-    kind: isNumericConditionFieldValue(field) ? 'number' as const : 'text' as const,
-  }));
+  if (!scopeSupportsAmountCurrencyConditions(scope)) return [];
 
   return [
-    { value: 'submitter.member', label: '提交人 / 本人', kind: 'member' },
-    { value: 'submitter.department', label: '提交人 / 部门', kind: 'department' },
-    ...formFieldOptions,
+    { value: 'amount', label: '金额', kind: 'number' },
+    { value: 'currency', label: '币种', kind: 'currency' },
   ];
 }
 
@@ -292,7 +292,7 @@ function defaultCondition(field: WorkflowConditionField = 'amount'): WorkflowCon
       id: createId('cond'),
       field,
       operator: 'eq',
-      value: '¥',
+      value: 'CNY',
     };
   }
 
@@ -646,23 +646,20 @@ function normalizeCondition(condition: Partial<WorkflowCondition> | undefined): 
 }
 
 function getAllowedConditionFields(scope: BusinessScopeOption) {
-  return new Set<WorkflowConditionField>([
-    'currency',
-    'amount',
-  ]);
+  if (!scopeSupportsAmountCurrencyConditions(scope)) return new Set<WorkflowConditionField>();
+  return new Set<WorkflowConditionField>(['amount', 'currency']);
 }
 
 function getFallbackConditionField(scope: BusinessScopeOption): WorkflowConditionField {
-  return 'amount';
+  return getAllowedConditionFields(scope).values().next().value || '';
 }
 
 function rebaseConditionToScope(condition: WorkflowCondition, scope: BusinessScopeOption): WorkflowCondition {
   const allowedFields = getAllowedConditionFields(scope);
   if (allowedFields.has(condition.field)) return normalizeCondition(condition);
 
-  const nextField = condition.field === 'department'
-    ? 'submitter.department'
-    : getFallbackConditionField(scope);
+  const nextField = getFallbackConditionField(scope);
+  if (!nextField) return normalizeCondition(condition);
 
   return {
     ...defaultCondition(nextField),
@@ -847,6 +844,8 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
 
   const branches = draft.branches || [];
   const aiBranchIds = collectAiConditionBranchIds(flowNodesFromDraft(draft));
+  const scope = getBusinessScopeByNames(draft.basic?.moduleName, draft.basic?.approvalTypeName);
+  const canUseRuleConditions = scopeSupportsAmountCurrencyConditions(scope);
   if (!branches.some((branch) => branch.isDefault)) {
     addValidationError(state, 'branches', '必须包含 default branch');
   }
@@ -855,6 +854,10 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
     const branchLabel = branch.name || `Branch ${branchIndex + 1}`;
     const isAiBranch = branch.conditionMode === 'ai' || aiBranchIds.has(branch.id);
     if (!branch.isDefault && !isAiBranch) {
+      if (!canUseRuleConditions) {
+        addValidationError(state, 'branches', `${branchLabel} 所属表单没有金额类字段，不能使用金额/币种条件分化`, branch.id);
+      }
+
       if (branch.conditions.length === 0) {
         addValidationError(state, 'branches', `${branchLabel} 必须配置条件`, branch.id);
       }
@@ -1370,11 +1373,13 @@ function FlowInsertButton({
   onCondition,
   onAiCondition,
   onCc,
+  canUseRuleConditions,
 }: {
   onApproval: () => void;
   onCondition: (branchCount: number) => void;
   onAiCondition: (branchCount: number) => void;
   onCc: () => void;
+  canUseRuleConditions: boolean;
 }) {
   const [isOpen, setIsOpen] = React.useState(false);
   const items = [
@@ -1412,7 +1417,9 @@ function FlowInsertButton({
           ))}
           <div className="my-1 h-px bg-border-silver" />
           {[
-            { label: '添加条件分化', icon: <GitBranch size={14} strokeWidth={2.4} />, onClick: onCondition },
+            ...(canUseRuleConditions
+              ? [{ label: '添加条件分化', icon: <GitBranch size={14} strokeWidth={2.4} />, onClick: onCondition }]
+              : []),
             { label: '添加 AI 条件分化', icon: <Bot size={14} strokeWidth={2.4} />, onClick: onAiCondition },
           ].map((group) => (
             <div key={group.label} className="px-1 py-1">
@@ -1617,9 +1624,11 @@ function resizeConditionBranches(
 function FlowGap({
   onInsert,
   compact,
+  canUseRuleConditions,
 }: {
   onInsert: (kind: FlowInsertKind, branchCount?: number) => void;
   compact?: boolean;
+  canUseRuleConditions: boolean;
 }) {
   return (
     <>
@@ -1629,6 +1638,7 @@ function FlowGap({
         onCondition={(branchCount) => onInsert('condition', branchCount)}
         onAiCondition={(branchCount) => onInsert('ai-condition', branchCount)}
         onCc={() => onInsert('cc')}
+        canUseRuleConditions={canUseRuleConditions}
       />
       <FlowConnector compact={compact} />
     </>
@@ -1675,6 +1685,7 @@ function FlowSequence({
   selection,
   onSelect,
   onInsert,
+  canUseRuleConditions,
 }: {
   nodes: WorkflowNode[];
   path: string[];
@@ -1683,10 +1694,11 @@ function FlowSequence({
   selection: DesignerSelection;
   onSelect: (selection: DesignerSelection) => void;
   onInsert: (path: string[], index: number, kind: FlowInsertKind, branchCount?: number) => void;
+  canUseRuleConditions: boolean;
 }) {
   return (
     <div className="flex w-full flex-col items-center">
-      <FlowGap compact onInsert={(kind, branchCount) => onInsert(path, 0, kind, branchCount)} />
+      <FlowGap compact canUseRuleConditions={canUseRuleConditions} onInsert={(kind, branchCount) => onInsert(path, 0, kind, branchCount)} />
       {nodes.map((node, index) => (
         <React.Fragment key={node.id}>
           <div className="w-[300px]">
@@ -1738,6 +1750,7 @@ function FlowSequence({
                       selection={selection}
                       onSelect={onSelect}
                       onInsert={onInsert}
+                      canUseRuleConditions={canUseRuleConditions}
                     />
                   </FlowBranchLane>
                 ))}
@@ -1746,7 +1759,7 @@ function FlowSequence({
             </div>
           )}
 
-          <FlowGap compact onInsert={(kind, branchCount) => onInsert(path, index + 1, kind, branchCount)} />
+          <FlowGap compact canUseRuleConditions={canUseRuleConditions} onInsert={(kind, branchCount) => onInsert(path, index + 1, kind, branchCount)} />
         </React.Fragment>
       ))}
     </div>
@@ -2095,6 +2108,7 @@ function WorkflowFlowDesigner({
                 selection={activeSelection}
                 onSelect={onSelect}
                 onInsert={onInsertFlowNode}
+                canUseRuleConditions={fieldOptions.length > 0}
               />
               <div className="w-[180px]">
                 <FlowNode
@@ -2212,8 +2226,9 @@ function ConditionValueControl({
       onChange={(event) => onUpdateCondition(branchId, condition.id, { currencyValue: event.target.value || undefined })}
     >
       <option value="">不限币种</option>
-      <option value="¥">¥</option>
-      <option value="$">$</option>
+      {workflowCurrencyOptions.map((currency) => (
+        <option key={currency} value={currency}>{currency}</option>
+      ))}
     </select>
   ) : null;
 
@@ -2221,11 +2236,12 @@ function ConditionValueControl({
     return (
       <select
         className="input-field text-[13px]"
-        value={condition.value || '¥'}
+        value={condition.value || 'CNY'}
         onChange={(event) => onUpdateCondition(branchId, condition.id, { value: event.target.value })}
       >
-        <option value="¥">¥</option>
-        <option value="$">$</option>
+        {workflowCurrencyOptions.map((currency) => (
+          <option key={currency} value={currency}>{currency}</option>
+        ))}
       </select>
     );
   }
@@ -2463,7 +2479,11 @@ function FlowConditionBranchEditor({
         <button
           type="button"
           onClick={() => onAddFlowBranchCondition(nodeId, branch.id)}
-          className={cn("mt-6 h-9 shrink-0 rounded-full bg-black px-3 text-[12px] font-black text-white", isAiCondition && "hidden")}
+          disabled={!fieldOptions.length}
+          className={cn(
+            "mt-6 h-9 shrink-0 rounded-full bg-black px-3 text-[12px] font-black text-white disabled:cursor-not-allowed disabled:opacity-40",
+            isAiCondition && "hidden",
+          )}
         >
           添加条件
         </button>
@@ -2481,6 +2501,11 @@ function FlowConditionBranchEditor({
         </label>
       ) : (
       <div className="space-y-3">
+        {!fieldOptions.length && (
+          <div className="rounded-xl bg-[#fff7e6] px-3 py-2 text-[12px] font-bold text-[#9a5b00]">
+            当前业务表单没有金额类字段，不能配置金额/币种条件分化。
+          </div>
+        )}
         {conditions.map((condition, conditionIndex) => (
           <React.Fragment key={condition.id}>
             <ConditionEditor
@@ -3437,7 +3462,12 @@ export default function WorkflowAdmin() {
   };
 
   const addCondition = (branchId: string) => {
-    const defaultField = conditionFieldOptionsForDraft[0]?.value || 'submitter.department';
+    const defaultField = conditionFieldOptionsForDraft[0]?.value;
+    if (!defaultField) {
+      window.alert('当前业务表单没有金额类字段，不能添加金额/币种条件。');
+      return;
+    }
+
     patchDraft((current) => ({
       ...current,
       branches: (current.branches || []).map((branch) => (
@@ -3460,8 +3490,13 @@ export default function WorkflowAdmin() {
   };
 
   const addBranch = () => {
+    const defaultField = conditionFieldOptionsForDraft[0]?.value;
+    if (!defaultField) {
+      window.alert('当前业务表单没有金额类字段，不能新增金额/币种条件分支。');
+      return;
+    }
+
     const branchId = createId('branch');
-    const defaultField = conditionFieldOptionsForDraft[0]?.value || 'submitter.department';
     patchDraft((current) => {
       const branchCount = (current.branches || []).filter((branch) => !branch.isDefault).length + 1;
       const branches = current.branches || [defaultBranch()];
@@ -3520,7 +3555,7 @@ export default function WorkflowAdmin() {
       const isAiCondition = kind === 'ai-condition';
       const field = conditionFieldOptionsForDraft.find((option) => option.kind === 'number')?.value
         || conditionFieldOptionsForDraft[0]?.value
-        || 'submitter.department';
+        || 'amount';
 
       return {
         id: createId('flow-condition'),
@@ -3666,6 +3701,11 @@ export default function WorkflowAdmin() {
   });
 
   const insertFlowNode = (path: string[], index: number, kind: FlowInsertKind, branchCount?: number) => {
+    if (kind === 'condition' && conditionFieldOptionsForDraft.length === 0) {
+      window.alert('当前业务表单没有金额类字段，不能添加金额/币种条件分化。');
+      return;
+    }
+
     const nextNode = createFlowNode(kind, index, branchCount);
     patchDraft((current) => {
       const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
@@ -3686,7 +3726,7 @@ export default function WorkflowAdmin() {
   const updateFlowConditionBranchCount = (nodeId: string, branchCount: number) => {
     const field = conditionFieldOptionsForDraft.find((option) => option.kind === 'number')?.value
       || conditionFieldOptionsForDraft[0]?.value
-      || 'submitter.department';
+      || 'amount';
     patchDraft((current) => {
       const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
       const resizedNodes = resizeFlowConditionNodeInTree(currentNodes, nodeId, branchCount, field);
@@ -3706,7 +3746,12 @@ export default function WorkflowAdmin() {
   };
 
   const addFlowBranchCondition = (nodeId: string, branchId: string) => {
-    const defaultField = conditionFieldOptionsForDraft[0]?.value || 'submitter.department';
+    const defaultField = conditionFieldOptionsForDraft[0]?.value;
+    if (!defaultField) {
+      window.alert('当前业务表单没有金额类字段，不能添加金额/币种条件。');
+      return;
+    }
+
     patchDraft((current) => {
       const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
       const nextNodes = updateFlowBranchInTree(currentNodes, nodeId, branchId, (branch) => {

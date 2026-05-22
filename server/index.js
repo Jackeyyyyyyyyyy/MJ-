@@ -1571,6 +1571,9 @@ async function findPublishedWorkflow(moduleName, approvalTypeName) {
 
 function parseWorkflowNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value && typeof value === 'object') {
+    return parseWorkflowNumber(value.amount ?? value.value ?? value.number);
+  }
   if (typeof value !== 'string') return undefined;
 
   const normalized = value.replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
@@ -1581,10 +1584,21 @@ function parseWorkflowNumber(value) {
 }
 
 function parseWorkflowCurrencySymbol(value) {
+  if (value && typeof value === 'object') {
+    return parseWorkflowCurrencySymbol(value.currency ?? value.currencyValue ?? value.symbol);
+  }
+
   const text = normalizeWorkflowText(value);
   if (!text) return undefined;
+  const lowerText = text.toLowerCase();
   if (text.includes('¥') || text.includes('￥')) return '¥';
   if (text.includes('$')) return '$';
+  if (lowerText.includes('cny') || lowerText.includes('rmb')) return 'CNY';
+  if (lowerText.includes('usd')) return 'USD';
+  if (lowerText.includes('eur')) return 'EUR';
+  if (lowerText.includes('hkd')) return 'HKD';
+  if (lowerText.includes('jpy')) return 'JPY';
+  if (lowerText.includes('gbp')) return 'GBP';
   return undefined;
 }
 

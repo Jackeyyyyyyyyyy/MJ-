@@ -31,6 +31,18 @@ function isPlainDisplayObject(value: unknown): value is Record<string, unknown> 
   return !!value && typeof value === 'object' && !Array.isArray(value) && !isAttachmentList(value);
 }
 
+function isMoneyDisplayObject(value: unknown): value is { currency?: unknown; amount?: unknown } {
+  return !!value
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && 'currency' in value
+    && 'amount' in value;
+}
+
+function formatMoneyDisplay(value: { currency?: unknown; amount?: unknown }) {
+  return [value.currency, value.amount].filter((item) => String(item || '').trim()).join(' ');
+}
+
 interface PreviewState {
   attachment: ApprovalAttachment;
   url: string;
@@ -655,6 +667,10 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                             </div>
                           ))}
                         </div>
+                      ) : isMoneyDisplayObject(value) ? (
+                        <span className="text-[17px] font-black text-black tracking-tight text-right break-all">
+                          {formatMoneyDisplay(value) || '-'}
+                        </span>
                       ) : isPlainDisplayObject(value) ? (
                         <div className="min-w-0 flex flex-col items-end gap-2">
                           {Object.entries(value).map(([itemKey, itemValue]) => (

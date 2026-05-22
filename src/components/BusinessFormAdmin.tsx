@@ -1,5 +1,5 @@
 import React from 'react';
-import { Edit3, Loader2, Lock, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
+import { DollarSign, Edit3, Loader2, Lock, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
 import { approvalSchema, replaceApprovalSchema } from '../approvalSchema';
 import { storage } from '../storage';
 import { ApprovalType, Module } from '../types';
@@ -38,6 +38,20 @@ function getFieldText(type: ApprovalType) {
   return type.businessFields.join('\n');
 }
 
+function isAmountCurrencyField(field: string) {
+  return /金额|价格|利润|总额/.test(field);
+}
+
+function isCurrencyOnlyField(field: string) {
+  return /^(币种|币别|货币|收款币种|付款币种)$/.test(field.trim());
+}
+
+function getFieldKindLabel(field: string) {
+  if (isAmountCurrencyField(field)) return '金额+币种';
+  if (isCurrencyOnlyField(field)) return '币种';
+  return '';
+}
+
 export default function BusinessFormAdmin() {
   const [moduleName, setModuleName] = React.useState('');
   const [approvalTypeName, setApprovalTypeName] = React.useState('');
@@ -48,8 +62,18 @@ export default function BusinessFormAdmin() {
   const [isSaving, setIsSaving] = React.useState(false);
 
   const businessFields = React.useMemo(() => normalizeFields(fieldText), [fieldText]);
+  const hasAmountCurrencyField = businessFields.some(isAmountCurrencyField);
+  const hasCurrencyOnlyField = businessFields.some(isCurrencyOnlyField);
   const moduleOptions = approvalSchema.modules.map((module) => module.name);
   const isEditing = Boolean(editingTarget);
+
+  const updateBusinessFields = (fields: string[]) => {
+    setFieldText([...new Set(fields.map((field) => field.trim()).filter(Boolean))].join('\n'));
+  };
+
+  const appendBusinessField = (field: string) => {
+    updateBusinessFields([...businessFields, field]);
+  };
 
   const resetForm = () => {
     setModuleName('');
@@ -216,21 +240,72 @@ export default function BusinessFormAdmin() {
             />
           </label>
 
+          <div className="rounded-2xl border border-[#d8e8ff] bg-[#f5fbff] p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
+                  <DollarSign size={15} strokeWidth={2.8} />
+                  金额字段
+                </div>
+                <p className="mt-1 text-[12px] font-semibold text-medium-gray">
+                  字段名包含金额、价格、利润、总额时，发起申请会自动使用“币种 + 数字金额”，后续条件分化也会识别。
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                {['申请金额', '付款金额', '合同总额'].map((field) => (
+                  <button
+                    key={field}
+                    type="button"
+                    onClick={() => appendBusinessField(field)}
+                    disabled={businessFields.includes(field)}
+                    className="h-9 rounded-full bg-white px-3 text-[12px] font-black text-interactive-blue shadow-sm transition-colors hover:bg-[#e7f1ff] disabled:cursor-not-allowed disabled:text-light-gray"
+                  >
+                    {businessFields.includes(field) ? '已添加' : `添加${field}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {hasCurrencyOnlyField && !hasAmountCurrencyField && (
+              <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-[12px] font-bold text-amber-700">
+                当前只有币种字段，没有金额类字段；普通条件分化需要金额类字段才会开放。
+              </div>
+            )}
+          </div>
+
           {businessFields.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              {businessFields.map((field) => (
-                <span key={field} className="inline-flex items-center gap-1.5 rounded-full bg-lightest-gray-background px-3 py-1.5 text-[12px] font-bold text-midnight-graphite">
-                  {field}
-                  <button
-                    type="button"
-                    onClick={() => setFieldText(businessFields.filter((item) => item !== field).join('\n'))}
-                    className="text-light-gray hover:text-rose-500"
-                    aria-label={`移除 ${field}`}
+              {businessFields.map((field) => {
+                const fieldKindLabel = getFieldKindLabel(field);
+
+                return (
+                  <span
+                    key={field}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-bold",
+                      isAmountCurrencyField(field)
+                        ? "bg-[#e7f1ff] text-interactive-blue"
+                        : isCurrencyOnlyField(field)
+                          ? "bg-amber-50 text-amber-700"
+                          : "bg-lightest-gray-background text-midnight-graphite",
+                    )}
                   >
-                    <X size={12} strokeWidth={3} />
-                  </button>
-                </span>
-              ))}
+                    {field}
+                    {fieldKindLabel && (
+                      <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black">
+                        {fieldKindLabel}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => updateBusinessFields(businessFields.filter((item) => item !== field))}
+                      className="text-light-gray hover:text-rose-500"
+                      aria-label={`移除 ${field}`}
+                    >
+                      <X size={12} strokeWidth={3} />
+                    </button>
+                  </span>
+                );
+              })}
             </div>
           )}
 
