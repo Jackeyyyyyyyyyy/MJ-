@@ -126,7 +126,13 @@ export default function AiBranchLogs() {
               const isReasonExpanded = expandedReasonIds.has(log.id);
               const canToggleReason = reasonText.length > 54;
               return (
-                <div key={log.id} className="grid grid-cols-[140px_1.2fr_1fr_110px_1.5fr] gap-4 px-5 py-4 text-[13px]">
+                <div
+                  key={log.id}
+                  className={cn(
+                    'grid grid-cols-[140px_1.2fr_1fr_110px_1.5fr] gap-4 px-5 py-4 text-[13px]',
+                    !isReasonExpanded && 'h-[112px]',
+                  )}
+                >
                   <span className="font-bold text-medium-gray">{formatTime(log.createdAt)}</span>
                   <span className="min-w-0">
                     <button
@@ -162,18 +168,21 @@ export default function AiBranchLogs() {
                     </span>
                   </span>
                   <span className="min-w-0 text-medium-gray">
-                    <span className={cn('block whitespace-pre-wrap break-words leading-6', !isReasonExpanded && 'line-clamp-3')}>
+                    <span className={cn('block whitespace-pre-wrap break-words leading-6', !isReasonExpanded && 'line-clamp-2')}>
                       {reasonText}
                     </span>
-                    {canToggleReason && (
+                    <span className="mt-1 block h-5">
                       <button
                         type="button"
                         onClick={() => toggleReason(log.id)}
-                        className="mt-1 text-[11px] font-black text-midnight-graphite underline decoration-border-silver underline-offset-4 transition-colors hover:text-interactive-blue"
+                        className={cn(
+                          'text-[11px] font-black text-midnight-graphite underline decoration-border-silver underline-offset-4 transition-colors hover:text-interactive-blue',
+                          !canToggleReason && 'invisible',
+                        )}
                       >
                         {isReasonExpanded ? '收起' : '查看完整'}
                       </button>
-                    )}
+                    </span>
                   </span>
                 </div>
               );
