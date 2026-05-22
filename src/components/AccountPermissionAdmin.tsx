@@ -244,7 +244,6 @@ export default function AccountPermissionAdmin() {
             {accounts.map((account) => {
               const draft = drafts[account.id] || toDraft(account);
               const linkedMember = account.linkedMember;
-              const isNameLocked = Boolean(linkedMember);
 
               return (
                 <article key={account.id} className="px-5 py-5 space-y-4">
@@ -309,20 +308,26 @@ export default function AccountPermissionAdmin() {
                           </p>
                         </div>
                       )}
-                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[1fr_1fr_160px_160px_120px] gap-3">
+                      <div className={cn(
+                        "grid grid-cols-1 md:grid-cols-2 gap-3",
+                        linkedMember
+                          ? "xl:grid-cols-[1fr_160px_160px_120px]"
+                          : "xl:grid-cols-[1fr_1fr_160px_160px_120px]",
+                      )}>
                       <input
                         value={draft.username}
                         onChange={(event) => updateDraft(account.id, { username: event.target.value })}
                         className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black"
                         placeholder="登录账号"
                       />
-                      <input
-                        value={draft.name}
-                        onChange={(event) => updateDraft(account.id, { name: event.target.value })}
-                        disabled={isNameLocked}
-                        className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black disabled:bg-lightest-gray-background disabled:text-light-gray disabled:cursor-not-allowed"
-                        placeholder="备用名称（未绑定时显示）"
-                      />
+                      {!linkedMember && (
+                        <input
+                          value={draft.name}
+                          onChange={(event) => updateDraft(account.id, { name: event.target.value })}
+                          className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black"
+                          placeholder="备用名称（未绑定时显示）"
+                        />
+                      )}
                       <select
                         value={draft.role}
                         onChange={(event) => updateDraft(account.id, { role: event.target.value as ManagedRole })}
