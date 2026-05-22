@@ -270,11 +270,13 @@ export default function AppLayout({
     onPerspectiveChange(auth.getCurrentUser()?.role || account.role);
   };
 
-  const displayRole = getPerspectiveLabel(perspective || user?.role || 'employee');
   const isDeveloper = sessionUser?.role === 'developer';
   const activeAccount = React.useMemo(() => {
     return accounts.find((account) => account.username === currentUsername) || null;
   }, [accounts, currentUsername]);
+  const displayRole = getPerspectiveLabel(perspective || user?.role || 'employee');
+  const displayName = activeAccount ? getAccountPrimaryLabel(activeAccount) : user?.name || currentUsername || displayRole;
+  const displayInitial = displayName.trim().charAt(0) || displayRole.charAt(0);
 
   return (
     <div className="flex h-screen bg-canvas-white overflow-hidden relative">
@@ -372,11 +374,11 @@ export default function AppLayout({
             <div className="flex items-center gap-4 lg:gap-8">
               <div className="flex items-center gap-3 lg:gap-4 group cursor-pointer">
                 <div className="hidden sm:flex flex-col items-end">
-                  <p className="text-[14px] font-semibold text-midnight-graphite tracking-tight leading-none">{displayRole}</p>
+                  <p className="text-[14px] font-semibold text-midnight-graphite tracking-tight leading-none">{displayName}</p>
                 </div>
 
                 <div className="w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-lightest-gray-background text-midnight-graphite flex items-center justify-center font-semibold text-[14px] transition-transform group-hover:scale-95 duration-500">
-                  {displayRole.charAt(0)}
+                  {displayInitial}
                 </div>
               </div>
 
