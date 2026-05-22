@@ -3,7 +3,7 @@ import { ApprovalAttachment, ApprovalMode, ApprovalRecord, ApprovalStatus } from
 import { motion, AnimatePresence } from 'motion/react';
 import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle, Download, Eye, Check, Clock, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { format } from 'date-fns';
+import { formatLocalDateTime } from '../lib/time';
 import { storage } from '../storage';
 import ApprovalParallelApprovers from './ApprovalParallelApprovers';
 
@@ -508,7 +508,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                 </div>
                 <div className="flex flex-col gap-2">
                   <p className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em]">时间戳</p>
-                  <p className="text-[17px] font-black text-black tracking-tighter leading-none font-mono uppercase">{format(new Date(record.createdAt), 'yyyy.MM.dd // HH:mm')}</p>
+                  <p className="text-[17px] font-black text-black tracking-tighter leading-none font-mono uppercase">{formatLocalDateTime(record.createdAt)}</p>
                 </div>
               </div>
 
@@ -562,7 +562,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                       </div>
                     </div>
                     <span className={cn("text-[10px] font-black font-mono uppercase tracking-widest", record.status === ApprovalStatus.APPROVED ? "text-white/70" : "text-medium-gray")}>
-                      {record.approvedAt || record.rejectedAt ? format(new Date(record.approvedAt || record.rejectedAt || ''), 'HH:mm:ss') : ''}
+                      {formatLocalDateTime(record.approvedAt || record.rejectedAt, 'time-seconds')}
                     </span>
                   </div>
                   {record.rejectReason && (
@@ -720,7 +720,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                           )}
                           {step.time && (
                             <p className="text-[10px] font-black text-light-gray font-mono mt-2 uppercase tracking-widest">
-                              {format(new Date(step.time), 'yyyy.MM.dd // HH:mm:ss')}
+                              {formatLocalDateTime(step.time, 'date-time-seconds')}
                             </p>
                           )}
                         </div>

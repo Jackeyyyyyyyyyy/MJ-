@@ -7,6 +7,7 @@ import ApprovalDetailModal from './ApprovalDetailModal';
 import ApprovalProgressModal from './ApprovalProgressModal';
 import ApprovalTable from './ApprovalTable';
 import StatsOverview from './StatsOverview';
+import { isLocalToday } from '../lib/time';
 
 function isCurrentUserCc(record: ApprovalRecord, username?: string) {
   if (record.currentUserIsCc) return true;
@@ -41,7 +42,7 @@ export default function CcHome() {
       summary.total += 1;
       if (record.status === ApprovalStatus.APPROVED) summary.approved += 1;
       if (record.status === ApprovalStatus.REJECTED) summary.rejected += 1;
-      if (String(record.updatedAt || record.createdAt).slice(0, 10) === new Date().toISOString().slice(0, 10)) {
+      if (isLocalToday(record.updatedAt || record.createdAt)) {
         summary.today += 1;
       }
       return summary;

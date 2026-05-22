@@ -37,6 +37,7 @@ import {
   WorkflowVersion,
 } from '../types';
 import { cn } from '../lib/utils';
+import { formatLocalDateTime } from '../lib/time';
 
 const DEFAULT_ORG_ID = 'default-org';
 const BUSINESS_SCOPE_SEPARATOR = '|||';
@@ -897,15 +898,7 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
 }
 
 function formatDate(value?: string) {
-  if (!value) return '未保存';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '未保存';
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatLocalDateTime(value, 'short') || '未保存';
 }
 
 function formatCondition(condition: WorkflowCondition) {

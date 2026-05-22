@@ -26,6 +26,10 @@ interface RequestOptions {
   skipImpersonation?: boolean;
 }
 
+function getClientTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
 async function request<T>(path: string, options?: RequestInit, requestOptions?: RequestOptions): Promise<T> {
   const token = auth.getToken();
   const impersonatedUsername = requestOptions?.skipImpersonation ? null : auth.getImpersonatedUsername();
@@ -33,6 +37,7 @@ async function request<T>(path: string, options?: RequestInit, requestOptions?: 
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      'X-MJ-Timezone': getClientTimeZone(),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(impersonatedUsername ? { 'X-MJ-Impersonate': impersonatedUsername } : {}),
       ...options?.headers,

@@ -1,8 +1,8 @@
 import React from 'react';
 import { ApprovalRecord, ApprovalStatus } from '../types';
 import { cn } from '../lib/utils';
-import { format } from 'date-fns';
 import { FileText } from 'lucide-react';
+import { formatLocalDate, formatLocalTime } from '../lib/time';
 
 interface ApprovalTableProps {
   records: ApprovalRecord[];
@@ -81,8 +81,8 @@ export default function ApprovalTable({
         </td>
 
         <td className="px-8 py-6 whitespace-nowrap text-[14px] font-medium text-light-gray">
-          {format(new Date(record.createdAt), 'MM/dd')}
-          <span className="text-[12px] opacity-60 ml-2 font-normal">{format(new Date(record.createdAt), 'HH:mm')}</span>
+          {formatLocalDate(record.createdAt)}
+          <span className="text-[12px] opacity-60 ml-2 font-normal">{formatLocalTime(record.createdAt)}</span>
         </td>
       </tr>
     );

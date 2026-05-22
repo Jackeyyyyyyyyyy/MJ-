@@ -2674,15 +2674,45 @@ function toAssistantRecord(record) {
   };
 }
 
-function buildOverview(records) {
-  const today = new Date().toISOString().slice(0, 10);
+function normalizeTimeZone(value) {
+  if (!value || typeof value !== 'string') return 'UTC';
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format(new Date());
+    return value;
+  } catch {
+    return 'UTC';
+  }
+}
+
+function getRequestTimeZone(req) {
+  return normalizeTimeZone(req.get('X-MJ-Timezone'));
+}
+
+function getLocalDateKey(value, timeZone) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const get = (type) => parts.find((part) => part.type === type)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+function buildOverview(records, timeZone = 'UTC') {
+  const localTimeZone = normalizeTimeZone(timeZone);
+  const today = getLocalDateKey(new Date(), localTimeZone);
   const summary = records.reduce(
     (current, record) => {
       current.total += 1;
       if (record.status === '待审批') current.pending += 1;
       if (record.status === '已批准') current.approved += 1;
       if (record.status === '已拒绝') current.rejected += 1;
-      if (String(record.createdAt || '').startsWith(today)) current.today += 1;
+      if (getLocalDateKey(record.createdAt, localTimeZone) === today) current.today += 1;
       if (getRiskRank(record) === 3) current.highRisk += 1;
       if (['failed', 'generating', 'skipped'].includes(record.aiSuggestion?.status)) current.aiAttention += 1;
       return current;
@@ -2768,7 +2798,7 @@ async function askAiAssistant(question, records) {
   const apiBase = process.env.OPENAI_API_BASE.trim();
   const model = process.env.OPENAI_MODEL.trim();
   const config = await readAiAssistantConfig();
-  const overview = buildOverview(records);
+  const overview = buildOverview(records, getRequestTimeZone(req));
   const recordPayload = records.map(toAssistantRecord);
   const controller = new AbortController();
   const configuredTimeout = Number(process.env.AI_REQUEST_TIMEOUT_MS);
@@ -3289,10 +3319,10 @@ app.patch('/api/ai-prompts', authenticate, requireRoles('developer'), async (req
   }
 });
 
-app.get('/api/ai-assistant/overview', authenticate, requireRoles('boss'), async (_req, res, next) => {
+app.get('/api/ai-assistant/overview', authenticate, requireRoles('boss'), async (req, res, next) => {
   try {
     const records = await readRecords();
-    res.json(buildOverview(records));
+    res.json(buildOverview(records, getRequestTimeZone(req)));
   } catch (error) {
     next(error);
   }

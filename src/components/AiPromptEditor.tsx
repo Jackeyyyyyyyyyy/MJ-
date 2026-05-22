@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { RefreshCw, Save, Sparkles } from 'lucide-react';
 import { storage } from '../storage';
 import { cn } from '../lib/utils';
+import { formatLocalDateTime } from '../lib/time';
 
 interface AiPromptEditorProps {
   moduleName: string;
@@ -86,7 +87,7 @@ export default function AiPromptEditor({ moduleName, approvalTypeName }: AiPromp
           <div className="min-w-0">
             <h2 className="text-[18px] font-bold tracking-tight">AI 审批提示词</h2>
             <p className="text-[12px] text-light-gray font-semibold truncate">
-              {isDefault ? '系统默认' : `上次修改：${updatedBy || '超级管理员'}${updatedAt ? ` · ${new Date(updatedAt).toLocaleString()}` : ''}`}
+              {isDefault ? '系统默认' : `上次修改：${updatedBy || '超级管理员'}${updatedAt ? ` · ${formatLocalDateTime(updatedAt, 'date-time-seconds')}` : ''}`}
             </p>
           </div>
         </div>

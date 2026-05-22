@@ -3,19 +3,10 @@ import { AlertCircle, CheckCircle2, RefreshCw, Route } from 'lucide-react';
 import { storage } from '../storage';
 import { AiBranchDecisionLog } from '../types';
 import { cn } from '../lib/utils';
+import { formatLocalDateTime } from '../lib/time';
 
 function formatTime(value?: string) {
-  if (!value) return '-';
-  try {
-    return new Intl.DateTimeFormat('zh-CN', {
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
+  return formatLocalDateTime(value, 'short') || '-';
 }
 
 function getStatusMeta(status: AiBranchDecisionLog['status']) {

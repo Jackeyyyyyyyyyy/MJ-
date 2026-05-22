@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, CheckCircle2, Clock, Check } from 'lucide-react';
 import { ApprovalMode, ApprovalRecord, ApprovalStatus, WorkflowApproverSnapshot } from '../types';
 import { cn } from '../lib/utils';
-import { format } from 'date-fns';
+import { formatLocalDateTime } from '../lib/time';
 import ApprovalParallelApprovers from './ApprovalParallelApprovers';
 
 interface ApprovalProgressModalProps {
@@ -174,7 +174,7 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
                     )}
                     {step.time && (
                       <p className="text-[10px] font-black text-light-gray font-mono mt-2 uppercase tracking-widest">
-                        {format(new Date(step.time), 'yyyy.MM.dd // HH:mm:ss')}
+                        {formatLocalDateTime(step.time, 'date-time-seconds')}
                       </p>
                     )}
                   </div>
