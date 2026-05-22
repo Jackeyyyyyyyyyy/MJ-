@@ -2692,27 +2692,11 @@ function DesignerInspector({
                 onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, { title: event.target.value })}
               />
             </label>
-            <div className="grid grid-cols-2 gap-2">
-              <SegmentedButton
-                isActive={!isAiCondition}
-                onClick={() => onUpdateFlowNode(selectedFlowNode.id, {
-                  conditionMode: 'rules',
-                  aiBranchRule: undefined,
-                  title: selectedFlowNode.title === 'AI 条件分化' ? '条件分化' : selectedFlowNode.title,
-                })}
-              >
-                普通条件
-              </SegmentedButton>
-              <SegmentedButton
-                isActive={isAiCondition}
-                onClick={() => onUpdateFlowNode(selectedFlowNode.id, {
-                  conditionMode: 'ai',
-                  aiBranchRule: selectedFlowNode.aiBranchRule || { prompt: '请根据申请表单内容判断应该进入哪个分支。' },
-                  title: selectedFlowNode.title === '条件分化' ? 'AI 条件分化' : selectedFlowNode.title,
-                })}
-              >
-                AI 条件
-              </SegmentedButton>
+            <div className="rounded-2xl bg-lightest-gray-background px-4 py-3">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">分化类型</span>
+              <p className="mt-1 text-[14px] font-black text-midnight-graphite">
+                {isAiCondition ? 'AI 条件分化' : '普通条件分化'}
+              </p>
             </div>
             {isAiCondition && (
               <label className="block space-y-2">
