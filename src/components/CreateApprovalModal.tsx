@@ -1069,7 +1069,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
                 {columns.map((column) => (
                   <div key={column.key} className="p-2">
                     <input
-                      type={column.type || 'text'}
+                      type="text"
                       value={row[column.key]}
                       onChange={(event) => updateStructuredDetail(field, rowIndex, String(column.key), event.target.value)}
                       className="w-full h-10 px-2 bg-canvas-white border border-transparent focus:border-interactive-blue outline-none text-[13px] font-semibold"
@@ -1164,7 +1164,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     return (
       <div className="relative">
         <input
-          type={isDate ? 'date' : (isMoney ? 'number' : 'text')}
+          type={isDate ? 'date' : 'text'}
           className={cn(
             "input-field border-b border-border-silver focus:border-interactive-blue transition-colors",
             errors[field] && "border-rose-500"

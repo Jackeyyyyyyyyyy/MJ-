@@ -51,7 +51,7 @@ interface BusinessScopeOption {
   fields: string[];
 }
 
-type ConditionFieldKind = 'number' | 'text' | 'member' | 'department';
+type ConditionFieldKind = 'number' | 'currency' | 'text' | 'member' | 'department';
 type WorkflowConditionBranch = NonNullable<WorkflowNode['conditions']>[number];
 
 interface ConditionFieldOption {
@@ -85,6 +85,7 @@ const conditionOperatorOptions: Array<{ value: WorkflowConditionOperator; label:
 ];
 
 const numericConditionOperators = new Set<WorkflowConditionOperator>(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq']);
+const currencyConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'neq']);
 const textConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'neq', 'contains', 'not_contains']);
 const identityConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'neq']);
 
@@ -213,42 +214,44 @@ function getBusinessTypeMeta(type?: string) {
 }
 
 function isNumericConditionFieldValue(field: string) {
-  const label = field.startsWith(FORM_FIELD_PREFIX) ? field.slice(FORM_FIELD_PREFIX.length) : field;
+  return field === 'amount';
   return field === 'amount' || /金额|价格|费用|利润|汇率|数量|总额|时长|天数|小时/.test(label);
 }
 
 function getConditionFieldLabel(field: string) {
   if (field === 'amount') return '金额';
+  if (field === 'currency') return '币种符号';
+  if (field === 'amount') return '金额';
   if (field === 'submitter.member') return '提交人';
   if (field === 'submitter.department') return '提交人部门';
-  if (field.startsWith(FORM_FIELD_PREFIX)) return field.slice(FORM_FIELD_PREFIX.length);
-  if (field.startsWith(SUBMITTER_FIELD_PREFIX)) return field.slice(SUBMITTER_FIELD_PREFIX.length);
   return field;
 }
 
 function getConditionFieldKind(field: string): ConditionFieldKind {
-  if (field === 'submitter.member') return 'member';
-  if (field === 'submitter.department') return 'department';
-  return isNumericConditionFieldValue(field) ? 'number' : 'text';
+  if (field === 'currency') return 'currency';
+  return 'number';
 }
 
 function getConditionOperatorOptions(field: string) {
-  const kind = getConditionFieldKind(field);
-  const allowedOperators = kind === 'number'
-    ? numericConditionOperators
-    : kind === 'member' || kind === 'department'
-      ? identityConditionOperators
-      : textConditionOperators;
-
-  return conditionOperatorOptions.filter((option) => allowedOperators.has(option.value));
+  if (field === 'currency') {
+    return conditionOperatorOptions.filter((option) => currencyConditionOperators.has(option.value));
+  }
+  if (field === 'amount') {
+    return conditionOperatorOptions.filter((option) => numericConditionOperators.has(option.value));
+  }
+  return conditionOperatorOptions.filter((option) => numericConditionOperators.has(option.value));
 }
 
 function getFallbackConditionOperator(field: string): WorkflowConditionOperator {
-  const kind = getConditionFieldKind(field);
-  return kind === 'number' ? 'lte' : 'eq';
+  if (field === 'currency') return 'eq';
+  return 'lte';
 }
 
 function getConditionFieldOptions(draft: WorkflowVersion | null): ConditionFieldOption[] {
+  return [
+    { value: 'amount', label: '金额', kind: 'number' },
+    { value: 'currency', label: '币种符号', kind: 'currency' },
+  ];
   const scope = draft ? getBusinessScopeByNames(draft.basic.moduleName, draft.basic.approvalTypeName) : null;
   const formFieldOptions = (scope?.fields || []).map((field) => ({
     value: `${FORM_FIELD_PREFIX}${field}`,
@@ -280,7 +283,16 @@ function defaultCcRule(): CcRule {
   };
 }
 
-function defaultCondition(field: WorkflowConditionField = 'submitter.department'): WorkflowCondition {
+function defaultCondition(field: WorkflowConditionField = 'amount'): WorkflowCondition {
+  if (field === 'currency') {
+    return {
+      id: createId('cond'),
+      field,
+      operator: 'eq',
+      value: '¥',
+    };
+  }
+
   if (!isNumericConditionFieldValue(field)) {
     return {
       id: createId('cond'),
@@ -625,15 +637,13 @@ function normalizeCondition(condition: Partial<WorkflowCondition> | undefined): 
 
 function getAllowedConditionFields(scope: BusinessScopeOption) {
   return new Set<WorkflowConditionField>([
-    'submitter.member',
-    'submitter.department',
-    ...scope.fields.map((field) => `${FORM_FIELD_PREFIX}${field}`),
+    'currency',
+    'amount',
   ]);
 }
 
 function getFallbackConditionField(scope: BusinessScopeOption): WorkflowConditionField {
-  const firstNumericField = scope.fields.find((field) => isNumericConditionFieldValue(field));
-  return firstNumericField ? `${FORM_FIELD_PREFIX}${firstNumericField}` : 'submitter.department';
+  return 'amount';
 }
 
 function rebaseConditionToScope(condition: WorkflowCondition, scope: BusinessScopeOption): WorkflowCondition {
@@ -2051,6 +2061,19 @@ function ConditionValueControl({
   onUpdateCondition: (branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
 }) {
   const kind = getConditionFieldKind(condition.field);
+
+  if (kind === 'currency') {
+    return (
+      <select
+        className="input-field text-[13px]"
+        value={condition.value || '¥'}
+        onChange={(event) => onUpdateCondition(branchId, condition.id, { value: event.target.value })}
+      >
+        <option value="¥">¥</option>
+        <option value="$">$</option>
+      </select>
+    );
+  }
 
   if (kind === 'number' && condition.operator === 'between') {
     return (

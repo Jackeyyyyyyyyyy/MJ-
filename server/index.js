@@ -982,6 +982,9 @@ function normalizeWorkflowTemplate(template) {
 
 function isNumericWorkflowConditionField(field) {
   const normalizedField = normalizeWorkflowText(field);
+  if (normalizedField === 'currency') return false;
+  if (normalizedField === 'amount') return true;
+  return false;
   const label = normalizedField.startsWith('form:') ? normalizedField.slice(5) : normalizedField;
   return normalizedField === 'amount' || /金额|价格|费用|利润|汇率|数量|总额|时长|天数|小时|修改前|修改后/.test(label);
 }
@@ -1310,14 +1313,37 @@ function parseWorkflowNumber(value) {
   return Number.isFinite(number) ? number : undefined;
 }
 
+function parseWorkflowCurrencySymbol(value) {
+  const text = normalizeWorkflowText(value);
+  if (!text) return undefined;
+  if (text.includes('¥') || text.includes('￥')) return '¥';
+  if (text.includes('$')) return '$';
+  return undefined;
+}
+
 function normalizeComparableText(value) {
   return normalizeWorkflowText(value).toLowerCase();
+}
+
+function flattenBusinessDataEntries(value, prefix = '') {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => flattenBusinessDataEntries(item, `${prefix}.${index}`));
+  }
+
+  if (!value || typeof value !== 'object') {
+    return prefix ? [[prefix, value]] : [];
+  }
+
+  return Object.entries(value).flatMap(([key, child]) => {
+    const pathKey = prefix ? `${prefix}.${key}` : key;
+    return [[key, child], [pathKey, child], ...flattenBusinessDataEntries(child, pathKey)];
+  });
 }
 
 function findBusinessDataValue(businessData, aliases) {
   if (!businessData || typeof businessData !== 'object') return undefined;
 
-  const entries = Object.entries(businessData);
+  const entries = flattenBusinessDataEntries(businessData);
   const normalizedAliases = aliases.map(normalizeComparableText).filter(Boolean);
   const exact = entries.find(([key]) => normalizedAliases.includes(normalizeComparableText(key)));
   if (exact) return exact[1];
@@ -1330,9 +1356,59 @@ function findBusinessDataValue(businessData, aliases) {
   return loose?.[1];
 }
 
+function findWorkflowAmountValue(businessData) {
+  return findBusinessDataValue(businessData, [
+    'amount',
+    '金额',
+    '付款总额',
+    '付款金额',
+    '报销金额',
+    '填写价格',
+    '标准价格',
+    '申请利润',
+    '修改后',
+    'updatedAmount',
+    '修改后金额',
+    'reductionAmount',
+    '申请减免金额',
+    'afterQuote',
+    '提交后报价',
+    'beforeQuote',
+    '提交前报价',
+    'priceLimit',
+    '报价限制',
+    '汇率',
+  ]);
+}
+
+function findWorkflowCurrencyValue(businessData) {
+  const directCurrency = findBusinessDataValue(businessData, ['currency', '币种', '币别', '变更前币别', '变更后币别']);
+  const directSymbol = parseWorkflowCurrencySymbol(directCurrency);
+  if (directSymbol) return directSymbol;
+
+  const amountValue = findWorkflowAmountValue(businessData);
+  const amountSymbol = parseWorkflowCurrencySymbol(amountValue);
+  if (amountSymbol) return amountSymbol;
+
+  for (const [, value] of flattenBusinessDataEntries(businessData)) {
+    const symbol = parseWorkflowCurrencySymbol(value);
+    if (symbol) return symbol;
+  }
+
+  return undefined;
+}
+
 function getWorkflowConditionValue(condition, context) {
   const { businessData, applicantMember, directory } = context || {};
   const field = normalizeWorkflowText(condition?.field);
+
+  if (field === 'currency') {
+    return findWorkflowCurrencyValue(businessData);
+  }
+
+  if (field === 'amount') {
+    return findWorkflowAmountValue(businessData);
+  }
 
   if (field.startsWith('form:')) {
     const formFieldName = field.slice(5);
@@ -1376,6 +1452,14 @@ function getWorkflowConditionValue(condition, context) {
 function workflowConditionMatches(condition, context) {
   const actualValue = getWorkflowConditionValue(condition, context);
   const actualNumber = parseWorkflowNumber(actualValue);
+
+  if (normalizeWorkflowText(condition.field) === 'currency') {
+    const expectedSymbol = parseWorkflowCurrencySymbol(condition.value) || normalizeWorkflowText(condition.value);
+    const actualSymbol = parseWorkflowCurrencySymbol(actualValue) || normalizeWorkflowText(actualValue);
+    if (!expectedSymbol || !actualSymbol) return false;
+    if (condition.operator === 'neq') return actualSymbol !== expectedSymbol;
+    return actualSymbol === expectedSymbol;
+  }
 
   if (isNumericWorkflowConditionField(condition.field) || actualNumber !== undefined) {
     if (condition.operator === 'between') {
