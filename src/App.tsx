@@ -12,6 +12,7 @@ import ApprovalDetailModal from './components/ApprovalDetailModal';
 import ApprovalProgressModal from './components/ApprovalProgressModal';
 import AiPromptEditor from './components/AiPromptEditor';
 import AiAssistantHome from './components/AiAssistantHome';
+import AiAssistantPromptAdmin from './components/AiAssistantPromptAdmin';
 import { auth } from './auth';
 import { storage } from './storage';
 import { AdminView, Role, ApprovalRecord, ApprovalStatus } from './types';
@@ -22,7 +23,7 @@ type AppRoute =
   | { kind: 'admin'; view: AdminView }
   | { kind: 'module'; moduleName: string; typeName: string };
 
-const adminRouteViews: AdminView[] = ['accounts', 'ai-assistant', 'organization', 'workflows', 'business-forms', 'ai-branch-logs'];
+const adminRouteViews: AdminView[] = ['accounts', 'ai-assistant', 'ai-assistant-prompt', 'organization', 'workflows', 'business-forms', 'ai-branch-logs'];
 const workRouteTabs: WorkTab[] = ['requests', 'approvals', 'cc', 'global'];
 
 function decodeRoutePart(part?: string) {
@@ -146,6 +147,11 @@ export default function App() {
     pushRoute({ kind: 'admin', view: 'ai-assistant' });
   };
 
+  const handleOpenAiAssistantPrompt = () => {
+    applyRoute({ kind: 'admin', view: 'ai-assistant-prompt' });
+    pushRoute({ kind: 'admin', view: 'ai-assistant-prompt' });
+  };
+
   const handleOpenOrganizationAdmin = () => {
     applyRoute({ kind: 'admin', view: 'organization' });
     pushRoute({ kind: 'admin', view: 'organization' });
@@ -264,7 +270,12 @@ export default function App() {
 
     const isSuperAdminPerspective = auth.getSessionUser()?.role === 'developer' && perspective === 'developer';
     const canUseAiAssistant = perspective === 'boss' || isSuperAdminPerspective;
-    const canAccessAdminView = activeAdminView === 'ai-assistant' ? canUseAiAssistant : isSuperAdminPerspective;
+    const aiAssistantViews: AdminView[] = ['ai-assistant', 'ai-assistant-prompt', 'ai-branch-logs'];
+    const canAccessAdminView = activeAdminView === 'ai-assistant'
+      ? canUseAiAssistant
+      : aiAssistantViews.includes(activeAdminView)
+        ? isSuperAdminPerspective
+        : isSuperAdminPerspective;
 
     if (!canAccessAdminView) {
       const fallbackRoute: AppRoute = { kind: 'work', tab: perspective === 'boss' || perspective === 'developer' ? 'global' : 'requests' };
@@ -287,6 +298,10 @@ export default function App() {
 
     if (activeAdminView === 'ai-assistant' && canUseAiAssistant) {
       return <AiAssistantHome />;
+    }
+
+    if (activeAdminView === 'ai-assistant-prompt' && isSuperAdminPerspective) {
+      return <AiAssistantPromptAdmin />;
     }
 
     if (activeAdminView === 'organization' && isSuperAdminPerspective) {
@@ -366,6 +381,7 @@ export default function App() {
       activeAdminView={activeAdminView}
       onOpenAccountAdmin={handleOpenAccountAdmin}
       onOpenAiAssistant={handleOpenAiAssistant}
+      onOpenAiAssistantPrompt={handleOpenAiAssistantPrompt}
       onOpenOrganizationAdmin={handleOpenOrganizationAdmin}
       onOpenWorkflowAdmin={handleOpenWorkflowAdmin}
       onOpenBusinessFormAdmin={handleOpenBusinessFormAdmin}

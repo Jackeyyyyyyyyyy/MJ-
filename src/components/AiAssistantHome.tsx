@@ -2,23 +2,18 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Bot,
-  Check,
   ChevronRight,
   FileText,
   Loader2,
-  MessageSquareText,
   RefreshCw,
-  Save,
   Send,
   Sparkles,
 } from 'lucide-react';
-import { auth } from '../auth';
 import { storage } from '../storage';
 import {
   AiAssistantOverview,
   AiAssistantRecord,
   ApprovalRecord,
-  ApprovalStatus,
 } from '../types';
 import ApprovalDetailModal from './ApprovalDetailModal';
 import { cn } from '../lib/utils';
@@ -31,10 +26,9 @@ interface ChatMessage {
 }
 
 const QUICK_QUESTIONS = [
-  '总结当前全局审批情况',
-  '找出最需要优先处理的单据',
-  '有哪些高风险或 AI 建议失败的单据',
-  '分析资金类审批风险',
+  '总结当前审批风险',
+  '找出最该优先处理的单据',
+  '查看高风险和 AI 异常单据',
 ];
 
 function createMessageId() {
@@ -49,51 +43,38 @@ function getRecordRiskLabel(record: AiAssistantRecord) {
   );
 }
 
-function buildInsights(overview: AiAssistantOverview | null) {
-  if (!overview) return [];
-
-  const insights = [
-    `当前共有 ${overview.summary.total} 条审批记录，待处理 ${overview.summary.pending} 条。`,
-  ];
-
-  if (overview.summary.highRisk > 0) {
-    insights.push(`发现 ${overview.summary.highRisk} 条高风险记录，建议优先核对。`);
-  }
-
-  if (overview.summary.aiAttention > 0) {
-    insights.push(`${overview.summary.aiAttention} 条记录需要关注 AI 建议状态。`);
-  }
-
-  const busiestModule = overview.moduleStats[0];
-  if (busiestModule) {
-    insights.push(`${busiestModule.moduleName}模块当前最活跃，待处理 ${busiestModule.pending} 条。`);
-  }
-
-  return insights.slice(0, 4);
+function getRiskClassName(label: string) {
+  if (label.includes('高')) return 'bg-[#ffebee] text-[#c62828]';
+  if (label.includes('中')) return 'bg-[#fff7e6] text-[#8a5a12]';
+  if (label.includes('低')) return 'bg-[#e8f5e9] text-[#2e7d32]';
+  return 'bg-lightest-gray-background text-medium-gray';
 }
 
-function SummaryCard({
-  label,
-  value,
-  icon: Icon,
-  tone,
-}: {
-  label: string;
-  value: number;
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
-  tone: string;
-}) {
-  return (
-    <div className="bg-white border border-border-silver rounded-lg p-5 min-h-[112px] flex items-start justify-between gap-4">
-      <div>
-        <p className="text-[12px] font-bold text-light-gray">{label}</p>
-        <p className="text-[30px] font-black tracking-tight text-midnight-graphite mt-3">{value}</p>
-      </div>
-      <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center', tone)}>
-        <Icon size={18} strokeWidth={2.5} />
-      </div>
-    </div>
-  );
+function getRecordReason(record: AiAssistantRecord) {
+  const text = record.aiSuggestion?.displayText?.trim();
+  if (!text) return 'AI 暂未给出风险说明，建议人工核对关键字段。';
+  return text.length > 74 ? `${text.slice(0, 74)}...` : text;
+}
+
+function buildHeadline(overview: AiAssistantOverview | null) {
+  if (!overview) return '正在整理需要关注的审批事项。';
+  if (overview.summary.highRisk > 0) {
+    return `今天有 ${overview.summary.highRisk} 张高风险审批建议优先查看。`;
+  }
+  if (overview.summary.pending > 0) {
+    return `当前有 ${overview.summary.pending} 张待处理审批，AI 已按风险排序。`;
+  }
+  return '暂无需要特别关注的审批。';
+}
+
+function buildSignals(overview: AiAssistantOverview | null) {
+  if (!overview) return [];
+
+  return [
+    { label: '待处理', value: overview.summary.pending, tone: 'text-midnight-graphite' },
+    { label: '高风险', value: overview.summary.highRisk, tone: 'text-[#c62828]' },
+    { label: 'AI 异常', value: overview.summary.aiAttention, tone: 'text-[#8a5a12]' },
+  ];
 }
 
 interface RecordButtonProps {
@@ -101,32 +82,37 @@ interface RecordButtonProps {
   onOpen: (id: string) => void | Promise<void>;
 }
 
-function RecordButton({ record, onOpen }: RecordButtonProps) {
+function PriorityRecordButton({ record, onOpen }: RecordButtonProps) {
+  const riskLabel = getRecordRiskLabel(record);
+
   return (
     <button
       type="button"
       onClick={() => onOpen(record.id)}
-      className="w-full min-h-[76px] px-4 py-3 bg-white border border-border-silver rounded-lg hover:border-black/20 hover:bg-canvas-white transition-all flex items-center justify-between gap-4 text-left"
+      className="group w-full rounded-lg border border-border-silver bg-white px-4 py-4 text-left transition-all hover:border-black/20 hover:bg-canvas-white"
     >
-      <div className="min-w-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[14px] font-black text-midnight-graphite truncate">{record.approvalTypeName}</span>
-          <span className="px-2 py-0.5 rounded-full bg-lightest-gray-background text-[10px] font-bold text-medium-gray shrink-0">
-            {getRecordRiskLabel(record)}
-          </span>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[15px] font-black text-midnight-graphite">{record.approvalTypeName}</span>
+            <span className={cn('rounded-full px-2.5 py-1 text-[11px] font-black', getRiskClassName(riskLabel))}>
+              {riskLabel}
+            </span>
+          </div>
+          <p className="mt-1 text-[12px] font-bold text-medium-gray">
+            {record.applicant} · {record.moduleName} · {record.id}
+          </p>
+          <p className="mt-3 text-[13px] font-semibold leading-5 text-deep-gray">
+            {getRecordReason(record)}
+          </p>
         </div>
-        <p className="text-[12px] font-semibold text-light-gray mt-1 truncate">
-          {record.id} · {record.moduleName} · {record.applicant}
-        </p>
+        <ChevronRight size={17} strokeWidth={2.5} className="mt-1 shrink-0 text-light-silver transition-colors group-hover:text-midnight-graphite" />
       </div>
-      <ChevronRight size={16} strokeWidth={2.5} className="text-light-silver shrink-0" />
     </button>
   );
 }
 
 export default function AiAssistantHome() {
-  const user = auth.getCurrentUser();
-  const isDeveloperPerspective = auth.getSessionUser()?.role === 'developer' && auth.getPerspective() === 'developer';
   const [overview, setOverview] = useState<AiAssistantOverview | null>(null);
   const [records, setRecords] = useState<ApprovalRecord[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -135,14 +121,11 @@ export default function AiAssistantHome() {
   const [isLoading, setIsLoading] = useState(true);
   const [isAsking, setIsAsking] = useState(false);
   const [error, setError] = useState('');
-  const [prompt, setPrompt] = useState('');
-  const [savedPrompt, setSavedPrompt] = useState('');
-  const [promptNotice, setPromptNotice] = useState('');
-  const [isPromptSaving, setIsPromptSaving] = useState(false);
 
-  const insights = useMemo(() => buildInsights(overview), [overview]);
   const recordMap = useMemo(() => new Map(records.map((record) => [record.id, record])), [records]);
-  const canSavePrompt = Boolean(isDeveloperPerspective && prompt.trim() && prompt.trim() !== savedPrompt.trim() && !isPromptSaving);
+  const headline = useMemo(() => buildHeadline(overview), [overview]);
+  const signals = useMemo(() => buildSignals(overview), [overview]);
+  const latestAnswer = [...messages].reverse().find((message) => message.role === 'assistant');
 
   const loadData = async () => {
     setIsLoading(true);
@@ -155,12 +138,6 @@ export default function AiAssistantHome() {
       ]);
       setOverview(nextOverview);
       setRecords(nextRecords);
-
-      if (isDeveloperPerspective) {
-        const config = await storage.getAiAssistantPrompt();
-        setPrompt(config.prompt);
-        setSavedPrompt(config.prompt);
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'AI 助手加载失败');
     } finally {
@@ -170,7 +147,7 @@ export default function AiAssistantHome() {
 
   useEffect(() => {
     void loadData();
-  }, [isDeveloperPerspective]);
+  }, []);
 
   const openRecord = async (id: string) => {
     const current = recordMap.get(id);
@@ -225,49 +202,32 @@ export default function AiAssistantHome() {
     void askQuestion(question);
   };
 
-  const handlePromptSave = async () => {
-    if (!canSavePrompt) return;
-
-    setIsPromptSaving(true);
-    setPromptNotice('');
-
-    try {
-      const config = await storage.updateAiAssistantPrompt(prompt.trim());
-      setPrompt(config.prompt);
-      setSavedPrompt(config.prompt);
-      setPromptNotice('AI 助手提示词已保存');
-    } catch (err) {
-      setPromptNotice(err instanceof Error ? err.message : '提示词保存失败');
-    } finally {
-      setIsPromptSaving(false);
-    }
-  };
-
   if (isLoading) {
     return (
-      <div className="min-h-[520px] flex items-center justify-center">
+      <div className="flex min-h-[520px] items-center justify-center">
         <div className="flex items-center gap-3 text-[14px] font-bold text-medium-gray">
           <Loader2 size={18} strokeWidth={2.5} className="animate-spin" />
-          AI 助手正在加载
+          AI 助手正在整理审批事项
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-8 pb-40 animate-in fade-in duration-700">
-      <section className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
-        <div>
-          <div className="flex items-center gap-3 text-[12px] font-bold text-medium-gray uppercase tracking-wider">
+    <div className="animate-in fade-in space-y-8 pb-36 duration-700">
+      <section className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <div className="max-w-3xl">
+          <div className="flex items-center gap-3 text-[12px] font-bold uppercase tracking-wider text-medium-gray">
             <Bot size={17} strokeWidth={2.4} />
-            <span>AI 管理助手</span>
+            <span>简洁 AI 助手</span>
           </div>
-          <h1 className="text-[34px] font-black tracking-tight text-midnight-graphite mt-3">智能工作台</h1>
+          <h1 className="mt-3 text-[34px] font-black tracking-tight text-midnight-graphite">智能审批</h1>
+          <p className="mt-3 text-[18px] font-bold leading-8 text-deep-gray">{headline}</p>
         </div>
         <button
           type="button"
           onClick={() => void loadData()}
-          className="h-10 px-4 bg-black text-white rounded-lg text-[13px] font-bold hover:bg-zinc-800 transition-all flex items-center justify-center gap-2"
+          className="flex h-10 items-center justify-center gap-2 rounded-full bg-black px-4 text-[13px] font-bold text-white transition-all hover:bg-zinc-800"
         >
           <RefreshCw size={14} strokeWidth={2.5} />
           刷新
@@ -275,183 +235,116 @@ export default function AiAssistantHome() {
       </section>
 
       {error && (
-        <div className="px-5 py-4 bg-[#ffebee] text-[#c62828] rounded-lg text-[13px] font-bold">
+        <div className="rounded-lg bg-[#ffebee] px-5 py-4 text-[13px] font-bold text-[#c62828]">
           {error}
         </div>
       )}
 
       {overview && !overview.aiEnabled && (
-        <div className="px-5 py-4 bg-[#fff7e6] border border-[#f5d7a1] rounded-lg text-[13px] font-bold text-[#9a5b00] flex items-center gap-3">
+        <div className="flex items-center gap-3 rounded-lg border border-[#f5d7a1] bg-[#fff7e6] px-5 py-4 text-[13px] font-bold text-[#9a5b00]">
           <AlertTriangle size={17} strokeWidth={2.5} />
           AI 助手暂未启用
         </div>
       )}
 
-      {overview && (
-        <div className="grid grid-cols-2 xl:grid-cols-6 gap-3">
-          <SummaryCard label="总记录" value={overview.summary.total} icon={FileText} tone="bg-lightest-gray-background text-midnight-graphite" />
-          <SummaryCard label="待处理" value={overview.summary.pending} icon={MessageSquareText} tone="bg-[#fff7e6] text-[#9a5b00]" />
-          <SummaryCard label="今日新增" value={overview.summary.today} icon={Sparkles} tone="bg-[#eef6ff] text-[#0066cc]" />
-          <SummaryCard label="高风险" value={overview.summary.highRisk} icon={AlertTriangle} tone="bg-[#ffebee] text-[#c62828]" />
-          <SummaryCard label="已通过" value={overview.summary.approved} icon={Check} tone="bg-[#e8f5e9] text-[#2e7d32]" />
-          <SummaryCard label="AI关注" value={overview.summary.aiAttention} icon={Bot} tone="bg-lightest-gray-background text-medium-gray" />
-        </div>
-      )}
-
-      <section className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-6">
-        <div className="space-y-6">
-          <div className="bg-white border border-border-silver rounded-lg overflow-hidden">
-            <div className="px-5 py-4 border-b border-border-silver">
-              <h2 className="text-[18px] font-black tracking-tight">今日洞察</h2>
-            </div>
-            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-3">
-              {insights.map((insight) => (
-                <div key={insight} className="min-h-[72px] bg-canvas-white border border-border-silver rounded-lg px-4 py-3 flex items-center gap-3">
-                  <Sparkles size={16} strokeWidth={2.5} className="text-interactive-blue shrink-0" />
-                  <span className="text-[13px] font-bold text-midnight-graphite leading-5">{insight}</span>
-                </div>
-              ))}
-            </div>
+      <section className="grid grid-cols-3 gap-3">
+        {signals.map((signal) => (
+          <div key={signal.label} className="rounded-lg border border-border-silver bg-white px-5 py-4">
+            <p className="text-[12px] font-black text-light-gray">{signal.label}</p>
+            <p className={cn('mt-2 text-[30px] font-black tracking-tight', signal.tone)}>{signal.value}</p>
           </div>
+        ))}
+      </section>
 
-          <div className="bg-white border border-border-silver rounded-lg overflow-hidden">
-            <div className="px-5 py-4 border-b border-border-silver">
-              <h2 className="text-[18px] font-black tracking-tight">快捷问题</h2>
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_380px]">
+        <div className="rounded-lg border border-border-silver bg-white">
+          <div className="flex items-center justify-between gap-4 border-b border-border-silver px-5 py-4">
+            <div>
+              <h2 className="text-[18px] font-black tracking-tight">优先处理</h2>
+              <p className="mt-1 text-[12px] font-bold text-medium-gray">AI 已按风险和时间排序</p>
             </div>
-            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <FileText size={18} strokeWidth={2.4} className="text-light-silver" />
+          </div>
+          <div className="space-y-3 p-4">
+            {overview && overview.priorityRecords.length > 0 ? (
+              overview.priorityRecords.map((record) => (
+                <div key={record.id}>
+                  <PriorityRecordButton record={record} onOpen={openRecord} />
+                </div>
+              ))
+            ) : (
+              <div className="flex min-h-[220px] items-center justify-center rounded-lg bg-canvas-white px-5 text-center text-[14px] font-bold text-light-gray">
+                暂无需要特别关注的审批
+              </div>
+            )}
+          </div>
+        </div>
+
+        <aside className="space-y-6">
+          <div className="rounded-lg border border-border-silver bg-white">
+            <div className="border-b border-border-silver px-5 py-4">
+              <h2 className="text-[18px] font-black tracking-tight">问 AI</h2>
+            </div>
+            <div className="space-y-3 p-4">
               {QUICK_QUESTIONS.map((item) => (
                 <button
                   key={item}
                   type="button"
                   onClick={() => void askQuestion(item)}
                   disabled={isAsking}
-                  className="h-12 px-4 bg-canvas-white border border-border-silver rounded-lg text-left text-[13px] font-bold text-midnight-graphite hover:border-black/20 hover:bg-white transition-all disabled:opacity-50"
+                  className="h-11 w-full rounded-lg border border-border-silver bg-canvas-white px-4 text-left text-[13px] font-bold text-midnight-graphite transition-all hover:border-black/20 hover:bg-white disabled:opacity-50"
                 >
                   {item}
                 </button>
               ))}
+
+              <form onSubmit={handleSubmit} className="flex items-center gap-2 pt-2">
+                <input
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  className="h-11 min-w-0 flex-1 rounded-lg border border-border-silver bg-canvas-white px-4 text-[13px] font-semibold outline-none focus:border-black"
+                  placeholder="输入问题"
+                />
+                <button
+                  type="submit"
+                  disabled={!question.trim() || isAsking}
+                  className="flex h-11 w-11 items-center justify-center rounded-lg bg-black text-white transition-all hover:bg-zinc-800 disabled:opacity-40"
+                  title="发送"
+                >
+                  {isAsking ? <Loader2 size={17} strokeWidth={2.5} className="animate-spin" /> : <Send size={17} strokeWidth={2.5} />}
+                </button>
+              </form>
             </div>
           </div>
 
-          <div className="bg-white border border-border-silver rounded-lg overflow-hidden">
-            <div className="px-5 py-4 border-b border-border-silver flex items-center justify-between">
-              <h2 className="text-[18px] font-black tracking-tight">AI 对话</h2>
-              {isAsking && <Loader2 size={16} strokeWidth={2.5} className="animate-spin text-medium-gray" />}
+          <div className="rounded-lg border border-border-silver bg-white">
+            <div className="flex items-center gap-2 border-b border-border-silver px-5 py-4">
+              <Sparkles size={17} strokeWidth={2.4} className="text-interactive-blue" />
+              <h2 className="text-[18px] font-black tracking-tight">最近回答</h2>
             </div>
-
-            <div className="min-h-[320px] p-5 space-y-4 bg-canvas-white">
-              {messages.length === 0 ? (
-                <div className="h-[260px] flex items-center justify-center text-[14px] font-bold text-light-gray">
-                  暂无对话
-                </div>
+            <div className="min-h-[180px] p-4">
+              {latestAnswer ? (
+                <article className="space-y-4">
+                  <p className="whitespace-pre-wrap text-[14px] font-semibold leading-6 text-midnight-graphite">
+                    {latestAnswer.text}
+                  </p>
+                  {latestAnswer.relatedRecords && latestAnswer.relatedRecords.length > 0 && (
+                    <div className="space-y-2">
+                      {latestAnswer.relatedRecords.map((record) => (
+                        <div key={record.id}>
+                          <PriorityRecordButton record={record} onOpen={openRecord} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
               ) : (
-                messages.map((message) => (
-                  <article
-                    key={message.id}
-                    className={cn(
-                      'max-w-[86%] rounded-lg px-4 py-3',
-                      message.role === 'user'
-                        ? 'ml-auto bg-black text-white'
-                        : 'bg-white border border-border-silver text-midnight-graphite',
-                    )}
-                  >
-                    <p className="text-[14px] font-semibold leading-6 whitespace-pre-wrap">{message.text}</p>
-                    {message.relatedRecords && message.relatedRecords.length > 0 && (
-                      <div className="mt-4 space-y-2">
-                        {message.relatedRecords.map((record) => (
-                          <div key={record.id}>
-                            <RecordButton record={record} onOpen={openRecord} />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </article>
-                ))
+                <div className="flex h-[150px] items-center justify-center text-center text-[13px] font-bold text-light-gray">
+                  选择一个问题后，这里会显示 AI 的简短结论。
+                </div>
               )}
             </div>
-
-            <form onSubmit={handleSubmit} className="p-4 bg-white border-t border-border-silver flex items-center gap-3">
-              <input
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                className="h-11 flex-1 bg-canvas-white border border-border-silver rounded-lg px-4 text-[14px] font-semibold outline-none focus:border-black"
-                placeholder="输入问题"
-              />
-              <button
-                type="submit"
-                disabled={!question.trim() || isAsking}
-                className="w-11 h-11 bg-black text-white rounded-lg flex items-center justify-center hover:bg-zinc-800 transition-all disabled:opacity-40"
-                title="发送"
-              >
-                <Send size={17} strokeWidth={2.5} />
-              </button>
-            </form>
           </div>
-        </div>
-
-        <aside className="space-y-6">
-          {overview && (
-            <>
-              <div className="bg-white border border-border-silver rounded-lg overflow-hidden">
-                <div className="px-5 py-4 border-b border-border-silver">
-                  <h2 className="text-[18px] font-black tracking-tight">优先处理</h2>
-                </div>
-                <div className="p-4 space-y-2">
-                  {overview.priorityRecords.length > 0 ? (
-                    overview.priorityRecords.map((record) => (
-                      <div key={record.id}>
-                        <RecordButton record={record} onOpen={openRecord} />
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-[13px] font-bold text-light-gray px-1 py-6 text-center">暂无待处理单据</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="bg-white border border-border-silver rounded-lg overflow-hidden">
-                <div className="px-5 py-4 border-b border-border-silver">
-                  <h2 className="text-[18px] font-black tracking-tight">模块分布</h2>
-                </div>
-                <div className="divide-y divide-border-silver">
-                  {overview.moduleStats.slice(0, 8).map((item) => (
-                    <div key={item.moduleName} className="px-5 py-3 flex items-center justify-between gap-4">
-                      <span className="text-[13px] font-bold text-midnight-graphite">{item.moduleName}</span>
-                      <span className="text-[12px] font-bold text-medium-gray">待处理 {item.pending} / 总 {item.total}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-
-          {isDeveloperPerspective && (
-            <div className="bg-white border border-border-silver rounded-lg overflow-hidden">
-              <div className="px-5 py-4 border-b border-border-silver flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-[18px] font-black tracking-tight">助手提示词</h2>
-                  {promptNotice && <p className="text-[12px] font-bold text-medium-gray mt-1">{promptNotice}</p>}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void handlePromptSave()}
-                  disabled={!canSavePrompt}
-                  className="h-9 px-3 bg-black text-white rounded-lg text-[12px] font-bold hover:bg-zinc-800 transition-all disabled:opacity-40 flex items-center gap-2"
-                >
-                  {isPromptSaving ? <Loader2 size={13} strokeWidth={2.5} className="animate-spin" /> : <Save size={13} strokeWidth={2.5} />}
-                  保存
-                </button>
-              </div>
-              <div className="p-4">
-                <textarea
-                  value={prompt}
-                  onChange={(event) => setPrompt(event.target.value)}
-                  rows={8}
-                  className="w-full resize-y bg-canvas-white border border-border-silver rounded-lg p-3 text-[13px] font-semibold leading-5 outline-none focus:border-black"
-                />
-              </div>
-            </div>
-          )}
         </aside>
       </section>
 
@@ -459,7 +352,7 @@ export default function AiAssistantHome() {
         record={selectedRecord}
         onClose={() => setSelectedRecord(null)}
         showAiSuggestion
-        showAiRawResponse={isDeveloperPerspective}
+        showAiRawResponse
       />
     </div>
   );

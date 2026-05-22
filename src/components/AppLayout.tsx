@@ -15,6 +15,7 @@ interface AppLayoutProps {
   activeAdminView?: AdminView | null;
   onOpenAccountAdmin: () => void;
   onOpenAiAssistant: () => void;
+  onOpenAiAssistantPrompt: () => void;
   onOpenOrganizationAdmin: () => void;
   onOpenWorkflowAdmin: () => void;
   onOpenBusinessFormAdmin: () => void;
@@ -225,6 +226,7 @@ export default function AppLayout({
   activeAdminView,
   onOpenAccountAdmin,
   onOpenAiAssistant,
+  onOpenAiAssistantPrompt,
   onOpenOrganizationAdmin,
   onOpenWorkflowAdmin,
   onOpenBusinessFormAdmin,
@@ -290,6 +292,10 @@ export default function AppLayout({
         }}
         onOpenAiAssistant={() => {
           onOpenAiAssistant();
+          setIsSidebarOpen(false);
+        }}
+        onOpenAiAssistantPrompt={() => {
+          onOpenAiAssistantPrompt();
           setIsSidebarOpen(false);
         }}
         onOpenOrganizationAdmin={() => {

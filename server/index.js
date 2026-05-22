@@ -2870,7 +2870,7 @@ function getRelatedRecordIds(answer, records) {
     .slice(0, 8);
 }
 
-async function askAiAssistant(question, records) {
+async function askAiAssistant(question, records, timeZone = 'UTC') {
   if (!isAiConfigured()) {
     return {
       enabled: false,
@@ -2883,7 +2883,7 @@ async function askAiAssistant(question, records) {
   const apiBase = process.env.OPENAI_API_BASE.trim();
   const model = process.env.OPENAI_MODEL.trim();
   const config = await readAiAssistantConfig();
-  const overview = buildOverview(records, getRequestTimeZone(req));
+  const overview = buildOverview(records, timeZone);
   const recordPayload = records.map(toAssistantRecord);
   const controller = new AbortController();
   const configuredTimeout = Number(process.env.AI_REQUEST_TIMEOUT_MS);
@@ -3424,7 +3424,7 @@ app.post('/api/ai-assistant/chat', authenticate, requireRoles('boss'), async (re
     const records = await readRecords();
 
     try {
-      res.json(await askAiAssistant(question, records));
+      res.json(await askAiAssistant(question, records, getRequestTimeZone(req)));
     } catch (error) {
       res.json({
         enabled: isAiConfigured(),
@@ -3874,4 +3874,3 @@ app.listen(port, () => {
   console.log(`MJ approval server listening on ${port}`);
   console.log(`Persistent data path: ${recordsFile}`);
 });
-
