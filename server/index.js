@@ -1027,6 +1027,19 @@ function validateWorkflowDraftForPublish(draft) {
   const submitPermission = draft?.submitPermission || {};
   const branches = Array.isArray(draft?.branches) ? draft.branches : [];
   const defaultBranch = branches.find((branch) => branch?.isDefault);
+  const aiBranchIds = new Set();
+  const collectAiBranchIds = (nodes = []) => {
+    (Array.isArray(nodes) ? nodes : []).forEach((node) => {
+      if (node?.type !== 'condition') return;
+      if (node.conditionMode === 'ai') {
+        (Array.isArray(node.conditions) ? node.conditions : []).forEach((condition) => {
+          if (condition?.id) aiBranchIds.add(condition.id);
+        });
+      }
+      (Array.isArray(node.conditions) ? node.conditions : []).forEach((condition) => collectAiBranchIds(condition?.nodes || []));
+    });
+  };
+  collectAiBranchIds(draft?.nodes || []);
 
   if (!name) errors.push('审批流名称不能为空');
 
@@ -1039,7 +1052,7 @@ function validateWorkflowDraftForPublish(draft) {
 
   branches.forEach((branch, branchIndex) => {
     const branchName = branch?.name || `Branch ${branchIndex + 1}`;
-    if (!branch.isDefault && branch?.conditionMode !== 'ai') {
+    if (!branch.isDefault && branch?.conditionMode !== 'ai' && !aiBranchIds.has(branch?.id)) {
       if (!Array.isArray(branch.conditions) || branch.conditions.length === 0) {
         errors.push(`${branchName} 必须配置条件`);
       }

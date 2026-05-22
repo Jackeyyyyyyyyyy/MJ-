@@ -820,6 +820,17 @@ function addValidationError(
   if (stepId) state.steps[stepId] = [...(state.steps[stepId] || []), message];
 }
 
+function collectAiConditionBranchIds(nodes: WorkflowNode[] = [], branchIds = new Set<string>()) {
+  nodes.forEach((node) => {
+    if (node.type !== 'condition') return;
+    if (node.conditionMode === 'ai') {
+      (node.conditions || []).forEach((condition) => branchIds.add(condition.id));
+    }
+    (node.conditions || []).forEach((condition) => collectAiConditionBranchIds(condition.nodes || [], branchIds));
+  });
+  return branchIds;
+}
+
 function validateDraft(draft: WorkflowVersion | null): ValidationState {
   const state = createValidationState();
   if (!draft) return state;
@@ -833,13 +844,14 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
   }
 
   const branches = draft.branches || [];
+  const aiBranchIds = collectAiConditionBranchIds(flowNodesFromDraft(draft));
   if (!branches.some((branch) => branch.isDefault)) {
     addValidationError(state, 'branches', '必须包含 default branch');
   }
 
   branches.forEach((branch, branchIndex) => {
     const branchLabel = branch.name || `Branch ${branchIndex + 1}`;
-    const isAiBranch = branch.conditionMode === 'ai';
+    const isAiBranch = branch.conditionMode === 'ai' || aiBranchIds.has(branch.id);
     if (!branch.isDefault && !isAiBranch) {
       if (branch.conditions.length === 0) {
         addValidationError(state, 'branches', `${branchLabel} 必须配置条件`, branch.id);
@@ -3676,7 +3688,7 @@ export default function WorkflowAdmin() {
     if (!draft) return;
     setIsSaving(true);
     setMessage('');
-    const nextValidation = validateDraft(draft);
+    const nextValidation = validateDraft(prepareDraftForSave(draft));
     setValidation(nextValidation);
     try {
       await saveDraft();
@@ -3690,7 +3702,7 @@ export default function WorkflowAdmin() {
 
   const handlePublish = async () => {
     if (!selectedTemplate || !draft) return;
-    const nextValidation = validateDraft(draft);
+    const nextValidation = validateDraft(prepareDraftForSave(draft));
     setValidation(nextValidation);
     if (nextValidation.errors.length > 0) {
       setMessage('发布失败，请先处理校验项。');
