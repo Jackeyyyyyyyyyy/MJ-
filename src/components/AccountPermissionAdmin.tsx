@@ -135,10 +135,13 @@ export default function AccountPermissionAdmin() {
       const username = draft.username.trim();
       const payload: Partial<AccountInput> = {
         username,
-        name: draft.name.trim() || username,
         role: draft.role,
         enabled: draft.enabled,
       };
+
+      if (!account.linkedMember) {
+        payload.name = draft.name.trim() || username;
+      }
 
       if (draft.password.trim()) {
         payload.password = draft.password.trim();
@@ -241,6 +244,7 @@ export default function AccountPermissionAdmin() {
             {accounts.map((account) => {
               const draft = drafts[account.id] || toDraft(account);
               const linkedMember = account.linkedMember;
+              const isNameLocked = Boolean(linkedMember);
 
               return (
                 <article key={account.id} className="px-5 py-5 space-y-4">
@@ -315,7 +319,8 @@ export default function AccountPermissionAdmin() {
                       <input
                         value={draft.name}
                         onChange={(event) => updateDraft(account.id, { name: event.target.value })}
-                        className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black"
+                        disabled={isNameLocked}
+                        className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black disabled:bg-lightest-gray-background disabled:text-light-gray disabled:cursor-not-allowed"
                         placeholder="备用名称（未绑定时显示）"
                       />
                       <select
