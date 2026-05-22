@@ -518,6 +518,58 @@ async function createBusinessForm({ moduleName, approvalTypeName, businessFields
   return writeApprovalSchema(schema);
 }
 
+async function updateBusinessForm(oldModuleName, oldApprovalTypeName, { moduleName, approvalTypeName, businessFields }) {
+  const schema = await readApprovalSchema();
+  const currentModuleName = String(oldModuleName || '').trim();
+  const currentApprovalTypeName = String(oldApprovalTypeName || '').trim();
+  const nextModuleName = String(moduleName || '').trim();
+  const nextApprovalTypeName = String(approvalTypeName || '').trim();
+  const nextBusinessFields = normalizeStringList(businessFields);
+
+  if (!currentModuleName || !currentApprovalTypeName) {
+    throw createHttpError('missing business form target', 400);
+  }
+
+  if (!nextModuleName || !nextApprovalTypeName || nextBusinessFields.length === 0) {
+    throw createHttpError('missing business form fields', 400);
+  }
+
+  const sourceModule = schema.modules.find((item) => item.name === currentModuleName);
+  const sourceTypeIndex = sourceModule?.approvalTypes.findIndex((item) => item.name === currentApprovalTypeName) ?? -1;
+
+  if (!sourceModule || sourceTypeIndex < 0) {
+    throw createHttpError('business form not found', 404);
+  }
+
+  const duplicate = schema.modules.some((item) => (
+    item.approvalTypes.some((approvalType) => (
+      item.name === nextModuleName &&
+      approvalType.name === nextApprovalTypeName &&
+      (item.name !== currentModuleName || approvalType.name !== currentApprovalTypeName)
+    ))
+  ));
+
+  if (duplicate) {
+    throw createHttpError('business form already exists', 409);
+  }
+
+  const [existingType] = sourceModule.approvalTypes.splice(sourceTypeIndex, 1);
+  let targetModule = schema.modules.find((item) => item.name === nextModuleName);
+  if (!targetModule) {
+    targetModule = { name: nextModuleName, approvalTypes: [] };
+    schema.modules.push(targetModule);
+  }
+
+  targetModule.approvalTypes.push({
+    ...existingType,
+    name: nextApprovalTypeName,
+    businessFields: nextBusinessFields,
+    commonFields: existingType.commonFields?.length ? existingType.commonFields : schema.commonFields,
+  });
+
+  return writeApprovalSchema(schema);
+}
+
 async function listBusinessRecordFiles() {
   try {
     const entries = await fs.readdir(businessRecordsDir, { withFileTypes: true });
@@ -3102,6 +3154,24 @@ app.post('/api/business-forms', authenticate, requireRoles('developer'), async (
     });
 
     res.status(201).json(schema);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/business-forms/:moduleName/:approvalTypeName', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const schema = await updateBusinessForm(
+      req.params.moduleName,
+      req.params.approvalTypeName,
+      {
+        moduleName: req.body?.moduleName,
+        approvalTypeName: req.body?.approvalTypeName,
+        businessFields: req.body?.businessFields,
+      },
+    );
+
+    res.json(schema);
   } catch (error) {
     next(error);
   }

@@ -86,6 +86,20 @@ export const storage = {
     });
   },
 
+  updateBusinessForm(
+    moduleName: string,
+    approvalTypeName: string,
+    input: { moduleName: string; approvalTypeName: string; businessFields: string[] },
+  ): Promise<Schema> {
+    return request<Schema>(
+      `/business-forms/${encodeURIComponent(moduleName)}/${encodeURIComponent(approvalTypeName)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      },
+    );
+  },
+
   getRecords(): Promise<ApprovalRecord[]> {
     return request<ApprovalRecord[]>('/records');
   },
