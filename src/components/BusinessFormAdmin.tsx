@@ -269,8 +269,8 @@ export default function BusinessFormAdmin() {
                           isActive ? 'bg-[#e7f1ff]' : 'bg-lightest-gray-background',
                         )}
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <div className="min-w-0 flex-1">
                             <div className="flex min-w-0 items-center gap-2">
                               <div className="truncate text-[12px] font-black text-midnight-graphite">{type.name}</div>
                               {isProtected && (
@@ -289,7 +289,8 @@ export default function BusinessFormAdmin() {
                             onClick={() => startEditing(module, type)}
                             disabled={isProtected}
                             title={isProtected ? '系统特殊配置表单默认不可编辑' : '编辑表单'}
-                            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-white px-2.5 text-[11px] font-black text-midnight-graphite shadow-sm transition-colors hover:text-interactive-blue disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-midnight-graphite"
+                            aria-label="编辑"
+                            className="ml-auto inline-flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white text-[0px] text-midnight-graphite shadow-sm transition-colors hover:text-interactive-blue disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-midnight-graphite"
                           >
                             <Edit3 size={12} strokeWidth={2.6} />
                             编辑
@@ -299,7 +300,8 @@ export default function BusinessFormAdmin() {
                             onClick={() => void handleDelete(module, type)}
                             disabled={isSaving || isProtected}
                             title={isProtected ? '系统特殊配置表单默认不可删除' : '删除表单'}
-                            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-white px-2.5 text-[11px] font-black text-midnight-graphite shadow-sm transition-colors hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-midnight-graphite"
+                            aria-label="删除"
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white text-[0px] text-midnight-graphite shadow-sm transition-colors hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-midnight-graphite"
                           >
                             <Trash2 size={12} strokeWidth={2.6} />
                             删除
