@@ -37,7 +37,7 @@ const defaultAccount: AccountInput = {
 function toDraft(account: SystemAccount): AccountDraft {
   return {
     username: account.username,
-    name: account.name,
+    name: account.accountName || account.name,
     role: account.role === 'developer' ? 'boss' : account.role,
     enabled: account.enabled,
     password: '',
@@ -96,10 +96,11 @@ export default function AccountPermissionAdmin() {
     setSavingId('new');
 
     try {
+      const username = newAccount.username.trim();
       await storage.createAccount({
         ...newAccount,
-        username: newAccount.username.trim(),
-        name: newAccount.name.trim(),
+        username,
+        name: (newAccount.name || '').trim() || username,
         password: newAccount.password?.trim() || '123456',
       });
       setNewAccount(defaultAccount);
@@ -131,9 +132,10 @@ export default function AccountPermissionAdmin() {
     setSavingId(account.id);
 
     try {
+      const username = draft.username.trim();
       const payload: Partial<AccountInput> = {
-        username: draft.username.trim(),
-        name: draft.name.trim(),
+        username,
+        name: draft.name.trim() || username,
         role: draft.role,
         enabled: draft.enabled,
       };
@@ -156,7 +158,7 @@ export default function AccountPermissionAdmin() {
     <div className="space-y-8 pb-40 animate-in fade-in duration-700">
       <StatsOverview
         title="账号权限管理"
-        subtitle="账号、角色与访问范围"
+        subtitle="账号是登录标识，姓名和职位优先来自组织架构"
         items={summaryItems}
       />
 
@@ -164,7 +166,7 @@ export default function AccountPermissionAdmin() {
         <div className="px-5 py-4 border-b border-border-silver flex items-center justify-between gap-4">
           <div>
             <h2 className="text-[20px] font-bold tracking-tight">新建账号</h2>
-            <p className="text-[12px] text-light-gray font-semibold mt-1">普通账号默认密码为 123456，创建后可在下方修改</p>
+            <p className="text-[12px] text-light-gray font-semibold mt-1">普通账号默认密码为 123456；绑定组织成员后，姓名和职位会自动使用组织架构信息</p>
           </div>
         </div>
 
@@ -180,8 +182,7 @@ export default function AccountPermissionAdmin() {
             value={newAccount.name}
             onChange={(event) => setNewAccount((current) => ({ ...current, name: event.target.value }))}
             className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black"
-            placeholder="显示名称"
-            required
+            placeholder="备用名称（未绑定时显示）"
           />
           <select
             value={newAccount.role}
@@ -207,7 +208,7 @@ export default function AccountPermissionAdmin() {
         <div className="px-5 py-4 border-b border-border-silver flex items-center justify-between gap-4">
           <div>
             <h2 className="text-[20px] font-bold tracking-tight">系统账号</h2>
-            <p className="text-[12px] text-light-gray font-semibold mt-1">超级管理员由环境变量控制，普通账号由这里维护</p>
+            <p className="text-[12px] text-light-gray font-semibold mt-1">这里只维护登录账号、角色、状态和备用名称；人员姓名、部门、职位在组织架构中维护</p>
           </div>
           <button
             type="button"
@@ -239,6 +240,7 @@ export default function AccountPermissionAdmin() {
           <div className="divide-y divide-border-silver">
             {accounts.map((account) => {
               const draft = drafts[account.id] || toDraft(account);
+              const linkedMember = account.linkedMember;
 
               return (
                 <article key={account.id} className="px-5 py-5 space-y-4">
@@ -249,7 +251,7 @@ export default function AccountPermissionAdmin() {
                       </div>
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-[16px] font-bold tracking-tight">{account.name}</h3>
+                          <h3 className="text-[16px] font-bold tracking-tight">{account.username}</h3>
                           <span className={cn(
                             'px-2.5 py-1 rounded-apple-btn text-[11px] font-bold',
                             roleTone[account.role] || 'bg-lightest-gray-background text-medium-gray',
@@ -266,8 +268,17 @@ export default function AccountPermissionAdmin() {
                               已停用
                             </span>
                           )}
+                          {linkedMember && (
+                            <span className="px-2.5 py-1 rounded-apple-btn text-[11px] font-bold bg-[#eef6ff] text-[#0066cc]">
+                              已绑定组织成员
+                            </span>
+                          )}
                         </div>
-                        <p className="text-[12px] text-light-gray font-semibold mt-1">{account.username}</p>
+                        <p className="text-[12px] text-light-gray font-semibold mt-1">
+                          {linkedMember
+                            ? `${linkedMember.name} · ${linkedMember.departmentName} · ${linkedMember.title}`
+                            : `未绑定组织成员 · 备用名称：${account.name}`}
+                        </p>
                       </div>
                     </div>
 
@@ -285,7 +296,16 @@ export default function AccountPermissionAdmin() {
                   </div>
 
                   {!account.isSuperAdmin && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[1fr_1fr_160px_160px_120px] gap-3">
+                    <div className="space-y-3">
+                      {linkedMember && (
+                        <div className="rounded-lg border border-border-silver bg-lightest-gray-background px-4 py-3">
+                          <p className="text-[12px] font-black text-midnight-graphite">组织架构身份</p>
+                          <p className="mt-1 text-[13px] font-semibold text-medium-gray">
+                            {linkedMember.name} / {linkedMember.departmentName} / {linkedMember.title}
+                          </p>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[1fr_1fr_160px_160px_120px] gap-3">
                       <input
                         value={draft.username}
                         onChange={(event) => updateDraft(account.id, { username: event.target.value })}
@@ -296,7 +316,7 @@ export default function AccountPermissionAdmin() {
                         value={draft.name}
                         onChange={(event) => updateDraft(account.id, { name: event.target.value })}
                         className="h-11 px-3 bg-canvas-white border border-border-silver rounded-lg text-[14px] font-semibold outline-none focus:border-black"
-                        placeholder="显示名称"
+                        placeholder="备用名称（未绑定时显示）"
                       />
                       <select
                         value={draft.role}
@@ -323,6 +343,7 @@ export default function AccountPermissionAdmin() {
                         />
                         启用
                       </label>
+                      </div>
                     </div>
                   )}
                 </article>

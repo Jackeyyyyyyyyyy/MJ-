@@ -254,6 +254,13 @@ export interface AccountPermission {
 
 export interface SystemAccount extends User {
   id: string;
+  accountName?: string;
+  linkedMember?: {
+    id: string;
+    name: string;
+    departmentName: string;
+    title: string;
+  };
   roleLabel: string;
   permissions: AccountPermission[];
   canSwitchPerspective: boolean;
@@ -265,7 +272,7 @@ export interface SystemAccount extends User {
 
 export interface AccountInput {
   username: string;
-  name: string;
+  name?: string;
   role: Exclude<Role, 'developer'>;
   password?: string;
   enabled?: boolean;

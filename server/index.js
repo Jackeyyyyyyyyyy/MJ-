@@ -200,20 +200,50 @@ function verifyPassword(password, passwordHash) {
   return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
-function toPublicAccount(account) {
-  const role = normalizeRole(account.role);
+function getLinkedAccountMember(directory, username) {
+  const member = findMemberByAccount(directory, username);
+  if (!member) return null;
+
+  const department = (directory.departments || []).find((item) => item.id === member.departmentId);
   return {
-    id: account.id,
-    username: account.username,
+    id: member.id,
+    name: member.name,
+    departmentName: department?.name || '未配置部门',
+    title: member.title || '未配置职位',
+  };
+}
+
+function applyDirectoryAccountName(account, directory) {
+  if (!account || normalizeRole(account.role) === 'developer') return account;
+
+  const linkedMember = getLinkedAccountMember(directory, account.username);
+  if (!linkedMember) return account;
+
+  return {
+    ...account,
+    name: linkedMember.name,
+    accountName: account.name,
+    linkedMember,
+  };
+}
+
+function toPublicAccount(account, directory = { departments: [], members: [] }) {
+  const role = normalizeRole(account.role);
+  const normalizedAccount = applyDirectoryAccountName(account, directory);
+  return {
+    id: normalizedAccount.id,
+    username: normalizedAccount.username,
     role,
-    name: account.name,
+    name: normalizedAccount.name,
+    accountName: normalizedAccount.accountName || normalizedAccount.name,
+    ...(normalizedAccount.linkedMember ? { linkedMember: normalizedAccount.linkedMember } : {}),
     roleLabel: roleLabels[role] || role,
     permissions: rolePermissions[role] || [],
     canSwitchPerspective: role === 'developer',
     isSuperAdmin: role === 'developer',
-    enabled: account.enabled !== false,
-    createdAt: account.createdAt,
-    updatedAt: account.updatedAt,
+    enabled: normalizedAccount.enabled !== false,
+    createdAt: normalizedAccount.createdAt,
+    updatedAt: normalizedAccount.updatedAt,
   };
 }
 
@@ -2154,7 +2184,11 @@ async function findAccount(username) {
   if (username === superAdmin.username) return superAdmin;
 
   const accounts = await readAccounts();
-  return accounts.find((account) => account.username === username && account.enabled !== false) || null;
+  const account = accounts.find((item) => item.username === username && item.enabled !== false) || null;
+  if (!account) return null;
+
+  const directory = await readOrganizationDirectory();
+  return applyDirectoryAccountName(account, directory);
 }
 
 function sanitizeUploadName(name) {
@@ -3091,9 +3125,10 @@ app.get('/api/ai-branch-logs', authenticate, requireRoles('developer'), async (_
 app.get('/api/accounts', authenticate, requireRoles('developer'), async (_req, res, next) => {
   try {
     const accounts = await readAccounts();
+    const directory = await readOrganizationDirectory();
     res.json([
-      toPublicAccount(superAdmin),
-      ...accounts.map(toPublicAccount),
+      toPublicAccount(superAdmin, directory),
+      ...accounts.map((account) => toPublicAccount(account, directory)),
     ]);
   } catch (error) {
     next(error);
@@ -3103,11 +3138,11 @@ app.get('/api/accounts', authenticate, requireRoles('developer'), async (_req, r
 app.post('/api/accounts', authenticate, requireRoles('developer'), async (req, res, next) => {
   try {
     const username = String(req.body?.username || '').trim();
-    const name = String(req.body?.name || '').trim();
+    const name = String(req.body?.name || username).trim();
     const role = normalizeRole(req.body?.role);
     const password = String(req.body?.password || '123456');
 
-    if (!username || !name || !isManagedRole(role)) {
+    if (!username || !isManagedRole(role)) {
       return res.status(400).json({ error: 'missing or invalid account fields' });
     }
 
@@ -3138,7 +3173,8 @@ app.post('/api/accounts', authenticate, requireRoles('developer'), async (req, r
       return newAccount;
     });
 
-    res.status(201).json(toPublicAccount(account));
+    const directory = await readOrganizationDirectory();
+    res.status(201).json(toPublicAccount(account, directory));
   } catch (error) {
     next(error);
   }
@@ -3161,10 +3197,10 @@ app.patch('/api/accounts/:id', authenticate, requireRoles('developer'), async (r
       }
 
       const nextUsername = req.body?.username === undefined ? account.username : String(req.body.username || '').trim();
-      const nextName = req.body?.name === undefined ? account.name : String(req.body.name || '').trim();
+      const nextName = req.body?.name === undefined ? account.name : String(req.body.name || nextUsername).trim();
       const nextRole = normalizeRole(req.body?.role === undefined ? account.role : req.body.role);
 
-      if (!nextUsername || !nextName || !isManagedRole(nextRole)) {
+      if (!nextUsername || !isManagedRole(nextRole)) {
         const error = new Error('missing or invalid account fields');
         error.statusCode = 400;
         throw error;
@@ -3198,7 +3234,8 @@ app.patch('/api/accounts/:id', authenticate, requireRoles('developer'), async (r
       return account;
     });
 
-    res.json(toPublicAccount(updatedAccount));
+    const directory = await readOrganizationDirectory();
+    res.json(toPublicAccount(updatedAccount, directory));
   } catch (error) {
     next(error);
   }
