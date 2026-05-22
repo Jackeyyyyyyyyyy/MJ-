@@ -100,6 +100,13 @@ export const storage = {
     );
   },
 
+  deleteBusinessForm(moduleName: string, approvalTypeName: string): Promise<Schema> {
+    return request<Schema>(
+      `/business-forms/${encodeURIComponent(moduleName)}/${encodeURIComponent(approvalTypeName)}`,
+      { method: 'DELETE' },
+    );
+  },
+
   getRecords(): Promise<ApprovalRecord[]> {
     return request<ApprovalRecord[]>('/records');
   },

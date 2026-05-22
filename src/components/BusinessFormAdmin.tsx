@@ -1,5 +1,5 @@
 import React from 'react';
-import { Edit3, FilePlus2, Loader2, Plus, RotateCcw, Save, X } from 'lucide-react';
+import { Edit3, FilePlus2, Loader2, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
 import { approvalSchema, replaceApprovalSchema } from '../approvalSchema';
 import { storage } from '../storage';
 import { ApprovalType, Module } from '../types';
@@ -52,6 +52,30 @@ export default function BusinessFormAdmin() {
     });
     setMessage('');
     setError('');
+  };
+
+  const handleDelete = async (module: Module, type: ApprovalType) => {
+    const confirmed = window.confirm(`确定删除业务表单「${module.name} / ${type.name}」吗？`);
+    if (!confirmed) return;
+
+    setMessage('');
+    setError('');
+    setIsSaving(true);
+
+    try {
+      const nextSchema = await storage.deleteBusinessForm(module.name, type.name);
+      replaceApprovalSchema(nextSchema);
+
+      if (editingTarget?.moduleName === module.name && editingTarget.approvalTypeName === type.name) {
+        resetForm();
+      }
+
+      setMessage('业务表单已删除，左侧业务模块和发起申请入口已同步刷新。');
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : '删除失败，请稍后再试。');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -231,6 +255,15 @@ export default function BusinessFormAdmin() {
                           >
                             <Edit3 size={12} strokeWidth={2.6} />
                             编辑
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDelete(module, type)}
+                            disabled={isSaving}
+                            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-white px-2.5 text-[11px] font-black text-midnight-graphite shadow-sm transition-colors hover:text-rose-600 disabled:opacity-60"
+                          >
+                            <Trash2 size={12} strokeWidth={2.6} />
+                            删除
                           </button>
                         </div>
                       </div>

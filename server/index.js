@@ -570,6 +570,36 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, { moduleNa
   return writeApprovalSchema(schema);
 }
 
+async function deleteBusinessForm(moduleName, approvalTypeName) {
+  const schema = await readApprovalSchema();
+  const targetModuleName = String(moduleName || '').trim();
+  const targetApprovalTypeName = String(approvalTypeName || '').trim();
+
+  if (!targetModuleName || !targetApprovalTypeName) {
+    throw createHttpError('missing business form target', 400);
+  }
+
+  const moduleIndex = schema.modules.findIndex((item) => item.name === targetModuleName);
+  const module = schema.modules[moduleIndex];
+  const typeIndex = module?.approvalTypes.findIndex((item) => item.name === targetApprovalTypeName) ?? -1;
+
+  if (!module || typeIndex < 0) {
+    throw createHttpError('business form not found', 404);
+  }
+
+  const totalForms = schema.modules.reduce((total, item) => total + item.approvalTypes.length, 0);
+  if (totalForms <= 1) {
+    throw createHttpError('cannot delete the last business form', 400);
+  }
+
+  module.approvalTypes.splice(typeIndex, 1);
+  if (module.approvalTypes.length === 0) {
+    schema.modules.splice(moduleIndex, 1);
+  }
+
+  return writeApprovalSchema(schema);
+}
+
 async function listBusinessRecordFiles() {
   try {
     const entries = await fs.readdir(businessRecordsDir, { withFileTypes: true });
@@ -3172,6 +3202,14 @@ app.patch('/api/business-forms/:moduleName/:approvalTypeName', authenticate, req
     );
 
     res.json(schema);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/business-forms/:moduleName/:approvalTypeName', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    res.json(await deleteBusinessForm(req.params.moduleName, req.params.approvalTypeName));
   } catch (error) {
     next(error);
   }
