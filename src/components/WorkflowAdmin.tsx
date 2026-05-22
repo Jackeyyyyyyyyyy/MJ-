@@ -405,6 +405,7 @@ function legacyNodeToStep(node: WorkflowNode, index: number): ApprovalStep {
     approverRule = {
       type: 'multi_supervisor',
       supervisorDepth: Math.max(1, Number(legacyRule.supervisorDepth || legacyRule.supervisorLevel) || 1),
+      ...(legacyRule.supervisorLevels ? { supervisorLevels: String(legacyRule.supervisorLevels) } : {}),
     };
   }
 
@@ -440,6 +441,7 @@ function stepToLegacyNode(step: ApprovalStep, index: number): WorkflowNode {
     legacyRule = {
       type: 'multi_supervisor',
       supervisorDepth: Math.max(1, Number(rule.supervisorDepth) || 1),
+      ...(rule.supervisorLevels ? { supervisorLevels: rule.supervisorLevels } : {}),
       emptyApproverAction: step.emptyApproverAction,
     };
   }
@@ -449,7 +451,7 @@ function stepToLegacyNode(step: ApprovalStep, index: number): WorkflowNode {
     type: 'approver',
     title: step.name || `审批节点 ${index + 1}`,
     subtitle: rule.type === 'multi_supervisor'
-      ? `连续审批：发起人的上 ${Math.max(1, Number(rule.supervisorDepth) || 1)} 级主管`
+      ? `连续审批：${getSupervisorDepthLabel(rule)}`
       : step.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
     rule: legacyRule,
   };
@@ -617,7 +619,10 @@ function normalizeStep(step: Partial<ApprovalStep> | undefined, index: number): 
     approverRule: {
       ...ruleWithoutRoleGroups,
       type,
-      ...(type === 'multi_supervisor' ? { supervisorDepth: Math.max(1, Number(rule.supervisorDepth || rule.supervisorLevel) || 1) } : {}),
+      ...(type === 'multi_supervisor' ? {
+        supervisorDepth: Math.max(1, Number(rule.supervisorDepth || rule.supervisorLevel) || 1),
+        ...(rule.supervisorLevels ? { supervisorLevels: String(rule.supervisorLevels) } : {}),
+      } : {}),
       memberIds: isLegacyRoleRule ? getLegacyRoleGroupMemberIds(legacyRoleGroupId) : Array.isArray(rule.memberIds) ? rule.memberIds : [],
       departmentIds: Array.isArray(rule.departmentIds) ? rule.departmentIds : [],
     },
@@ -994,14 +999,68 @@ function getApproverTypeLabel(type: ApproverRule['type']) {
 
 function getSupervisorDepthLabel(rule: ApproverRule) {
   if (rule.type !== 'multi_supervisor') return getApproverTypeLabel(rule.type);
-  const depth = Math.max(1, Number(rule.supervisorDepth) || 1);
-  return depth === 1 ? '发起人的直属上级' : `发起人的上 ${depth} 级主管`;
+  const levels = getSupervisorLevels(rule);
+  if (levels.length === 1 && levels[0] === 1) return '发起人的直属上级';
+  return `发起人的第 ${levels.join('、')} 级主管`;
 }
 
 function getSupervisorLevelLabel(level: number) {
   const numerals = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
   const normalizedLevel = Math.max(1, Number(level) || 1);
   return `第${numerals[normalizedLevel - 1] || normalizedLevel}级主管`;
+}
+
+function parseSupervisorLevelsText(value?: string) {
+  const text = String(value || '').trim();
+  if (!text) return [];
+  const levels = new Set<number>();
+  text
+    .replace(/[，、；;]/g, ',')
+    .split(/[\s,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((item) => {
+      const rangeMatch = item.match(/^(\d+)\s*[-~～]\s*(\d+)$/);
+      if (rangeMatch) {
+        const start = Math.max(1, Math.min(20, Number(rangeMatch[1]) || 1));
+        const end = Math.max(1, Math.min(20, Number(rangeMatch[2]) || 1));
+        const from = Math.min(start, end);
+        const to = Math.max(start, end);
+        for (let level = from; level <= to; level += 1) levels.add(level);
+        return;
+      }
+
+      const level = Number(item);
+      if (Number.isFinite(level)) {
+        levels.add(Math.max(1, Math.min(20, Math.floor(level))));
+      }
+    });
+  return Array.from(levels).sort((a, b) => a - b);
+}
+
+function getSupervisorLevels(rule: ApproverRule) {
+  if (rule.type !== 'multi_supervisor') return [];
+  const explicitLevels = parseSupervisorLevelsText(rule.supervisorLevels);
+  if (explicitLevels.length > 0) return explicitLevels;
+  const depth = Math.max(1, Math.min(20, Number(rule.supervisorDepth) || 1));
+  return Array.from({ length: depth }, (_, index) => index + 1);
+}
+
+function formatSupervisorLevelsText(rule: ApproverRule) {
+  const levels = getSupervisorLevels(rule);
+  if (levels.length === 0) return '1';
+  if (levels.length === 1) return String(levels[0]);
+  const isContinuousFromFirst = levels.every((level, index) => level === index + 1);
+  return isContinuousFromFirst ? `1-${levels.length}` : levels.join(',');
+}
+
+function patchSupervisorLevels(rule: ApproverRule, value: string): ApproverRule {
+  const levels = parseSupervisorLevelsText(value);
+  return {
+    ...rule,
+    supervisorLevels: value,
+    supervisorDepth: levels.length > 0 ? Math.max(...levels) : Math.max(1, Number(rule.supervisorDepth) || 1),
+  };
 }
 
 function getEligibleSubmitterMembers(permission: SubmitPermissionRule, directory: OrganizationDirectory) {
@@ -1017,23 +1076,26 @@ function getEligibleSubmitterMembers(permission: SubmitPermissionRule, directory
 function getSupervisorChainPreview(
   directory: OrganizationDirectory,
   submitterId: string,
-  depth: number,
+  levels: number[],
 ) {
   const membersById = new Map(directory.members.map((member) => [member.id, member]));
   const submitter = membersById.get(submitterId) || null;
   const chain: Array<{ level: number; label: string; name: string; isMissing: boolean }> = [];
   let current = submitter;
-  const maxDepth = Math.max(1, Number(depth) || 1);
+  const requestedLevels = levels.length > 0 ? levels : [1];
+  const maxDepth = Math.max(...requestedLevels);
 
   for (let index = 0; index < maxDepth; index += 1) {
     const supervisor = current?.supervisorId ? membersById.get(current.supervisorId) : null;
     const level = index + 1;
-    chain.push({
-      level,
-      label: getSupervisorLevelLabel(level),
-      name: supervisor?.name || '未配置',
-      isMissing: !supervisor,
-    });
+    if (requestedLevels.includes(level)) {
+      chain.push({
+        level,
+        label: getSupervisorLevelLabel(level),
+        name: supervisor?.name || '未配置',
+        isMissing: !supervisor,
+      });
+    }
     current = supervisor || null;
   }
 
@@ -1055,7 +1117,8 @@ function SupervisorChainPreview({
 }) {
   if (rule.type !== 'multi_supervisor') return null;
 
-  const depth = Math.max(1, Number(rule.supervisorDepth) || 1);
+  const levels = getSupervisorLevels(rule);
+  const levelsText = levels.join('、');
   if (!previewSubmitter) {
     return (
       <div className="mt-3 rounded-md bg-lightest-gray-background px-3 py-2 text-[11px] font-bold text-medium-gray">
@@ -1064,14 +1127,14 @@ function SupervisorChainPreview({
     );
   }
 
-  const preview = getSupervisorChainPreview(directory, previewSubmitter.id, depth);
+  const preview = getSupervisorChainPreview(directory, previewSubmitter.id, levels);
   return (
     <div className={cn(
       "mt-3 space-y-2 rounded-md bg-lightest-gray-background px-3 py-2",
       compact ? "text-[10px]" : "text-[11px]"
     )}>
       <p className="text-[10px] font-black text-light-gray">
-        {depth}级直接主管 · 以 {preview.submitter?.name || previewSubmitter.name} 预览
+        第 {levelsText} 级主管 · 以 {preview.submitter?.name || previewSubmitter.name} 预览
       </p>
       <div className="space-y-1.5">
         {preview.chain.map((item) => (
@@ -2622,15 +2685,10 @@ function StepEditor({
               <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">主管层级</span>
               <input
                 className="input-field text-[14px]"
-                type="number"
-                min={1}
-                max={20}
-                value={Math.max(1, Number(step.approverRule.supervisorDepth) || 1)}
+                value={step.approverRule.supervisorLevels ?? formatSupervisorLevelsText(step.approverRule)}
+                placeholder="例如：1-3 或 1,3"
                 onChange={(event) => onUpdateStep(branch.id, step.id, {
-                  approverRule: {
-                    ...step.approverRule,
-                    supervisorDepth: Math.max(1, Math.min(20, Number(event.target.value) || 1)),
-                  },
+                  approverRule: patchSupervisorLevels(step.approverRule, event.target.value),
                   approvalMode: 'one_of',
                 })}
               />
@@ -2968,12 +3026,10 @@ function DesignerInspector({
                 <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">主管层级</span>
                 <input
                   className="input-field text-[14px]"
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={Math.max(1, Number(rule.supervisorDepth) || 1)}
+                  value={rule.supervisorLevels ?? formatSupervisorLevelsText(rule)}
+                  placeholder="例如：1-3 或 1,3"
                   onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, {
-                    rule: { ...rule, supervisorDepth: Math.max(1, Math.min(20, Number(event.target.value) || 1)) },
+                    rule: patchSupervisorLevels(rule, event.target.value),
                     approvalMode: 'one_of',
                   })}
                 />
@@ -4397,15 +4453,10 @@ export default function WorkflowAdmin() {
                             ) : (
                               <input
                                 className="input-field text-[13px]"
-                                type="number"
-                                min={1}
-                                max={20}
-                                value={Math.max(1, Number(step.approverRule.supervisorDepth) || 1)}
+                                value={step.approverRule.supervisorLevels ?? formatSupervisorLevelsText(step.approverRule)}
+                                placeholder="例如：1-3 或 1,3"
                                 onChange={(event) => updateStep(branch.id, step.id, {
-                                  approverRule: {
-                                    ...step.approverRule,
-                                    supervisorDepth: Math.max(1, Math.min(20, Number(event.target.value) || 1)),
-                                  },
+                                  approverRule: patchSupervisorLevels(step.approverRule, event.target.value),
                                   approvalMode: 'one_of',
                                 })}
                               />

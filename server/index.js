@@ -974,6 +974,7 @@ function legacyRuleToApprovalStep(node, index = 0) {
     approverRule = {
       type: 'multi_supervisor',
       supervisorDepth: Math.max(1, Number(rule.supervisorDepth || rule.supervisorLevel) || 1),
+      ...(rule.supervisorLevels ? { supervisorLevels: normalizeWorkflowText(rule.supervisorLevels) } : {}),
     };
   }
 
@@ -1005,6 +1006,7 @@ function approvalStepToLegacyNode(step, index = 0) {
     legacyRule = {
       type: 'multi_supervisor',
       supervisorDepth: Math.max(1, Number(rule.supervisorDepth) || 1),
+      ...(rule.supervisorLevels ? { supervisorLevels: normalizeWorkflowText(rule.supervisorLevels) } : {}),
       emptyApproverAction: step?.emptyApproverAction || 'block_submit',
     };
   }
@@ -1014,7 +1016,7 @@ function approvalStepToLegacyNode(step, index = 0) {
     type: 'approver',
     title: step?.name || `审批节点 ${index + 1}`,
     subtitle: rule.type === 'multi_supervisor'
-      ? `\u8fde\u7eed\u5ba1\u6279\uff1a\u53d1\u8d77\u4eba\u7684\u4e0a ${Math.max(1, Number(rule.supervisorDepth) || 1)} \u7ea7\u4e3b\u7ba1`
+      ? `\u8fde\u7eed\u5ba1\u6279\uff1a\u53d1\u8d77\u4eba\u7684\u7b2c ${getSupervisorLevels(rule).join('\u3001')} \u7ea7\u4e3b\u7ba1`
       : step?.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
     rule: legacyRule,
     approvalMode: step?.approvalMode === 'all_of' ? 'all_of' : 'one_of',
@@ -1074,7 +1076,10 @@ function normalizeApprovalStep(step, index = 0) {
     approverRule: {
       ...ruleWithoutRoleGroups,
       type: ruleType,
-      ...(ruleType === 'multi_supervisor' ? { supervisorDepth: Math.max(1, Number(rule.supervisorDepth || rule.supervisorLevel) || 1) } : {}),
+      ...(ruleType === 'multi_supervisor' ? {
+        supervisorDepth: Math.max(1, Number(rule.supervisorDepth || rule.supervisorLevel) || 1),
+        ...(rule.supervisorLevels ? { supervisorLevels: normalizeWorkflowText(rule.supervisorLevels) } : {}),
+      } : {}),
       memberIds: isLegacyRoleRule ? getLegacyRoleGroupMemberIds(legacyRoleGroupId) : Array.isArray(rule.memberIds) ? rule.memberIds : [],
       departmentIds: Array.isArray(rule.departmentIds) ? rule.departmentIds : [],
     },
@@ -2075,6 +2080,59 @@ function getSupervisorChain(directory, member, depth) {
   return supervisors;
 }
 
+function parseSupervisorLevelsText(value) {
+  const text = normalizeWorkflowText(value);
+  if (!text) return [];
+  const levels = new Set();
+  text
+    .replace(/[，、；;]/g, ',')
+    .split(/[\s,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((item) => {
+      const rangeMatch = item.match(/^(\d+)\s*[-~～]\s*(\d+)$/);
+      if (rangeMatch) {
+        const start = Math.max(1, Math.min(20, Number(rangeMatch[1]) || 1));
+        const end = Math.max(1, Math.min(20, Number(rangeMatch[2]) || 1));
+        const from = Math.min(start, end);
+        const to = Math.max(start, end);
+        for (let level = from; level <= to; level += 1) levels.add(level);
+        return;
+      }
+
+      const level = Number(item);
+      if (Number.isFinite(level)) {
+        levels.add(Math.max(1, Math.min(20, Math.floor(level))));
+      }
+    });
+  return Array.from(levels).sort((a, b) => a - b);
+}
+
+function getSupervisorLevels(rule) {
+  const explicitLevels = parseSupervisorLevelsText(rule?.supervisorLevels);
+  if (explicitLevels.length > 0) return explicitLevels;
+  const depth = Math.max(1, Math.min(20, Number(rule?.supervisorDepth || rule?.supervisorLevel) || 1));
+  return Array.from({ length: depth }, (_, index) => index + 1);
+}
+
+function getSupervisorsAtLevels(directory, member, levels) {
+  const requestedLevels = levels.length > 0 ? levels : [1];
+  const maxDepth = Math.max(...requestedLevels);
+  const supervisors = [];
+  let current = member;
+
+  for (let index = 0; index < maxDepth; index += 1) {
+    const supervisor = getSupervisorAtLevel(directory, current, 1);
+    const level = index + 1;
+    if (requestedLevels.includes(level) && supervisor) {
+      supervisors.push({ level, member: supervisor });
+    }
+    current = supervisor || null;
+  }
+
+  return supervisors;
+}
+
 function resolveApproversForRule(rule, directory, applicantMember) {
   const approverRule = rule || { type: 'specified', memberIds: [] };
   let members = [];
@@ -2097,7 +2155,7 @@ function resolveApproversForRule(rule, directory, applicantMember) {
     if (!applicantMember) {
       throw createHttpError('Cannot resolve supervisor chain because applicant is not bound to organization.', 400);
     }
-    members = getSupervisorChain(directory, applicantMember, approverRule.supervisorDepth || 1);
+    members = getSupervisorsAtLevels(directory, applicantMember, getSupervisorLevels(approverRule)).map((item) => item.member);
   }
 
   return uniqueMembers(members).filter((member) => normalizeWorkflowText(member.accountUsername));
@@ -2145,16 +2203,16 @@ function createSupervisorChainWorkflowSteps(node, startOrder, directory, applica
     throw createHttpError('Cannot resolve supervisor chain because applicant is not bound to organization.', 400);
   }
 
-  const supervisors = getSupervisorChain(directory, applicantMember, rule.supervisorDepth || 1)
-    .filter((member) => normalizeWorkflowText(member.accountUsername));
-  return supervisors.map((supervisor, index) => createWorkflowStep(
+  const supervisors = getSupervisorsAtLevels(directory, applicantMember, getSupervisorLevels(rule))
+    .filter((item) => normalizeWorkflowText(item.member.accountUsername));
+  return supervisors.map((item, index) => createWorkflowStep(
     {
       ...node,
-      id: `${node.id || 'supervisor'}-${index + 1}`,
-      title: `${node.title || '\u4e0a\u7ea7\u5ba1\u6279'} \u7b2c${index + 1}\u7ea7`,
+      id: `${node.id || 'supervisor'}-${item.level}`,
+      title: `${node.title || '\u4e0a\u7ea7\u5ba1\u6279'} \u7b2c${item.level}\u7ea7`,
     },
     startOrder + index,
-    [supervisor],
+    [item.member],
   ));
 }
 

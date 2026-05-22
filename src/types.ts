@@ -53,6 +53,7 @@ export interface ApproverRule {
   departmentIds?: string[];
   supervisorLevel?: number;
   supervisorDepth?: number;
+  supervisorLevels?: string;
   emptyApproverAction?: 'auto_pass' | 'block_submit';
 }
 
