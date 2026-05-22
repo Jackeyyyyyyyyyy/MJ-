@@ -5,6 +5,7 @@ import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle, Download,
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { storage } from '../storage';
+import ApprovalParallelApprovers from './ApprovalParallelApprovers';
 
 interface ApprovalDetailModalProps {
   record: ApprovalRecord | null;
@@ -185,17 +186,9 @@ function getCcTimelineItem(record: ApprovalRecord, finishedAt?: string) {
 }
 
 function formatWorkflowStepDesc(step: NonNullable<ApprovalRecord['workflowInstance']>['steps'][number]) {
-  const approverProgress = (step.approvers || []).map((approver) => {
-    const status = approver.status === 'approved'
-      ? '已同意'
-      : approver.status === 'rejected' ? '已拒绝' : '待处理';
-    return `${approver.name}：${status}`;
-  }).join('、');
-
   return [
     `审批人：${step.approvers.map((approver) => approver.name).join('、') || '未解析'}`,
     step.approvalMode === 'all_of' ? '所有人都要通过' : '',
-    approverProgress && step.approvers.length > 1 ? `进度：${approverProgress}` : '',
     step.actedByName ? `操作人：${step.actedByName}` : '',
     step.comment ? `意见：${step.comment}` : '',
   ].filter(Boolean).join(' ｜ ');
@@ -231,6 +224,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
           title: step.name,
           desc: formatWorkflowStepDesc(step),
           time: step.actedAt,
+          approvers: step.approvers || [],
           state: step.status === 'approved' || step.status === 'skipped'
             ? 'done'
             : (step.status === 'pending' ? 'active' : (step.status === 'rejected' ? 'failed' : 'pending')),
@@ -719,6 +713,9 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                             step.state === 'pending' ? "text-medium-gray" : "text-black"
                           )}>{step.title}</h4>
                           <p className="text-[12px] font-bold text-medium-gray">{step.desc}</p>
+                          {'approvers' in step && step.approvers && (
+                            <ApprovalParallelApprovers approvers={step.approvers} title={step.title} />
+                          )}
                           {step.time && (
                             <p className="text-[10px] font-black text-light-gray font-mono mt-2 uppercase tracking-widest">
                               {format(new Date(step.time), 'yyyy.MM.dd // HH:mm:ss')}

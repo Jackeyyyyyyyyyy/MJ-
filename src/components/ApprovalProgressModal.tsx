@@ -4,6 +4,7 @@ import { X, CheckCircle2, Clock, Check } from 'lucide-react';
 import { ApprovalRecord, ApprovalStatus, WorkflowApproverSnapshot } from '../types';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
+import ApprovalParallelApprovers from './ApprovalParallelApprovers';
 
 interface ApprovalProgressModalProps {
   record: ApprovalRecord | null;
@@ -34,18 +35,6 @@ function getCcProgressStep(record: ApprovalRecord): ProgressStep | null {
     time: isFinished ? (record.approvedAt || record.rejectedAt) : undefined,
     status: isFinished ? 'completed' : 'pending'
   };
-}
-
-function getApproverStatusLabel(approver: WorkflowApproverSnapshot) {
-  if (approver.status === 'approved') return '已同意';
-  if (approver.status === 'rejected') return '已拒绝';
-  return '待处理';
-}
-
-function getApproverStatusClass(approver: WorkflowApproverSnapshot) {
-  if (approver.status === 'approved') return 'bg-[#e8f5e9] text-[#2e7d32]';
-  if (approver.status === 'rejected') return 'bg-[#ffebee] text-[#c62828]';
-  return 'bg-lightest-gray-background text-medium-gray';
 }
 
 export default function ApprovalProgressModal({ record, onClose }: ApprovalProgressModalProps) {
@@ -175,20 +164,7 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
                     )}>{step.title}</h3>
                     <p className="text-[12px] font-bold text-medium-gray">{step.desc}</p>
                     {step.approvers && step.approvers.length > 1 && (
-                      <div className="mt-2 space-y-1.5">
-                        {step.approvers.map((approver) => (
-                          <div
-                            key={`${step.title}-${approver.memberId}`}
-                            className={cn(
-                              "flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-[11px] font-black",
-                              getApproverStatusClass(approver)
-                            )}
-                          >
-                            <span className="min-w-0 truncate">{approver.name}</span>
-                            <span className="shrink-0">{getApproverStatusLabel(approver)}</span>
-                          </div>
-                        ))}
-                      </div>
+                      <ApprovalParallelApprovers approvers={step.approvers} title={step.title} />
                     )}
                     {step.time && (
                       <p className="text-[10px] font-black text-light-gray font-mono mt-2 uppercase tracking-widest">
