@@ -38,6 +38,27 @@ interface AccountSwitcherProps {
   onChange: (account: SystemAccount) => void;
 }
 
+function getAccountPrimaryLabel(account: SystemAccount) {
+  if (account.isSuperAdmin) return '超管端';
+  return account.linkedMember?.name || account.name;
+}
+
+function getAccountSecondaryLabel(account: SystemAccount) {
+  if (account.isSuperAdmin) return '独立管理入口';
+  if (account.linkedMember) {
+    return `${account.username} · ${account.linkedMember.departmentName} · ${account.linkedMember.title}`;
+  }
+  return `${account.username} · ${account.roleLabel}`;
+}
+
+function getMobileAccountLabel(account: SystemAccount) {
+  if (account.isSuperAdmin) return '超管端';
+  if (account.linkedMember) {
+    return `${account.linkedMember.name}（${account.username} · ${account.linkedMember.title}）`;
+  }
+  return `${account.name}（${account.username} · ${account.roleLabel}）`;
+}
+
 function AccountSwitcher({ activeAccount, accounts, isLoading, onChange }: AccountSwitcherProps) {
   const [isOpen, setIsOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
@@ -52,6 +73,10 @@ function AccountSwitcher({ activeAccount, accounts, isLoading, onChange }: Accou
 
     return enabledAccounts.filter((account) => (
       account.name.toLowerCase().includes(keyword)
+      || account.accountName?.toLowerCase().includes(keyword)
+      || account.linkedMember?.name.toLowerCase().includes(keyword)
+      || account.linkedMember?.departmentName.toLowerCase().includes(keyword)
+      || account.linkedMember?.title.toLowerCase().includes(keyword)
       || account.username.toLowerCase().includes(keyword)
       || account.roleLabel.toLowerCase().includes(keyword)
     ));
@@ -71,8 +96,8 @@ function AccountSwitcher({ activeAccount, accounts, isLoading, onChange }: Accou
   }, [isOpen]);
 
   const selectedAccount = activeAccount || enabledAccounts.find((account) => account.isSuperAdmin) || null;
-  const selectedLabel = selectedAccount?.isSuperAdmin ? '超管端' : selectedAccount?.name || '选择账号';
-  const selectedRole = selectedAccount?.isSuperAdmin ? '独立管理入口' : selectedAccount?.roleLabel || '账号视角';
+  const selectedLabel = selectedAccount ? getAccountPrimaryLabel(selectedAccount) : '选择账号';
+  const selectedRole = selectedAccount ? getAccountSecondaryLabel(selectedAccount) : '账号视角';
 
   return (
     <div ref={rootRef} className="relative w-[260px] max-w-full">
@@ -144,18 +169,18 @@ function AccountSwitcher({ activeAccount, accounts, isLoading, onChange }: Accou
                   <span className={cn(
                     "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
                     selectedAccount?.username === account.username ? "bg-white/20" : "bg-lightest-gray-background"
-                  )}>
-                    {account.isSuperAdmin ? <ShieldCheck size={16} strokeWidth={2.4} /> : <UserRound size={16} strokeWidth={2.4} />}
+                    )}>
+                      {account.isSuperAdmin ? <ShieldCheck size={16} strokeWidth={2.4} /> : <UserRound size={16} strokeWidth={2.4} />}
                   </span>
                   <span className="min-w-0">
                     <span className="block text-[13px] font-black truncate">
-                      {account.isSuperAdmin ? '超管端' : account.name}
+                      {getAccountPrimaryLabel(account)}
                     </span>
                     <span className={cn(
                       "block text-[11px] font-semibold truncate",
                       selectedAccount?.username === account.username ? "text-white/75" : "text-medium-gray"
                     )}>
-                      {account.username} · {account.isSuperAdmin ? '独立管理入口' : account.roleLabel}
+                      {getAccountSecondaryLabel(account)}
                     </span>
                   </span>
                 </button>
@@ -184,7 +209,7 @@ function MobileAccountSwitcher({ activeAccount, accounts, isLoading, onChange }:
     >
       {enabledAccounts.map((account) => (
         <option key={account.id} value={account.username}>
-          {account.isSuperAdmin ? '超管端' : `${account.name}（${account.roleLabel}）`}
+          {getMobileAccountLabel(account)}
         </option>
       ))}
     </select>
