@@ -12,7 +12,6 @@ import ApprovalDetailModal from './components/ApprovalDetailModal';
 import ApprovalProgressModal from './components/ApprovalProgressModal';
 import AiPromptEditor from './components/AiPromptEditor';
 import AiAssistantHome from './components/AiAssistantHome';
-import AiAssistantNewHome from './components/AiAssistantNewHome';
 import { auth } from './auth';
 import { storage } from './storage';
 import { AdminView, Role, ApprovalRecord, ApprovalStatus } from './types';
@@ -23,7 +22,7 @@ type AppRoute =
   | { kind: 'admin'; view: AdminView }
   | { kind: 'module'; moduleName: string; typeName: string };
 
-const adminRouteViews: AdminView[] = ['accounts', 'ai-assistant', 'ai-assistant-new', 'organization', 'workflows', 'business-forms', 'ai-branch-logs'];
+const adminRouteViews: AdminView[] = ['accounts', 'ai-assistant', 'organization', 'workflows', 'business-forms', 'ai-branch-logs'];
 const workRouteTabs: WorkTab[] = ['requests', 'approvals', 'cc', 'global'];
 
 function decodeRoutePart(part?: string) {
@@ -147,11 +146,6 @@ export default function App() {
     pushRoute({ kind: 'admin', view: 'ai-assistant' });
   };
 
-  const handleOpenAiAssistantNew = () => {
-    applyRoute({ kind: 'admin', view: 'ai-assistant-new' });
-    pushRoute({ kind: 'admin', view: 'ai-assistant-new' });
-  };
-
   const handleOpenOrganizationAdmin = () => {
     applyRoute({ kind: 'admin', view: 'organization' });
     pushRoute({ kind: 'admin', view: 'organization' });
@@ -270,7 +264,7 @@ export default function App() {
 
     const isSuperAdminPerspective = auth.getSessionUser()?.role === 'developer' && perspective === 'developer';
     const canUseAiAssistant = perspective === 'boss' || isSuperAdminPerspective;
-    const canAccessAdminView = activeAdminView === 'ai-assistant' || activeAdminView === 'ai-assistant-new' ? canUseAiAssistant : isSuperAdminPerspective;
+    const canAccessAdminView = activeAdminView === 'ai-assistant' ? canUseAiAssistant : isSuperAdminPerspective;
 
     if (!canAccessAdminView) {
       const fallbackRoute: AppRoute = { kind: 'work', tab: perspective === 'boss' || perspective === 'developer' ? 'global' : 'requests' };
@@ -293,10 +287,6 @@ export default function App() {
 
     if (activeAdminView === 'ai-assistant' && canUseAiAssistant) {
       return <AiAssistantHome />;
-    }
-
-    if (activeAdminView === 'ai-assistant-new' && canUseAiAssistant) {
-      return <AiAssistantNewHome />;
     }
 
     if (activeAdminView === 'organization' && isSuperAdminPerspective) {
@@ -376,7 +366,6 @@ export default function App() {
       activeAdminView={activeAdminView}
       onOpenAccountAdmin={handleOpenAccountAdmin}
       onOpenAiAssistant={handleOpenAiAssistant}
-      onOpenAiAssistantNew={handleOpenAiAssistantNew}
       onOpenOrganizationAdmin={handleOpenOrganizationAdmin}
       onOpenWorkflowAdmin={handleOpenWorkflowAdmin}
       onOpenBusinessFormAdmin={handleOpenBusinessFormAdmin}

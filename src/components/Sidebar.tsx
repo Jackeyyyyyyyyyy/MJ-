@@ -13,7 +13,6 @@ import {
   Home,
   LayoutDashboard,
   ShieldCheck,
-  Sparkles,
   Building2,
   Workflow,
   X
@@ -28,7 +27,6 @@ interface SidebarProps {
   activeAdminView?: AdminView | null;
   onOpenAccountAdmin?: () => void;
   onOpenAiAssistant?: () => void;
-  onOpenAiAssistantNew?: () => void;
   onOpenOrganizationAdmin?: () => void;
   onOpenWorkflowAdmin?: () => void;
   onOpenBusinessFormAdmin?: () => void;
@@ -47,7 +45,6 @@ export default function Sidebar({
   activeAdminView,
   onOpenAccountAdmin,
   onOpenAiAssistant,
-  onOpenAiAssistantNew,
   onOpenOrganizationAdmin,
   onOpenWorkflowAdmin,
   onOpenBusinessFormAdmin,
@@ -85,12 +82,6 @@ export default function Sidebar({
             label: 'AI 助手',
             icon: Bot,
             onClick: onOpenAiAssistant,
-          },
-          {
-            id: 'ai-assistant-new',
-            label: 'AI 助手新',
-            icon: Sparkles,
-            onClick: onOpenAiAssistantNew,
           },
         ]
       : []),
