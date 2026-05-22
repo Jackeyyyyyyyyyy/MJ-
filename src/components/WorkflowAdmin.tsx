@@ -575,10 +575,12 @@ function branchesFromFlowNodes(nodes: WorkflowNode[]): WorkflowBranch[] {
       id: condition.id || createId('branch'),
       name: condition.title || (condition.isDefault ? 'Default Branch' : `Branch ${index + 1}`),
       isDefault: Boolean(condition.isDefault),
+      conditionMode: conditionNode.conditionMode === 'ai' ? 'ai' : 'rules',
+      aiBranchRule: conditionNode.aiBranchRule,
       conditions: condition.isDefault
         ? []
         : conditionNode.conditionMode === 'ai'
-          ? [defaultCondition('category')]
+          ? []
           : (condition.workflowConditions || [parseLegacyCondition(condition.expression)]),
       approvalSteps: collectFlowSteps(condition.nodes || []),
     }));
@@ -705,6 +707,8 @@ function normalizeBranches(draft: WorkflowVersion): WorkflowBranch[] {
       id: branch.id || createId('branch'),
       name: branch.name || (branch.isDefault ? 'Default Branch' : `Branch ${index + 1}`),
       isDefault: Boolean(branch.isDefault),
+      conditionMode: branch.conditionMode === 'ai' ? 'ai' : 'rules',
+      aiBranchRule: branch.aiBranchRule,
       conditions: Array.isArray(branch.conditions) ? branch.conditions.map(normalizeCondition) : [],
       approvalSteps: Array.isArray(branch.approvalSteps)
         ? branch.approvalSteps.map((step, stepIndex) => normalizeStep(step, stepIndex))
@@ -834,7 +838,8 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
 
   branches.forEach((branch, branchIndex) => {
     const branchLabel = branch.name || `Branch ${branchIndex + 1}`;
-    if (!branch.isDefault) {
+    const isAiBranch = branch.conditionMode === 'ai';
+    if (!branch.isDefault && !isAiBranch) {
       if (branch.conditions.length === 0) {
         addValidationError(state, 'branches', `${branchLabel} 必须配置条件`, branch.id);
       }

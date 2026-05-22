@@ -106,6 +106,8 @@ export interface WorkflowBranch {
   id: string;
   name: string;
   isDefault: boolean;
+  conditionMode?: 'rules' | 'ai';
+  aiBranchRule?: AiBranchRule;
   conditions: WorkflowCondition[];
   approvalSteps: ApprovalStep[];
 }

@@ -878,6 +878,10 @@ function normalizeWorkflowBranches(version) {
       id: normalizeWorkflowText(branch?.id) || createWorkflowId('branch'),
       name: normalizeWorkflowText(branch?.name) || (branch?.isDefault ? 'Default Branch' : `Branch ${index + 1}`),
       isDefault: Boolean(branch?.isDefault),
+      conditionMode: branch?.conditionMode === 'ai' ? 'ai' : 'rules',
+      aiBranchRule: branch?.aiBranchRule && typeof branch.aiBranchRule === 'object'
+        ? { prompt: normalizeWorkflowText(branch.aiBranchRule.prompt) }
+        : undefined,
       conditions: Array.isArray(branch?.conditions)
         ? branch.conditions.map((condition, conditionIndex) => normalizeWorkflowCondition(condition, conditionIndex))
         : [],
@@ -1034,7 +1038,7 @@ function validateWorkflowDraftForPublish(draft) {
 
   branches.forEach((branch, branchIndex) => {
     const branchName = branch?.name || `Branch ${branchIndex + 1}`;
-    if (!branch.isDefault) {
+    if (!branch.isDefault && branch?.conditionMode !== 'ai') {
       if (!Array.isArray(branch.conditions) || branch.conditions.length === 0) {
         errors.push(`${branchName} 必须配置条件`);
       }
