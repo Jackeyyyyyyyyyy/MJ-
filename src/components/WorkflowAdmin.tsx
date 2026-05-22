@@ -90,19 +90,21 @@ const currencyConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'ne
 const textConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'neq', 'contains', 'not_contains']);
 const identityConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'neq']);
 
-const businessScopeOptions: BusinessScopeOption[] = approvalSchema.modules.flatMap((module) => (
-  module.approvalTypes.map((approvalType) => {
-    const fields = approvalType.businessFields;
-    return {
-      key: `${module.name}${BUSINESS_SCOPE_SEPARATOR}${approvalType.name}`,
-      moduleName: module.name,
-      approvalTypeName: approvalType.name,
-      label: `${module.name} / ${approvalType.name}`,
-      businessType: inferBusinessTypeFromNames(module.name, approvalType.name),
-      fields: [...new Set(fields.filter(Boolean))],
-    };
-  })
-));
+function getBusinessScopeOptions(): BusinessScopeOption[] {
+  return approvalSchema.modules.flatMap((module) => (
+    module.approvalTypes.map((approvalType) => {
+      const fields = approvalType.businessFields;
+      return {
+        key: `${module.name}${BUSINESS_SCOPE_SEPARATOR}${approvalType.name}`,
+        moduleName: module.name,
+        approvalTypeName: approvalType.name,
+        label: `${module.name} / ${approvalType.name}`,
+        businessType: inferBusinessTypeFromNames(module.name, approvalType.name),
+        fields: [...new Set(fields.filter(Boolean))],
+      };
+    })
+  ));
+}
 
 const statusLabels: Record<WorkflowTemplate['status'], string> = {
   draft: '草稿',
@@ -215,8 +217,7 @@ function getBusinessTypeMeta(type?: string) {
 }
 
 function isNumericConditionFieldValue(field: string) {
-  return field === 'amount';
-  return field === 'amount' || /金额|价格|费用|利润|汇率|数量|总额|时长|天数|小时/.test(label);
+  return field === 'amount' || /金额|价格|费用|利润|汇率|数量|总额|时长|天数|小时/.test(field);
 }
 
 function getConditionFieldLabel(field: string) {
@@ -704,11 +705,11 @@ function branchesFromLegacyNodes(nodes: WorkflowNode[] | undefined): WorkflowBra
 
 function normalizeBranches(draft: WorkflowVersion): WorkflowBranch[] {
   if (Array.isArray(draft.branches) && draft.branches.length > 0) {
-    const branches = draft.branches.map((branch, index) => ({
+    const branches: WorkflowBranch[] = draft.branches.map((branch, index) => ({
       id: branch.id || createId('branch'),
       name: branch.name || (branch.isDefault ? 'Default Branch' : `Branch ${index + 1}`),
       isDefault: Boolean(branch.isDefault),
-      conditionMode: branch.conditionMode === 'ai' ? 'ai' : 'rules',
+      conditionMode: branch.conditionMode === 'ai' ? 'ai' as const : 'rules' as const,
       aiBranchRule: branch.aiBranchRule,
       conditions: Array.isArray(branch.conditions) ? branch.conditions.map(normalizeCondition) : [],
       approvalSteps: Array.isArray(branch.approvalSteps)
@@ -1378,15 +1379,13 @@ function FlowInsertButton({
   onCc,
 }: {
   onApproval: () => void;
-  onCondition: () => void;
-  onAiCondition: () => void;
+  onCondition: (branchCount: number) => void;
+  onAiCondition: (branchCount: number) => void;
   onCc: () => void;
 }) {
   const [isOpen, setIsOpen] = React.useState(false);
   const items = [
     { label: '添加审批', icon: <CheckCircle2 size={14} strokeWidth={2.4} />, onClick: onApproval },
-    { label: '添加条件分化', icon: <GitBranch size={14} strokeWidth={2.4} />, onClick: onCondition },
-    { label: '添加 AI 条件分化', icon: <Bot size={14} strokeWidth={2.4} />, onClick: onAiCondition },
     { label: '添加抄送', icon: <Send size={14} strokeWidth={2.4} />, onClick: onCc },
   ];
 
@@ -1401,7 +1400,7 @@ function FlowInsertButton({
         <Plus size={15} strokeWidth={3} />
       </button>
       {isOpen && (
-        <div className="absolute left-1/2 top-10 w-44 -translate-x-1/2 rounded-2xl border border-border-silver bg-white/95 p-1.5 shadow-xl shadow-black/10 backdrop-blur">
+        <div className="absolute left-1/2 top-10 w-56 -translate-x-1/2 rounded-2xl border border-border-silver bg-white/95 p-1.5 shadow-xl shadow-black/10 backdrop-blur">
           {items.map((item) => (
             <button
               key={item.label}
@@ -1417,6 +1416,35 @@ function FlowInsertButton({
               </span>
               {item.label}
             </button>
+          ))}
+          <div className="my-1 h-px bg-border-silver" />
+          {[
+            { label: '添加条件分化', icon: <GitBranch size={14} strokeWidth={2.4} />, onClick: onCondition },
+            { label: '添加 AI 条件分化', icon: <Bot size={14} strokeWidth={2.4} />, onClick: onAiCondition },
+          ].map((group) => (
+            <div key={group.label} className="px-1 py-1">
+              <div className="flex items-center gap-2 px-2 py-1 text-[11px] font-black text-medium-gray">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-canvas-white text-medium-gray">
+                  {group.icon}
+                </span>
+                {group.label}
+              </div>
+              <div className="mt-1 grid grid-cols-5 gap-1">
+                {FLOW_BRANCH_COUNT_OPTIONS.map((count) => (
+                  <button
+                    key={`${group.label}-${count}`}
+                    type="button"
+                    onClick={() => {
+                      group.onClick(count);
+                      setIsOpen(false);
+                    }}
+                    className="h-8 rounded-lg bg-lightest-gray-background text-[12px] font-black text-midnight-graphite transition-colors hover:bg-[#e7f1ff] hover:text-interactive-blue"
+                  >
+                    {count}层
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -1502,12 +1530,102 @@ function FlowNode({
 }
 
 type FlowInsertKind = 'approval' | 'condition' | 'ai-condition' | 'cc';
+const FLOW_BRANCH_COUNT_OPTIONS = [2, 3, 4, 5, 6];
+
+function clampFlowBranchCount(value: number) {
+  const min = FLOW_BRANCH_COUNT_OPTIONS[0];
+  const max = FLOW_BRANCH_COUNT_OPTIONS[FLOW_BRANCH_COUNT_OPTIONS.length - 1];
+  return Math.max(min, Math.min(max, Number(value) || min));
+}
+
+function getAiBranchLetter(index: number) {
+  return String.fromCharCode(65 + index);
+}
+
+function createConditionBranch(
+  isAiCondition: boolean,
+  index: number,
+  totalCount: number,
+  field: WorkflowConditionField,
+): WorkflowConditionBranch {
+  const isDefault = index === totalCount - 1;
+  const condition = defaultCondition(field);
+  const aiLetter = getAiBranchLetter(index);
+
+  if (isAiCondition) {
+    return {
+      id: createId(isDefault ? 'flow-else' : 'flow-branch'),
+      title: `${aiLetter} 分支`,
+      expression: isDefault ? `AI 选择 ${aiLetter}，或 AI 失败时兜底` : `AI 选择 ${aiLetter}`,
+      priority: isDefault ? 999 : index + 1,
+      isDefault,
+      aiDescription: isDefault
+        ? `未选择其他分支，或 AI 无法判断时进入 ${aiLetter} 分支`
+        : `符合 AI 判断规则时进入 ${aiLetter} 分支`,
+      workflowConditions: [],
+      nodes: [],
+    };
+  }
+
+  return {
+    id: createId(isDefault ? 'flow-else' : 'flow-branch'),
+    title: isDefault ? '其余情况' : `条件 ${index + 1}`,
+    expression: isDefault ? '' : formatCondition(condition),
+    priority: isDefault ? 999 : index + 1,
+    isDefault,
+    workflowConditions: isDefault ? [] : [condition],
+    nodes: [],
+  };
+}
+
+function createConditionBranches(isAiCondition: boolean, branchCount: number, field: WorkflowConditionField) {
+  const totalCount = clampFlowBranchCount(branchCount);
+  return Array.from({ length: totalCount }, (_, index) => createConditionBranch(isAiCondition, index, totalCount, field));
+}
+
+function resizeConditionBranches(
+  branches: WorkflowConditionBranch[] = [],
+  isAiCondition: boolean,
+  branchCount: number,
+  field: WorkflowConditionField,
+) {
+  const totalCount = clampFlowBranchCount(branchCount);
+  const conditionCount = totalCount - 1;
+  const conditionalBranches = branches.filter((branch) => !branch.isDefault);
+  const defaultBranch = branches.find((branch) => branch.isDefault);
+  const nextConditionalBranches = Array.from({ length: conditionCount }, (_, index) => {
+    const existing = conditionalBranches[index];
+    if (existing) {
+      return {
+        ...existing,
+        title: existing.title || (isAiCondition ? `${getAiBranchLetter(index)} 分支` : `条件 ${index + 1}`),
+        expression: existing.expression || (isAiCondition ? `AI 选择 ${getAiBranchLetter(index)}` : getFlowBranchExpression(existing.workflowConditions || [])),
+        priority: index + 1,
+        isDefault: false,
+      };
+    }
+    return createConditionBranch(isAiCondition, index, totalCount, field);
+  });
+
+  const fallbackBranch = defaultBranch
+    ? {
+        ...defaultBranch,
+        title: defaultBranch.title || (isAiCondition ? `${getAiBranchLetter(totalCount - 1)} 分支` : '其余情况'),
+        expression: defaultBranch.expression || (isAiCondition ? `AI 选择 ${getAiBranchLetter(totalCount - 1)}，或 AI 失败时兜底` : ''),
+        priority: 999,
+        isDefault: true,
+        workflowConditions: [],
+      }
+    : createConditionBranch(isAiCondition, totalCount - 1, totalCount, field);
+
+  return [...nextConditionalBranches, fallbackBranch];
+}
 
 function FlowGap({
   onInsert,
   compact,
 }: {
-  onInsert: (kind: FlowInsertKind) => void;
+  onInsert: (kind: FlowInsertKind, branchCount?: number) => void;
   compact?: boolean;
 }) {
   return (
@@ -1515,8 +1633,8 @@ function FlowGap({
       <FlowConnector compact={compact} />
       <FlowInsertButton
         onApproval={() => onInsert('approval')}
-        onCondition={() => onInsert('condition')}
-        onAiCondition={() => onInsert('ai-condition')}
+        onCondition={(branchCount) => onInsert('condition', branchCount)}
+        onAiCondition={(branchCount) => onInsert('ai-condition', branchCount)}
         onCc={() => onInsert('cc')}
       />
       <FlowConnector compact={compact} />
@@ -1571,11 +1689,11 @@ function FlowSequence({
   previewSubmitter: OrganizationDirectory['members'][number] | null;
   selection: DesignerSelection;
   onSelect: (selection: DesignerSelection) => void;
-  onInsert: (path: string[], index: number, kind: FlowInsertKind) => void;
+  onInsert: (path: string[], index: number, kind: FlowInsertKind, branchCount?: number) => void;
 }) {
   return (
     <div className="flex w-full flex-col items-center">
-      <FlowGap compact onInsert={(kind) => onInsert(path, 0, kind)} />
+      <FlowGap compact onInsert={(kind, branchCount) => onInsert(path, 0, kind, branchCount)} />
       {nodes.map((node, index) => (
         <React.Fragment key={node.id}>
           <div className="w-[300px]">
@@ -1635,7 +1753,7 @@ function FlowSequence({
             </div>
           )}
 
-          <FlowGap compact onInsert={(kind) => onInsert(path, index + 1, kind)} />
+          <FlowGap compact onInsert={(kind, branchCount) => onInsert(path, index + 1, kind, branchCount)} />
         </React.Fragment>
       ))}
     </div>
@@ -1670,6 +1788,7 @@ function WorkflowFlowDesigner({
   flowNodes,
   onInsertFlowNode,
   onUpdateFlowNode,
+  onUpdateFlowConditionBranchCount,
   onUpdateFlowBranch,
   onAddFlowBranchCondition,
   onRemoveFlowBranchCondition,
@@ -1701,8 +1820,9 @@ function WorkflowFlowDesigner({
   onRemoveStep: (branchId: string, stepId: string) => void;
   onMoveStep: (branchId: string, stepId: string, direction: -1 | 1) => void;
   flowNodes: WorkflowNode[];
-  onInsertFlowNode: (path: string[], index: number, kind: FlowInsertKind) => void;
+  onInsertFlowNode: (path: string[], index: number, kind: FlowInsertKind, branchCount?: number) => void;
   onUpdateFlowNode: (nodeId: string, patch: Partial<WorkflowNode>) => void;
+  onUpdateFlowConditionBranchCount: (nodeId: string, branchCount: number) => void;
   onUpdateFlowBranch: (nodeId: string, branchId: string, patch: Partial<WorkflowConditionBranch>) => void;
   onAddFlowBranchCondition: (nodeId: string, branchId: string) => void;
   onRemoveFlowBranchCondition: (nodeId: string, branchId: string, conditionId: string) => void;
@@ -2024,6 +2144,7 @@ function WorkflowFlowDesigner({
           onRemoveStep={onRemoveStep}
           onMoveStep={onMoveStep}
           onUpdateFlowNode={onUpdateFlowNode}
+          onUpdateFlowConditionBranchCount={onUpdateFlowConditionBranchCount}
           onUpdateFlowBranch={onUpdateFlowBranch}
           onAddFlowBranchCondition={onAddFlowBranchCondition}
           onRemoveFlowBranchCondition={onRemoveFlowBranchCondition}
@@ -2597,6 +2718,7 @@ function DesignerInspector({
   onRemoveStep,
   onMoveStep,
   onUpdateFlowNode,
+  onUpdateFlowConditionBranchCount,
   onUpdateFlowBranch,
   onAddFlowBranchCondition,
   onRemoveFlowBranchCondition,
@@ -2629,6 +2751,7 @@ function DesignerInspector({
   onRemoveStep: (branchId: string, stepId: string) => void;
   onMoveStep: (branchId: string, stepId: string, direction: -1 | 1) => void;
   onUpdateFlowNode: (nodeId: string, patch: Partial<WorkflowNode>) => void;
+  onUpdateFlowConditionBranchCount: (nodeId: string, branchCount: number) => void;
   onUpdateFlowBranch: (nodeId: string, branchId: string, patch: Partial<WorkflowConditionBranch>) => void;
   onAddFlowBranchCondition: (nodeId: string, branchId: string) => void;
   onRemoveFlowBranchCondition: (nodeId: string, branchId: string, conditionId: string) => void;
@@ -2698,6 +2821,18 @@ function DesignerInspector({
                 {isAiCondition ? 'AI 条件分化' : '普通条件分化'}
               </p>
             </div>
+            <label className="block space-y-2">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">分化层数</span>
+              <select
+                className="input-field text-[14px]"
+                value={clampFlowBranchCount(selectedFlowNode.conditions?.length || 2)}
+                onChange={(event) => onUpdateFlowConditionBranchCount(selectedFlowNode.id, Number(event.target.value))}
+              >
+                {FLOW_BRANCH_COUNT_OPTIONS.map((count) => (
+                  <option key={count} value={count}>{count}层</option>
+                ))}
+              </select>
+            </label>
             {isAiCondition && (
               <label className="block space-y-2">
                 <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">AI 判断提示词</span>
@@ -3374,14 +3509,12 @@ export default function WorkflowAdmin() {
     setDesignerSelection({ type: 'step', branchId, stepId });
   };
 
-  const createFlowNode = (kind: FlowInsertKind, index: number): WorkflowNode => {
+  const createFlowNode = (kind: FlowInsertKind, index: number, branchCount = 2): WorkflowNode => {
     if (kind === 'condition' || kind === 'ai-condition') {
       const isAiCondition = kind === 'ai-condition';
       const field = conditionFieldOptionsForDraft.find((option) => option.kind === 'number')?.value
         || conditionFieldOptionsForDraft[0]?.value
         || 'submitter.department';
-      const condition = defaultCondition(field);
-      const expression = formatCondition(condition);
 
       return {
         id: createId('flow-condition'),
@@ -3390,28 +3523,7 @@ export default function WorkflowAdmin() {
         subtitle: isAiCondition ? 'AI 根据提示词选择 A/B 分支' : '按条件进入不同分支',
         conditionMode: isAiCondition ? 'ai' : 'rules',
         ...(isAiCondition ? { aiBranchRule: { prompt: '请根据申请表单内容判断应该进入哪个分支。' } } : {}),
-        conditions: [
-          {
-            id: createId('flow-branch'),
-            title: isAiCondition ? 'A 分支' : '条件 1',
-            expression: isAiCondition ? 'AI 选择 A' : expression,
-            priority: 1,
-            isDefault: false,
-            aiDescription: isAiCondition ? '符合 AI 判断规则时进入此分支' : undefined,
-            workflowConditions: isAiCondition ? [] : [condition],
-            nodes: [],
-          },
-          {
-            id: createId('flow-else'),
-            title: isAiCondition ? 'B 分支' : '其余情况',
-            expression: isAiCondition ? 'AI 选择 B，或 AI 失败时兜底' : '',
-            priority: 999,
-            isDefault: true,
-            aiDescription: isAiCondition ? '不符合 A 分支，或 AI 无法判断时进入此分支' : undefined,
-            workflowConditions: [],
-            nodes: [],
-          },
-        ],
+        conditions: createConditionBranches(isAiCondition, branchCount, field),
       };
     }
 
@@ -3478,6 +3590,29 @@ export default function WorkflowAdmin() {
     };
   });
 
+  const resizeFlowConditionNodeInTree = (
+    nodes: WorkflowNode[],
+    nodeId: string,
+    branchCount: number,
+    field: WorkflowConditionField,
+  ): WorkflowNode[] => nodes.map((node) => {
+    if (node.type === 'condition' && node.id === nodeId) {
+      const isAiCondition = node.conditionMode === 'ai';
+      return {
+        ...node,
+        conditions: resizeConditionBranches(node.conditions || [], isAiCondition, branchCount, field),
+      };
+    }
+    if (node.type !== 'condition') return node;
+    return {
+      ...node,
+      conditions: (node.conditions || []).map((condition) => ({
+        ...condition,
+        nodes: resizeFlowConditionNodeInTree(condition.nodes || [], nodeId, branchCount, field),
+      })),
+    };
+  });
+
   const updateFlowBranchInTree = (
     nodes: WorkflowNode[],
     nodeId: string,
@@ -3524,8 +3659,8 @@ export default function WorkflowAdmin() {
     ccRule: collectFlowCcRule(nextNodes) || defaultCcRule(),
   });
 
-  const insertFlowNode = (path: string[], index: number, kind: FlowInsertKind) => {
-    const nextNode = createFlowNode(kind, index);
+  const insertFlowNode = (path: string[], index: number, kind: FlowInsertKind, branchCount?: number) => {
+    const nextNode = createFlowNode(kind, index, branchCount);
     patchDraft((current) => {
       const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
       const nextNodes = insertFlowNodeInto(currentNodes, path, index, nextNode);
@@ -3539,6 +3674,17 @@ export default function WorkflowAdmin() {
       const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
       const nextNodes = updateFlowNodeInTree(currentNodes, nodeId, patch);
       return syncFlowDraft(current, nextNodes);
+    });
+  };
+
+  const updateFlowConditionBranchCount = (nodeId: string, branchCount: number) => {
+    const field = conditionFieldOptionsForDraft.find((option) => option.kind === 'number')?.value
+      || conditionFieldOptionsForDraft[0]?.value
+      || 'submitter.department';
+    patchDraft((current) => {
+      const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
+      const resizedNodes = resizeFlowConditionNodeInTree(currentNodes, nodeId, branchCount, field);
+      return syncFlowDraft(current, resizedNodes);
     });
   };
 
@@ -3894,6 +4040,7 @@ export default function WorkflowAdmin() {
               flowNodes={flowNodes}
               onInsertFlowNode={insertFlowNode}
               onUpdateFlowNode={updateFlowNode}
+              onUpdateFlowConditionBranchCount={updateFlowConditionBranchCount}
               onUpdateFlowBranch={updateFlowBranch}
               onAddFlowBranchCondition={addFlowBranchCondition}
               onRemoveFlowBranchCondition={removeFlowBranchCondition}
