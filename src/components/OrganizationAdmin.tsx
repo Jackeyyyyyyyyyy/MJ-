@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Building2, GitBranch, Link2, Maximize2, Minus, Plus, Save, Trash2, UserRound, Users } from 'lucide-react';
+import { Building2, GitBranch, Link2, Maximize2, Minimize2, Minus, Plus, Save, Trash2, UserRound, Users } from 'lucide-react';
 import { storage } from '../storage';
 import { OrganizationDepartment, OrganizationDirectory, OrganizationMember, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
@@ -328,6 +328,7 @@ function ChartViewport({ children }: { children: React.ReactNode }) {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const dragStateRef = useRef({
     isDragging: false,
     startX: 0,
@@ -364,6 +365,16 @@ function ChartViewport({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const frame = window.requestAnimationFrame(fitToView);
     return () => window.cancelAnimationFrame(frame);
+  }, [children]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === viewportRef.current);
+      window.requestAnimationFrame(fitToView);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, [children]);
 
   const zoomAt = (nextScale: number, clientX?: number, clientY?: number) => {
@@ -420,11 +431,23 @@ function ChartViewport({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const toggleFullscreen = async () => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    if (document.fullscreenElement === viewport) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    await viewport.requestFullscreen();
+  };
+
   return (
     <div
       ref={viewportRef}
       className={cn(
-        "relative h-[560px] overflow-hidden bg-canvas-white select-none touch-none",
+        "diagram-fullscreen-surface relative h-[560px] overflow-hidden bg-canvas-white select-none touch-none",
         isDragging ? "cursor-grabbing" : "cursor-grab"
       )}
       onPointerDown={beginDrag}
@@ -446,6 +469,15 @@ function ChartViewport({ children }: { children: React.ReactNode }) {
         </button>
         <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={fitToView}>
           <Maximize2 size={14} />
+        </button>
+        <button
+          type="button"
+          className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center"
+          onClick={toggleFullscreen}
+          title={isFullscreen ? '退出全屏' : '全屏'}
+          aria-label={isFullscreen ? '退出全屏' : '全屏'}
+        >
+          {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
       </div>
       <div
@@ -610,7 +642,6 @@ export default function OrganizationAdmin() {
   );
   const departmentChartRoots = useMemo(() => buildDepartmentChart(directory), [directory]);
   const reportingChartRoots = useMemo(() => buildReportingChart(directory), [directory]);
-  const healthMessages = useMemo(() => buildHealthMessages(directory), [directory]);
   const selectedDepartment = directory.departments.find((department) => department.id === selectedDepartmentId) || null;
   const selectedDepartmentMembers = useMemo(
     () => directory.members.filter((member) => member.departmentId === selectedDepartmentId),
@@ -811,28 +842,6 @@ export default function OrganizationAdmin() {
             ))}
           </ChartViewport>
         )}
-      </section>
-
-      <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-border-silver flex items-center gap-3">
-          <AlertCircle size={18} />
-          <h2 className="text-[18px] font-black">组织配置检查</h2>
-        </div>
-        <div className="p-5 grid gap-3 lg:grid-cols-2">
-          {healthMessages.map((item, index) => (
-            <div
-              key={`${item.text}-${index}`}
-              className={cn(
-                "rounded-2xl px-4 py-3 text-[13px] font-bold",
-                item.tone === 'danger' && "bg-[#ffebee] text-[#c62828]",
-                item.tone === 'warning' && "bg-[#fff7e6] text-[#9a5b00]",
-                item.tone === 'info' && "bg-[#e8f5e9] text-[#2e7d32]"
-              )}
-            >
-              {item.text}
-            </div>
-          ))}
-        </div>
       </section>
 
       <section className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-6">

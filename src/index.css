@@ -73,4 +73,11 @@
     display: none;
   }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  .diagram-fullscreen-surface:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    min-height: 100vh;
+    border-radius: 0;
+  }
 }

@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   GitBranch,
   Maximize2,
+  Minimize2,
   Minus,
   Plus,
   Save,
@@ -1695,6 +1696,7 @@ function WorkflowFlowDesigner({
   const canvasContentRef = React.useRef<HTMLDivElement | null>(null);
   const canvasFlowRef = React.useRef<HTMLDivElement | null>(null);
   const [canvasView, setCanvasView] = React.useState({ scale: 1, x: 0, y: 0 });
+  const [isCanvasFullscreen, setIsCanvasFullscreen] = React.useState(false);
   const eligibleSubmitters = React.useMemo(
     () => getEligibleSubmitterMembers(submitPermission, directory),
     [submitPermission, directory],
@@ -1738,6 +1740,16 @@ function WorkflowFlowDesigner({
     const frame = window.requestAnimationFrame(fitWorkflowCanvas);
     return () => window.cancelAnimationFrame(frame);
   }, [fitWorkflowCanvas, canvasMinWidth, flowBranches.length, branches.length, flowNodes.length]);
+
+  React.useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsCanvasFullscreen(document.fullscreenElement === canvasFrameRef.current);
+      window.requestAnimationFrame(fitWorkflowCanvas);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, [fitWorkflowCanvas]);
 
   const zoomWorkflowCanvas = (nextScale: number, clientX?: number, clientY?: number) => {
     const frame = canvasFrameRef.current;
@@ -1795,6 +1807,18 @@ function WorkflowFlowDesigner({
     }
   };
 
+  const toggleCanvasFullscreen = async () => {
+    const frame = canvasFrameRef.current;
+    if (!frame) return;
+
+    if (document.fullscreenElement === frame) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    await frame.requestFullscreen();
+  };
+
   return (
     <section className="rounded-xl border border-border-silver bg-white shadow-sm overflow-visible">
       <div className="px-5 py-4 border-b border-border-silver flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1846,7 +1870,7 @@ function WorkflowFlowDesigner({
             zoomWorkflowCanvas(canvasView.scale * (event.deltaY > 0 ? 0.9 : 1.1), event.clientX, event.clientY);
           }}
           className={cn(
-            "relative min-h-[680px] overflow-hidden bg-[#f7f8fa] cursor-grab select-none touch-none",
+            "diagram-fullscreen-surface relative min-h-[680px] overflow-hidden bg-[#f7f8fa] cursor-grab select-none touch-none",
             isPanning && "cursor-grabbing"
           )}
         >
@@ -1860,6 +1884,15 @@ function WorkflowFlowDesigner({
             </button>
             <button type="button" className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center" onClick={fitWorkflowCanvas}>
               <Maximize2 size={14} />
+            </button>
+            <button
+              type="button"
+              className="h-8 w-8 rounded-full text-medium-gray hover:bg-lightest-gray-background flex items-center justify-center"
+              onClick={toggleCanvasFullscreen}
+              title={isCanvasFullscreen ? '退出全屏' : '全屏'}
+              aria-label={isCanvasFullscreen ? '退出全屏' : '全屏'}
+            >
+              {isCanvasFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
             </button>
           </div>
           <div
