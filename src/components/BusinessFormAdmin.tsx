@@ -1,5 +1,5 @@
 import React from 'react';
-import { Edit3, FilePlus2, Loader2, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
+import { Edit3, FilePlus2, Loader2, Lock, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
 import { approvalSchema, replaceApprovalSchema } from '../approvalSchema';
 import { storage } from '../storage';
 import { ApprovalType, Module } from '../types';
@@ -8,6 +8,23 @@ import { cn } from '../lib/utils';
 interface EditingTarget {
   moduleName: string;
   approvalTypeName: string;
+}
+
+const protectedBusinessForms = new Set([
+  '资金|||批量修改',
+  '资金|||资金减免',
+  '客户|||客户信息',
+  '供应商|||供应商信息',
+  '供应商|||报价',
+  '订单|||项目货变更',
+]);
+
+function getBusinessFormKey(moduleName: string, approvalTypeName: string) {
+  return `${moduleName}|||${approvalTypeName}`;
+}
+
+function isProtectedBusinessForm(moduleName: string, approvalTypeName: string) {
+  return protectedBusinessForms.has(getBusinessFormKey(moduleName, approvalTypeName));
 }
 
 function normalizeFields(value: string) {
@@ -43,6 +60,11 @@ export default function BusinessFormAdmin() {
   };
 
   const startEditing = (module: Module, type: ApprovalType) => {
+    if (isProtectedBusinessForm(module.name, type.name)) {
+      setError('该表单使用系统特殊配置，默认不可编辑。');
+      return;
+    }
+
     setModuleName(module.name);
     setApprovalTypeName(type.name);
     setFieldText(getFieldText(type));
@@ -55,6 +77,11 @@ export default function BusinessFormAdmin() {
   };
 
   const handleDelete = async (module: Module, type: ApprovalType) => {
+    if (isProtectedBusinessForm(module.name, type.name)) {
+      setError('该表单使用系统特殊配置，默认不可删除。');
+      return;
+    }
+
     const confirmed = window.confirm(`确定删除业务表单「${module.name} / ${type.name}」吗？`);
     if (!confirmed) return;
 
@@ -232,6 +259,7 @@ export default function BusinessFormAdmin() {
                   {module.approvalTypes.map((type) => {
                     const isActive = editingTarget?.moduleName === module.name
                       && editingTarget?.approvalTypeName === type.name;
+                    const isProtected = isProtectedBusinessForm(module.name, type.name);
 
                     return (
                       <div
@@ -243,7 +271,15 @@ export default function BusinessFormAdmin() {
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="truncate text-[12px] font-black text-midnight-graphite">{type.name}</div>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <div className="truncate text-[12px] font-black text-midnight-graphite">{type.name}</div>
+                              {isProtected && (
+                                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-700">
+                                  <Lock size={10} strokeWidth={2.8} />
+                                  系统配置
+                                </span>
+                              )}
+                            </div>
                             <div className="mt-0.5 text-[11px] font-semibold text-medium-gray">
                               {type.businessFields.length} 个字段
                             </div>
@@ -251,7 +287,9 @@ export default function BusinessFormAdmin() {
                           <button
                             type="button"
                             onClick={() => startEditing(module, type)}
-                            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-white px-2.5 text-[11px] font-black text-midnight-graphite shadow-sm transition-colors hover:text-interactive-blue"
+                            disabled={isProtected}
+                            title={isProtected ? '系统特殊配置表单默认不可编辑' : '编辑表单'}
+                            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-white px-2.5 text-[11px] font-black text-midnight-graphite shadow-sm transition-colors hover:text-interactive-blue disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-midnight-graphite"
                           >
                             <Edit3 size={12} strokeWidth={2.6} />
                             编辑
@@ -259,8 +297,9 @@ export default function BusinessFormAdmin() {
                           <button
                             type="button"
                             onClick={() => void handleDelete(module, type)}
-                            disabled={isSaving}
-                            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-white px-2.5 text-[11px] font-black text-midnight-graphite shadow-sm transition-colors hover:text-rose-600 disabled:opacity-60"
+                            disabled={isSaving || isProtected}
+                            title={isProtected ? '系统特殊配置表单默认不可删除' : '删除表单'}
+                            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-white px-2.5 text-[11px] font-black text-midnight-graphite shadow-sm transition-colors hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-midnight-graphite"
                           >
                             <Trash2 size={12} strokeWidth={2.6} />
                             删除

@@ -53,6 +53,14 @@ const LEGACY_ROLE_GROUP_MEMBERS = {
   'role-assistant': ['qin-sheng'],
 };
 const managedRoles = new Set(['employee', 'boss']);
+const protectedBusinessForms = new Set([
+  '\u8d44\u91d1|||\u6279\u91cf\u4fee\u6539',
+  '\u8d44\u91d1|||\u8d44\u91d1\u51cf\u514d',
+  '\u5ba2\u6237|||\u5ba2\u6237\u4fe1\u606f',
+  '\u4f9b\u5e94\u5546|||\u4f9b\u5e94\u5546\u4fe1\u606f',
+  '\u4f9b\u5e94\u5546|||\u62a5\u4ef7',
+  '\u8ba2\u5355|||\u9879\u76ee\u8d27\u53d8\u66f4',
+]);
 const defaultAiAssistantPrompt =
   '你是 MJ 审批系统的管理助手，只做只读分析。你负责总结审批风险、发现异常、解释待办优先级，并引用相关审批单。不得编造数据，不得替用户做审批决定，不得建议绕过流程。回答要先给简短结论，再列关键原因；如果涉及具体单据，请在 relatedRecordIds 中返回对应 recordId。';
 const defaultAiPromptBase =
@@ -356,6 +364,14 @@ function getBusinessKey(moduleName, approvalTypeName) {
     .slice(0, 16);
 }
 
+function getBusinessFormConfigKey(moduleName, approvalTypeName) {
+  return `${String(moduleName || '').trim()}|||${String(approvalTypeName || '').trim()}`;
+}
+
+function isProtectedBusinessForm(moduleName, approvalTypeName) {
+  return protectedBusinessForms.has(getBusinessFormConfigKey(moduleName, approvalTypeName));
+}
+
 function getPromptKey(moduleName, approvalTypeName) {
   return getBusinessKey(moduleName, approvalTypeName);
 }
@@ -534,6 +550,10 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, { moduleNa
     throw createHttpError('missing business form fields', 400);
   }
 
+  if (isProtectedBusinessForm(currentModuleName, currentApprovalTypeName)) {
+    throw createHttpError('protected business form cannot be edited', 403);
+  }
+
   const sourceModule = schema.modules.find((item) => item.name === currentModuleName);
   const sourceTypeIndex = sourceModule?.approvalTypes.findIndex((item) => item.name === currentApprovalTypeName) ?? -1;
 
@@ -585,6 +605,10 @@ async function deleteBusinessForm(moduleName, approvalTypeName) {
 
   if (!module || typeIndex < 0) {
     throw createHttpError('business form not found', 404);
+  }
+
+  if (isProtectedBusinessForm(targetModuleName, targetApprovalTypeName)) {
+    throw createHttpError('protected business form cannot be deleted', 403);
   }
 
   const totalForms = schema.modules.reduce((total, item) => total + item.approvalTypes.length, 0);
@@ -3410,6 +3434,7 @@ app.patch('/api/accounts/:id', authenticate, requireRoles('developer'), async (r
       return res.status(400).json({ error: 'super admin is managed by environment variables' });
     }
 
+    const directory = await readOrganizationDirectory();
     const updatedAccount = await updateAccounts((accounts) => {
       const account = accounts.find((item) => item.id === id);
       if (!account) {
@@ -3438,7 +3463,12 @@ app.patch('/api/accounts/:id', authenticate, requireRoles('developer'), async (r
       }
 
       account.username = nextUsername;
-      account.name = nextName;
+      const isLinkedToDirectory = Boolean(
+        getLinkedAccountMember(directory, account.username) || getLinkedAccountMember(directory, nextUsername),
+      );
+      if (!isLinkedToDirectory) {
+        account.name = nextName;
+      }
       account.role = nextRole;
       account.enabled = req.body?.enabled === undefined ? account.enabled !== false : Boolean(req.body.enabled);
 
@@ -3456,7 +3486,6 @@ app.patch('/api/accounts/:id', authenticate, requireRoles('developer'), async (r
       return account;
     });
 
-    const directory = await readOrganizationDirectory();
     res.json(toPublicAccount(updatedAccount, directory));
   } catch (error) {
     next(error);
