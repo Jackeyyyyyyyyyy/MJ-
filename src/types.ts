@@ -198,6 +198,7 @@ export interface WorkflowVersion {
   branches?: WorkflowBranch[];
   ccRule?: CcRule;
   formFields?: WorkflowFormField[];
+  flowMode?: 'flexible';
   nodes: WorkflowNode[];
   savedAt?: string;
   savedBy?: string;

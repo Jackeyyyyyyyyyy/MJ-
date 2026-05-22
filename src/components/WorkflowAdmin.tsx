@@ -450,6 +450,8 @@ function stepToFlowNode(step: ApprovalStep, index: number): WorkflowNode {
 }
 
 function flowNodesFromDraft(draft: WorkflowVersion): WorkflowNode[] {
+  if (draft.flowMode !== 'flexible') return [];
+
   const nodes = Array.isArray(draft.nodes) ? draft.nodes.filter((node) => node.type !== 'start') : [];
   if (nodes.some((node) => node.type === 'approver' || node.type === 'condition' || node.type === 'cc')) {
     return nodes;
@@ -507,6 +509,43 @@ function collectFlowSteps(nodes: WorkflowNode[]): ApprovalStep[] {
     }
   });
   return steps;
+}
+
+function collectFlowCcRule(nodes: WorkflowNode[]): CcRule | null {
+  for (const node of nodes) {
+    if (node.type === 'cc') {
+      return {
+        ...defaultCcRule(),
+        ...(node.ccRule || {}),
+        memberIds: node.ccRule?.memberIds || [],
+        departmentIds: node.ccRule?.departmentIds || [],
+      };
+    }
+    if (node.type === 'condition') {
+      for (const condition of node.conditions || []) {
+        const ccRule = collectFlowCcRule(condition.nodes || []);
+        if (ccRule) return ccRule;
+      }
+    }
+  }
+  return null;
+}
+
+function startFlowNode(): WorkflowNode {
+  return { id: 'node-start', type: 'start', title: '发起人', subtitle: 'Applicant' };
+}
+
+function findFlowNode(nodes: WorkflowNode[], nodeId: string): WorkflowNode | null {
+  for (const node of nodes) {
+    if (node.id === nodeId) return node;
+    if (node.type === 'condition') {
+      for (const condition of node.conditions || []) {
+        const matched = findFlowNode(condition.nodes || [], nodeId);
+        if (matched) return matched;
+      }
+    }
+  }
+  return null;
 }
 
 function branchesFromFlowNodes(nodes: WorkflowNode[]): WorkflowBranch[] {
@@ -666,12 +705,14 @@ function normalizeDraftForEditor(draft: WorkflowVersion): WorkflowVersion {
     || businessScopeOptions.find((option) => option.businessType === draft.businessType)
     || businessScopeOptions[0];
   const businessType = fallbackScope?.businessType || getBusinessTypeMeta(draft.businessType).value;
-  const branches = normalizeBranches(draft).map((branch) => (
+  const isFlexibleFlow = draft.flowMode === 'flexible';
+  const normalizedBranches = normalizeBranches(draft).map((branch) => (
     branch.isDefault ? branch : {
       ...branch,
       conditions: branch.conditions.map((condition) => rebaseConditionToScope(condition, fallbackScope)),
     }
   ));
+  const branches = isFlexibleFlow ? normalizedBranches : [defaultBranch()];
 
   return {
     ...draft,
@@ -698,7 +739,8 @@ function normalizeDraftForEditor(draft: WorkflowVersion): WorkflowVersion {
       departmentIds: draft.ccRule?.departmentIds || [],
       timing: 'workflow_completed',
     },
-    nodes: Array.isArray(draft.nodes) ? draft.nodes : [],
+    flowMode: isFlexibleFlow ? 'flexible' : undefined,
+    nodes: isFlexibleFlow && Array.isArray(draft.nodes) ? draft.nodes : [],
   };
 }
 
@@ -710,7 +752,7 @@ function prepareDraftForSave(draft: WorkflowVersion): WorkflowVersion {
     approvalTypeName: nextDraft.basic.approvalTypeName || '通用审批',
   });
   const legacyNodes: WorkflowNode[] = [
-    { id: 'node-start', type: 'start', title: '发起人', subtitle: 'Applicant' },
+    startFlowNode(),
     ...flowNodes,
   ];
 
@@ -720,7 +762,9 @@ function prepareDraftForSave(draft: WorkflowVersion): WorkflowVersion {
       ...nextDraft.basic,
       name: generatedName,
     },
+    flowMode: 'flexible',
     branches: branchesFromFlowNodes(flowNodes),
+    ccRule: collectFlowCcRule(flowNodes) || defaultCcRule(),
     nodes: legacyNodes,
   };
 }
@@ -887,6 +931,7 @@ type DesignerSelection =
   | { type: 'submit' }
   | { type: 'branch'; branchId: string }
   | { type: 'step'; branchId: string; stepId: string }
+  | { type: 'flow-node'; nodeId: string }
   | { type: 'cc' };
 
 const submitDesignerSelection: DesignerSelection = { type: 'submit' };
@@ -1358,6 +1403,131 @@ function FlowNode({
   );
 }
 
+type FlowInsertKind = 'approval' | 'condition' | 'cc';
+
+function FlowGap({
+  onInsert,
+  compact,
+}: {
+  onInsert: (kind: FlowInsertKind) => void;
+  compact?: boolean;
+}) {
+  return (
+    <>
+      <FlowConnector compact={compact} />
+      <FlowInsertButton
+        onApproval={() => onInsert('approval')}
+        onCondition={() => onInsert('condition')}
+        onCc={() => onInsert('cc')}
+      />
+      <FlowConnector compact={compact} />
+    </>
+  );
+}
+
+function getFlowNodeTone(node: WorkflowNode): 'approval' | 'condition' | 'cc' {
+  if (node.type === 'condition') return 'condition';
+  if (node.type === 'cc') return 'cc';
+  return 'approval';
+}
+
+function getFlowNodeIcon(node: WorkflowNode) {
+  if (node.type === 'condition') return <GitBranch size={17} strokeWidth={2.5} />;
+  if (node.type === 'cc') return <Send size={17} strokeWidth={2.5} />;
+  return <CheckCircle2 size={17} strokeWidth={2.5} />;
+}
+
+function getFlowNodeSubtitle(node: WorkflowNode, directory: OrganizationDirectory) {
+  if (node.type === 'condition') return `${node.conditions?.length || 0} 个分支`;
+  if (node.type === 'cc') {
+    const rule = node.ccRule || defaultCcRule();
+    return [
+      rule.memberIds.length ? `${rule.memberIds.length} 个成员` : '',
+      rule.departmentIds.length ? `${rule.departmentIds.length} 个部门` : '',
+    ].filter(Boolean).join('、') || '到达这里时抄送';
+  }
+  return formatStepRule({
+    id: node.id,
+    name: node.title,
+    approverRule: node.rule || { type: 'specific_members', memberIds: [] },
+    approvalMode: node.approvalMode || 'one_of',
+    emptyApproverAction: node.emptyApproverAction || 'block_submit',
+  }, directory);
+}
+
+function FlowSequence({
+  nodes,
+  path,
+  directory,
+  selection,
+  onSelect,
+  onInsert,
+}: {
+  nodes: WorkflowNode[];
+  path: string[];
+  directory: OrganizationDirectory;
+  selection: DesignerSelection;
+  onSelect: (selection: DesignerSelection) => void;
+  onInsert: (path: string[], index: number, kind: FlowInsertKind) => void;
+}) {
+  return (
+    <div className="flex w-full flex-col items-center">
+      <FlowGap compact onInsert={(kind) => onInsert(path, 0, kind)} />
+      {nodes.map((node, index) => (
+        <React.Fragment key={node.id}>
+          <div className="w-[300px]">
+            <FlowNode
+              tone={getFlowNodeTone(node)}
+              kicker={node.type === 'condition' ? '条件分化' : node.type === 'cc' ? '抄送' : `审批 ${index + 1}`}
+              title={node.title || (node.type === 'condition' ? '条件分化' : node.type === 'cc' ? '抄送对象' : `审批节点 ${index + 1}`)}
+              subtitle={getFlowNodeSubtitle(node, directory)}
+              icon={getFlowNodeIcon(node)}
+              selected={selection.type === 'flow-node' && selection.nodeId === node.id}
+              onClick={() => onSelect({ type: 'flow-node', nodeId: node.id })}
+            />
+          </div>
+
+          {node.type === 'condition' && (
+            <div className="relative my-1 pt-[72px]">
+              <FlowBranchRail count={Math.max(1, node.conditions?.length || 0)} />
+              <div
+                className="relative grid items-start"
+                style={{
+                  columnGap: `${FLOW_BRANCH_GAP}px`,
+                  gridTemplateColumns: `repeat(${Math.max(1, node.conditions?.length || 0)}, ${FLOW_BRANCH_CARD_WIDTH}px)`,
+                }}
+              >
+                {(node.conditions || []).map((condition, conditionIndex) => (
+                  <FlowBranchLane key={condition.id} showBottomConnector={(node.conditions?.length || 0) > 1}>
+                    <FlowNode
+                      tone="condition"
+                      kicker={condition.isDefault ? '其余情况' : `条件 ${conditionIndex + 1}`}
+                      title={condition.title || (condition.isDefault ? '其余情况' : `条件 ${conditionIndex + 1}`)}
+                      subtitle={condition.isDefault ? '未命中其他条件' : condition.expression || '点击右侧配置条件'}
+                      icon={<GitBranch size={17} strokeWidth={2.5} />}
+                    />
+                    <FlowSequence
+                      nodes={condition.nodes || []}
+                      path={[...path, condition.id]}
+                      directory={directory}
+                      selection={selection}
+                      onSelect={onSelect}
+                      onInsert={onInsert}
+                    />
+                  </FlowBranchLane>
+                ))}
+              </div>
+              <FlowMergeRail count={Math.max(1, node.conditions?.length || 0)} />
+            </div>
+          )}
+
+          <FlowGap compact onInsert={(kind) => onInsert(path, index + 1, kind)} />
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
 function WorkflowFlowDesigner({
   draft,
   directory,
@@ -1366,6 +1536,7 @@ function WorkflowFlowDesigner({
   branches,
   validation,
   selection,
+  selectedFlowNode,
   fieldOptions,
   memberOptions,
   departmentOptions,
@@ -1382,6 +1553,9 @@ function WorkflowFlowDesigner({
   onUpdateStep,
   onRemoveStep,
   onMoveStep,
+  flowNodes,
+  onInsertFlowNode,
+  onUpdateFlowNode,
 }: {
   draft: WorkflowVersion;
   directory: OrganizationDirectory;
@@ -1390,6 +1564,7 @@ function WorkflowFlowDesigner({
   branches: WorkflowBranch[];
   validation: ValidationState;
   selection: DesignerSelection;
+  selectedFlowNode: WorkflowNode | null;
   fieldOptions: ConditionFieldOption[];
   memberOptions: Array<{ value: string; label: string }>;
   departmentOptions: Array<{ value: string; label: string }>;
@@ -1406,6 +1581,9 @@ function WorkflowFlowDesigner({
   onUpdateStep: (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => void;
   onRemoveStep: (branchId: string, stepId: string) => void;
   onMoveStep: (branchId: string, stepId: string, direction: -1 | 1) => void;
+  flowNodes: WorkflowNode[];
+  onInsertFlowNode: (path: string[], index: number, kind: FlowInsertKind) => void;
+  onUpdateFlowNode: (nodeId: string, patch: Partial<WorkflowNode>) => void;
 }) {
   const defaultBranch = branches.find((branch) => branch.isDefault) || branches[branches.length - 1];
   const conditionalBranches = branches.filter((branch) => !branch.isDefault);
@@ -1424,6 +1602,7 @@ function WorkflowFlowDesigner({
   const activeSelection: DesignerSelection = (
     (selection.type === 'branch' && selectedBranch)
     || (selection.type === 'step' && selectedStep)
+    || selection.type === 'flow-node'
     || selection.type === 'cc'
   ) ? selection : submitDesignerSelection;
   const panStartRef = React.useRef<{ x: number; y: number; left: number; top: number } | null>(null);
@@ -1476,7 +1655,7 @@ function WorkflowFlowDesigner({
   React.useEffect(() => {
     const frame = window.requestAnimationFrame(fitWorkflowCanvas);
     return () => window.cancelAnimationFrame(frame);
-  }, [fitWorkflowCanvas, canvasMinWidth, flowBranches.length, branches.length]);
+  }, [fitWorkflowCanvas, canvasMinWidth, flowBranches.length, branches.length, flowNodes.length]);
 
   const zoomWorkflowCanvas = (nextScale: number, clientX?: number, clientY?: number) => {
     const frame = canvasFrameRef.current;
@@ -1673,108 +1852,14 @@ function WorkflowFlowDesigner({
                 </FlowNode>
               </div>
 
-              <FlowConnector />
-              <FlowInsertButton
-                onApproval={() => {
-                  if (defaultBranch) onAddStep(defaultBranch.id);
-                }}
-                onCondition={onAddBranch}
-                onCc={() => onSelect({ type: 'cc' })}
+              <FlowSequence
+                nodes={flowNodes}
+                path={[]}
+                directory={directory}
+                selection={activeSelection}
+                onSelect={onSelect}
+                onInsert={onInsertFlowNode}
               />
-              <FlowConnector compact />
-
-              <div
-                className={cn("relative", flowBranches.length > 1 && "pt-[88px]")}
-                style={{ width: `${branchFlowWidth}px` }}
-              >
-                <FlowBranchRail count={flowBranches.length} />
-                <div
-                  className="relative grid items-stretch"
-                  style={{
-                    columnGap: `${FLOW_BRANCH_GAP}px`,
-                    gridTemplateColumns: `repeat(${Math.max(flowBranches.length, 1)}, ${FLOW_BRANCH_CARD_WIDTH}px)`,
-                  }}
-                >
-                  {flowBranches.map((branch, branchIndex) => (
-                    <FlowBranchLane
-                      key={branch.id}
-                      showBottomConnector={flowBranches.length > 1}
-                    >
-                      <FlowNode
-                        tone={branch.isDefault ? 'condition' : 'condition'}
-                        kicker={branch.isDefault ? '默认条件' : `条件 ${branchIndex + 1}`}
-                        title={getBranchTitle(branch)}
-                        subtitle={branch.isDefault ? '默认兜底' : branch.conditions.map(formatCondition).join(' 且 ') || '未设置条件'}
-                        meta={branch.isDefault ? '优先级最低' : `优先级 ${branchIndex + 1}`}
-                        icon={<GitBranch size={17} strokeWidth={2.5} />}
-                        selected={isDesignerSelected(activeSelection, 'branch', branch.id)}
-                        hasError={Boolean(validation.branches[branch.id]?.length)}
-                        onClick={() => onSelect({ type: 'branch', branchId: branch.id })}
-                      />
-
-                      <FlowConnector compact />
-                      <FlowInsertButton
-                        onApproval={() => onAddStep(branch.id)}
-                        onCondition={onAddBranch}
-                        onCc={() => onSelect({ type: 'cc' })}
-                      />
-                      <FlowConnector compact />
-
-                      <div className="flex w-full flex-col items-center gap-0">
-                        {branch.approvalSteps.length === 0 ? (
-                          <div className="w-full rounded-lg border border-dashed border-border-silver bg-white/80 p-5 text-center text-[12px] font-bold text-medium-gray">
-                            当前分支暂无审批节点
-                          </div>
-                        ) : branch.approvalSteps.map((step, stepIndex) => (
-                          <React.Fragment key={step.id}>
-                            {stepIndex > 0 && (
-                              <>
-                                <FlowConnector compact />
-                                <FlowInsertButton
-                                  onApproval={() => onAddStep(branch.id)}
-                                  onCondition={onAddBranch}
-                                  onCc={() => onSelect({ type: 'cc' })}
-                                />
-                                <FlowConnector compact />
-                              </>
-                            )}
-                            <FlowNode
-                              tone="approval"
-                              kicker={`审批 ${stepIndex + 1}`}
-                              title={step.name}
-                              subtitle={formatStepRule(step, directory)}
-                              meta={step.approverRule.type === 'specific_members' ? getApprovalModeLabel(step.approvalMode) : getSupervisorDepthLabel(step.approverRule)}
-                              icon={<CheckCircle2 size={17} strokeWidth={2.5} />}
-                              selected={isDesignerSelected(activeSelection, 'step', branch.id, step.id)}
-                              hasError={Boolean(validation.steps[step.id]?.length)}
-                              onClick={() => onSelect({ type: 'step', branchId: branch.id, stepId: step.id })}
-                            >
-                              {renderSupervisorPreview(step)}
-                            </FlowNode>
-                          </React.Fragment>
-                        ))}
-                      </div>
-                    </FlowBranchLane>
-                  ))}
-                </div>
-              </div>
-
-              <FlowMergeRail count={flowBranches.length} />
-              <div className="w-[300px]">
-                <FlowNode
-                  tone="cc"
-                  kicker="抄送"
-                  title="抄送对象"
-                  subtitle={[
-                    ccRule.memberIds.length ? `${ccRule.memberIds.length} 个成员` : '',
-                    ccRule.departmentIds.length ? `${ccRule.departmentIds.length} 个部门` : '',
-                  ].filter(Boolean).join('、') || '流程结束后抄送，可为空'}
-                  icon={<Send size={17} strokeWidth={2.5} />}
-                  selected={isDesignerSelected(activeSelection, 'cc')}
-                  onClick={() => onSelect({ type: 'cc' })}
-                />
-              </div>
-              <FlowConnector compact />
               <div className="w-[180px]">
                 <FlowNode
                   tone="end"
@@ -1790,6 +1875,7 @@ function WorkflowFlowDesigner({
 
         <DesignerInspector
           selection={activeSelection}
+          selectedFlowNode={selectedFlowNode}
           selectedBranch={selectedBranch}
           selectedStep={selectedStep}
           branches={branches}
@@ -1812,6 +1898,7 @@ function WorkflowFlowDesigner({
           onUpdateStep={onUpdateStep}
           onRemoveStep={onRemoveStep}
           onMoveStep={onMoveStep}
+          onUpdateFlowNode={onUpdateFlowNode}
         />
       </div>
     </section>
@@ -2205,6 +2292,7 @@ function DesignerInspector({
   selection,
   selectedBranch,
   selectedStep,
+  selectedFlowNode,
   branches,
   submitPermission,
   ccRule,
@@ -2225,10 +2313,12 @@ function DesignerInspector({
   onUpdateStep,
   onRemoveStep,
   onMoveStep,
+  onUpdateFlowNode,
 }: {
   selection: DesignerSelection;
   selectedBranch: WorkflowBranch | null;
   selectedStep: ApprovalStep | null;
+  selectedFlowNode: WorkflowNode | null;
   branches: WorkflowBranch[];
   submitPermission: SubmitPermissionRule;
   ccRule: CcRule;
@@ -2249,8 +2339,132 @@ function DesignerInspector({
   onUpdateStep: (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => void;
   onRemoveStep: (branchId: string, stepId: string) => void;
   onMoveStep: (branchId: string, stepId: string, direction: -1 | 1) => void;
+  onUpdateFlowNode: (nodeId: string, patch: Partial<WorkflowNode>) => void;
 }) {
   const inspectorClassName = "border-t border-border-silver bg-white lg:sticky lg:top-20 lg:self-start lg:border-l lg:border-t-0 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto";
+
+  if (selection.type === 'flow-node' && selectedFlowNode) {
+    if (selectedFlowNode.type === 'cc') {
+      const rule = selectedFlowNode.ccRule || defaultCcRule();
+      return (
+        <aside className={inspectorClassName}>
+          <InspectorHeader label="抄送" title="抄送配置" description="配置流程到达此处时需要同步的人。" />
+          <div className="space-y-5 p-5">
+            <label className="block space-y-2">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">抄送成员</span>
+              <MultiSelect
+                value={rule.memberIds}
+                options={memberOptions}
+                onChange={(memberIds) => onUpdateFlowNode(selectedFlowNode.id, { ccRule: { ...rule, memberIds } })}
+                emptyText="暂无成员"
+              />
+            </label>
+            <label className="block space-y-2">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">抄送部门</span>
+              <MultiSelect
+                value={rule.departmentIds}
+                options={departmentOptions}
+                onChange={(departmentIds) => onUpdateFlowNode(selectedFlowNode.id, { ccRule: { ...rule, departmentIds } })}
+                emptyText="暂无部门"
+              />
+            </label>
+          </div>
+        </aside>
+      );
+    }
+
+    if (selectedFlowNode.type === 'condition') {
+      return (
+        <aside className={inspectorClassName}>
+          <InspectorHeader label="条件分化" title={selectedFlowNode.title || '条件分化'} description="条件分化会按命中的分支继续执行。" />
+          <div className="space-y-5 p-5">
+            <label className="block space-y-2">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">节点名称</span>
+              <input
+                className="input-field text-[14px]"
+                value={selectedFlowNode.title || ''}
+                onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, { title: event.target.value })}
+              />
+            </label>
+            <div className="space-y-2">
+              {(selectedFlowNode.conditions || []).map((condition) => (
+                <div key={condition.id} className="rounded-2xl border border-border-silver bg-white px-4 py-3">
+                  <p className="text-[13px] font-black text-midnight-graphite">{condition.title}</p>
+                  <p className="mt-1 text-[11px] font-bold text-medium-gray">
+                    {condition.isDefault ? '未命中其他条件时进入' : condition.expression || '默认条件待配置'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </aside>
+      );
+    }
+
+    const rule = selectedFlowNode.rule || { type: 'specific_members', memberIds: [] };
+    return (
+      <aside className={inspectorClassName}>
+        <InspectorHeader label="审批节点" title={selectedFlowNode.title || '审批节点'} description="配置当前审批节点。" />
+        <div className="space-y-5 p-5">
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">节点名称</span>
+            <input
+              className="input-field text-[14px]"
+              value={selectedFlowNode.title || ''}
+              onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, { title: event.target.value })}
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <SegmentedButton
+              isActive={rule.type === 'specific_members'}
+              onClick={() => onUpdateFlowNode(selectedFlowNode.id, {
+                rule: { type: 'specific_members', memberIds: [] },
+                approvalMode: selectedFlowNode.approvalMode || 'one_of',
+              })}
+            >
+              指定成员
+            </SegmentedButton>
+            <SegmentedButton
+              isActive={rule.type === 'multi_supervisor'}
+              onClick={() => onUpdateFlowNode(selectedFlowNode.id, {
+                rule: { type: 'multi_supervisor', supervisorDepth: 1 },
+                approvalMode: 'one_of',
+              })}
+            >
+              发起人上级
+            </SegmentedButton>
+          </div>
+          {rule.type === 'specific_members' && (
+            <label className="block space-y-2">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">指定成员</span>
+              <MultiSelect
+                value={rule.memberIds || []}
+                options={memberOptions}
+                onChange={(memberIds) => onUpdateFlowNode(selectedFlowNode.id, { rule: { ...rule, memberIds } })}
+                emptyText="暂无成员"
+              />
+            </label>
+          )}
+          {rule.type === 'multi_supervisor' && (
+            <label className="block space-y-2">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">主管层级</span>
+              <input
+                className="input-field text-[14px]"
+                type="number"
+                min={1}
+                max={20}
+                value={Math.max(1, Number(rule.supervisorDepth) || 1)}
+                onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, {
+                  rule: { ...rule, supervisorDepth: Math.max(1, Math.min(20, Number(event.target.value) || 1)) },
+                  approvalMode: 'one_of',
+                })}
+              />
+            </label>
+          )}
+        </div>
+      </aside>
+    );
+  }
 
   if (selection.type === 'step' && selectedBranch && selectedStep) {
     return (
@@ -2792,6 +3006,131 @@ export default function WorkflowAdmin() {
     setDesignerSelection({ type: 'step', branchId, stepId });
   };
 
+  const createFlowNode = (kind: FlowInsertKind, index: number): WorkflowNode => {
+    if (kind === 'condition') {
+      const field = conditionFieldOptionsForDraft.find((option) => option.kind === 'number')?.value
+        || conditionFieldOptionsForDraft[0]?.value
+        || 'submitter.department';
+      const condition = defaultCondition(field);
+      const expression = formatCondition(condition);
+
+      return {
+        id: createId('flow-condition'),
+        type: 'condition',
+        title: '条件分化',
+        subtitle: '按条件进入不同分支',
+        conditions: [
+          {
+            id: createId('flow-branch'),
+            title: '条件 1',
+            expression,
+            priority: 1,
+            isDefault: false,
+            workflowConditions: [condition],
+            nodes: [],
+          },
+          {
+            id: createId('flow-else'),
+            title: '其余情况',
+            expression: '',
+            priority: 999,
+            isDefault: true,
+            workflowConditions: [],
+            nodes: [],
+          },
+        ],
+      };
+    }
+
+    if (kind === 'cc') {
+      return {
+        id: createId('flow-cc'),
+        type: 'cc',
+        title: '抄送对象',
+        subtitle: '流程到达这里时抄送',
+        ccRule: defaultCcRule(),
+      };
+    }
+
+    const step = defaultStep(index + 1);
+    return {
+      ...stepToFlowNode(step, index),
+      id: createId('flow-approval'),
+      title: `审批节点 ${index + 1}`,
+    };
+  };
+
+  const insertFlowNodeInto = (
+    nodes: WorkflowNode[],
+    path: string[],
+    index: number,
+    nodeToInsert: WorkflowNode,
+  ): WorkflowNode[] => {
+    if (path.length === 0) {
+      const nextNodes = [...nodes];
+      nextNodes.splice(index, 0, nodeToInsert);
+      return nextNodes;
+    }
+
+    const [branchId, ...restPath] = path;
+    return nodes.map((node) => {
+      if (node.type !== 'condition') return node;
+
+      return {
+        ...node,
+        conditions: (node.conditions || []).map((condition) => {
+          if (condition.id !== branchId) return condition;
+          return {
+            ...condition,
+            nodes: insertFlowNodeInto(condition.nodes || [], restPath, index, nodeToInsert),
+          };
+        }),
+      };
+    });
+  };
+
+  const updateFlowNodeInTree = (
+    nodes: WorkflowNode[],
+    nodeId: string,
+    patch: Partial<WorkflowNode>,
+  ): WorkflowNode[] => nodes.map((node) => {
+    if (node.id === nodeId) return { ...node, ...patch };
+    if (node.type !== 'condition') return node;
+    return {
+      ...node,
+      conditions: (node.conditions || []).map((condition) => ({
+        ...condition,
+        nodes: updateFlowNodeInTree(condition.nodes || [], nodeId, patch),
+      })),
+    };
+  });
+
+  const syncFlowDraft = (current: WorkflowVersion, nextNodes: WorkflowNode[]): WorkflowVersion => ({
+    ...current,
+    flowMode: 'flexible',
+    nodes: [startFlowNode(), ...nextNodes],
+    branches: branchesFromFlowNodes(nextNodes),
+    ccRule: collectFlowCcRule(nextNodes) || defaultCcRule(),
+  });
+
+  const insertFlowNode = (path: string[], index: number, kind: FlowInsertKind) => {
+    const nextNode = createFlowNode(kind, index);
+    patchDraft((current) => {
+      const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
+      const nextNodes = insertFlowNodeInto(currentNodes, path, index, nextNode);
+      return syncFlowDraft(current, nextNodes);
+    });
+    setDesignerSelection({ type: 'flow-node', nodeId: nextNode.id });
+  };
+
+  const updateFlowNode = (nodeId: string, patch: Partial<WorkflowNode>) => {
+    patchDraft((current) => {
+      const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
+      const nextNodes = updateFlowNodeInTree(currentNodes, nodeId, patch);
+      return syncFlowDraft(current, nextNodes);
+    });
+  };
+
   const updateStep = (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => {
     patchDraft((current) => ({
       ...current,
@@ -2933,6 +3272,10 @@ export default function WorkflowAdmin() {
   const submitPermission = draft?.submitPermission || defaultSubmitPermission();
   const ccRule = draft?.ccRule || defaultCcRule();
   const branches = draft?.branches || [];
+  const flowNodes = draft ? flowNodesFromDraft(draft) : [];
+  const selectedFlowNode = designerSelection.type === 'flow-node'
+    ? findFlowNode(flowNodes, designerSelection.nodeId)
+    : null;
 
   return (
     <div className="space-y-4 pb-16 animate-in fade-in duration-500">
@@ -3052,6 +3395,7 @@ export default function WorkflowAdmin() {
               branches={branches}
               validation={validation}
               selection={designerSelection}
+              selectedFlowNode={selectedFlowNode}
               fieldOptions={conditionFieldOptionsForDraft}
               memberOptions={memberOptions}
               departmentOptions={departmentOptions}
@@ -3068,6 +3412,9 @@ export default function WorkflowAdmin() {
               onUpdateStep={updateStep}
               onRemoveStep={removeStep}
               onMoveStep={moveStep}
+              flowNodes={flowNodes}
+              onInsertFlowNode={insertFlowNode}
+              onUpdateFlowNode={updateFlowNode}
             />
 
             <div className="hidden">

@@ -702,7 +702,7 @@ function createDefaultWorkflowBranch() {
     name: 'Default Branch',
     isDefault: true,
     conditions: [],
-    approvalSteps: [createDefaultApprovalStep(1)],
+    approvalSteps: [],
   };
 }
 
@@ -898,7 +898,7 @@ function normalizeWorkflowBranches(version) {
     name: 'Default Branch',
     isDefault: true,
     conditions: [],
-    approvalSteps: linearSteps.length > 0 ? linearSteps : [createDefaultApprovalStep(1)],
+    approvalSteps: linearSteps,
   });
 
   return branches;
@@ -908,11 +908,12 @@ function normalizeWorkflowDraft(draft) {
   const nextDraft = JSON.parse(JSON.stringify(draft || {}));
   const name = normalizeWorkflowText(nextDraft.basic?.name || nextDraft.name || '新审批流');
   const businessType = inferWorkflowBusinessType(nextDraft.businessType);
-  const branches = normalizeWorkflowBranches(nextDraft);
+  const isFlexibleFlow = nextDraft.flowMode === 'flexible';
+  const branches = isFlexibleFlow ? normalizeWorkflowBranches(nextDraft) : [createDefaultWorkflowBranch()];
   const savedNodes = Array.isArray(nextDraft.nodes)
     ? nextDraft.nodes.filter((node) => node && typeof node === 'object')
     : [];
-  const hasSavedFlow = savedNodes.some((node) => node.type === 'approver' || node.type === 'condition' || node.type === 'cc');
+  const hasSavedFlow = isFlexibleFlow && savedNodes.some((node) => node.type === 'approver' || node.type === 'condition' || node.type === 'cc');
   const defaultBranch = branches.find((branch) => branch.isDefault) || branches[branches.length - 1];
   const legacyNodes = hasSavedFlow
     ? [
@@ -947,12 +948,13 @@ function normalizeWorkflowDraft(draft) {
     branches,
     ccRule: {
       ...createDefaultCcRule(),
-      ...(nextDraft.ccRule || {}),
-      memberIds: Array.isArray(nextDraft.ccRule?.memberIds) ? nextDraft.ccRule.memberIds : [],
-      departmentIds: Array.isArray(nextDraft.ccRule?.departmentIds) ? nextDraft.ccRule.departmentIds : [],
+      ...(isFlexibleFlow ? nextDraft.ccRule || {} : {}),
+      memberIds: isFlexibleFlow && Array.isArray(nextDraft.ccRule?.memberIds) ? nextDraft.ccRule.memberIds : [],
+      departmentIds: isFlexibleFlow && Array.isArray(nextDraft.ccRule?.departmentIds) ? nextDraft.ccRule.departmentIds : [],
       timing: 'workflow_completed',
     },
     formFields: Array.isArray(nextDraft.formFields) ? nextDraft.formFields : [],
+    ...(isFlexibleFlow ? { flowMode: 'flexible' } : {}),
     nodes: legacyNodes,
   };
 }
@@ -1008,10 +1010,6 @@ function validateWorkflowDraftForPublish(draft) {
 
   branches.forEach((branch, branchIndex) => {
     const branchName = branch?.name || `Branch ${branchIndex + 1}`;
-    if (!Array.isArray(branch.approvalSteps) || branch.approvalSteps.length === 0) {
-      errors.push(`${branchName} 至少需要一个审批节点`);
-    }
-
     if (!branch.isDefault) {
       if (!Array.isArray(branch.conditions) || branch.conditions.length === 0) {
         errors.push(`${branchName} 必须配置条件`);
@@ -1056,44 +1054,6 @@ function validateWorkflowDraftForPublish(draft) {
 }
 
 function createDefaultWorkflowVersion(status = 'draft') {
-  const baseNodes = [
-    {
-      id: 'node-supervisor',
-      type: 'approver',
-      title: '直接主管',
-      subtitle: '从直接主管到第4级主管',
-      rule: { type: 'multi_supervisor', supervisorDepth: 4, emptyApproverAction: 'auto_pass' },
-    },
-    {
-      id: 'node-finance-director',
-      type: 'approver',
-      title: '财务总监',
-      subtitle: '钱琳',
-      rule: { type: 'specified', memberIds: ['qian-lin'], emptyApproverAction: 'block_submit' },
-    },
-    {
-      id: 'node-finance-approval',
-      type: 'approver',
-      title: '审批人',
-      subtitle: '叶飞',
-      rule: { type: 'specified', memberIds: ['ye-fei'], emptyApproverAction: 'block_submit' },
-    },
-    {
-      id: 'node-gm-countersign',
-      type: 'approver',
-      title: '总经理',
-      subtitle: '总经理会签',
-      rule: { type: 'specified', memberIds: ['fan-lu'], emptyApproverAction: 'block_submit' },
-    },
-  ];
-
-  const branchRanges = [
-    ['cond-1', '条件1', '付款总额 <= 10000'],
-    ['cond-2', '条件2', '10000 < 付款总额 <= 50000'],
-    ['cond-3', '条件3', '50000 < 付款总额 <= 200000'],
-    ['cond-4', '条件4', '付款总额 > 200000'],
-  ];
-
   return {
     id: `version-${status}-1`,
     version: 1,
@@ -1107,38 +1067,9 @@ function createDefaultWorkflowVersion(status = 'draft') {
       visibleRange: '全公司',
     },
     submitPermission: createDefaultSubmitPermission(),
-    branches: [
-      ...branchRanges.map(([id, title, expression], index) => ({
-        id,
-        name: title,
-        isDefault: false,
-        conditions: [parseLegacyConditionExpression(expression, index)],
-        approvalSteps: baseNodes.map((node, stepIndex) => legacyRuleToApprovalStep({
-          ...node,
-          id: `${node.id}-${index + 1}`,
-        }, stepIndex)),
-      })),
-      {
-        id: 'branch-default',
-        name: 'Default Branch',
-        isDefault: true,
-        conditions: [],
-        approvalSteps: [
-          legacyRuleToApprovalStep({
-            id: 'node-chairman',
-            type: 'approver',
-            title: '董事长',
-            subtitle: '董事长会签',
-            rule: { type: 'specified', memberIds: ['qin-an-tang'], emptyApproverAction: 'block_submit' },
-          }, 0),
-        ],
-      },
-    ],
-    ccRule: {
-      timing: 'workflow_completed',
-      memberIds: ['qin-sheng', 'wang-tumiao', 'jiang-hua', 'qian-lin'],
-      departmentIds: [],
-    },
+    flowMode: 'flexible',
+    branches: [createDefaultWorkflowBranch()],
+    ccRule: createDefaultCcRule(),
     formFields: [
       { id: 'field-vendor', label: '供应商', type: 'text', required: true },
       { id: 'field-currency', label: '币种', type: 'select', required: true },
@@ -1147,37 +1078,7 @@ function createDefaultWorkflowVersion(status = 'draft') {
       { id: 'field-attachment', label: '附件', type: 'attachment', required: false },
     ],
     nodes: [
-      { id: 'node-start', type: 'start', title: '发起人', subtitle: '金华魔术信息科技有限公司' },
-      {
-        id: 'node-amount-conditions',
-        type: 'condition',
-        title: '金额条件',
-        subtitle: '按付款总额自动分支',
-        conditions: branchRanges.map(([id, title, expression], index) => ({
-          id,
-          title,
-          expression,
-          priority: index + 1,
-          nodes: baseNodes.map((node) => ({
-            ...node,
-            id: `${node.id}-${index + 1}`,
-          })),
-        })),
-      },
-      {
-        id: 'node-chairman',
-        type: 'approver',
-        title: '董事长',
-        subtitle: '董事长会签',
-        rule: { type: 'specified', memberIds: ['qin-an-tang'], emptyApproverAction: 'block_submit' },
-      },
-      {
-        id: 'node-copy',
-        type: 'cc',
-        title: '抄送对象',
-        subtitle: '秦笙、王涂妙、姜华、钱琳',
-        rule: { type: 'specified', memberIds: ['qin-sheng', 'wang-tumiao', 'jiang-hua', 'qian-lin'] },
-      },
+      { id: 'node-start', type: 'start', title: '发起人', subtitle: 'Applicant' },
     ],
     advanced: {
       allowWithdraw: true,
@@ -1729,9 +1630,6 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
   const applicantMember = findMemberByAccount(directory, applicantUsername);
   const ccRecipients = resolveCcRecipientsForRule(version.ccRule, directory);
   const nodes = getLinearApproverNodes(version, { businessData, directory, applicantMember });
-  if (nodes.length === 0) {
-    throw createHttpError('The matched approval workflow has no linear approval steps.', 400);
-  }
 
   const steps = [];
 
