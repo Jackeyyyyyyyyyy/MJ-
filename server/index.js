@@ -8,8 +8,41 @@ import zlib from 'node:zlib';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+async function loadLocalEnvFile() {
+  const envFile = path.resolve(__dirname, '..', '.env.local');
+
+  try {
+    const content = await fs.readFile(envFile, 'utf8');
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+
+      const equalsIndex = line.indexOf('=');
+      if (equalsIndex < 1) continue;
+
+      const name = line.slice(0, equalsIndex).trim();
+      let value = line.slice(equalsIndex + 1).trim();
+      if (!name || process.env[name] !== undefined) continue;
+
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+
+      process.env[name] = value;
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+}
+
+await loadLocalEnvFile();
+
 const app = express();
 const port = process.env.PORT || 8080;
+const maxBackupUploadBytes = Number(process.env.BACKUP_UPLOAD_LIMIT_BYTES || 300 * 1024 * 1024);
 const dataDir =
   process.env.RAILWAY_VOLUME_MOUNT_PATH ||
   process.env.DATA_DIR ||
@@ -514,6 +547,158 @@ async function createBackupArchive() {
   const centralDirectory = Buffer.concat(centralChunks);
   const endRecord = createZipEndRecord(entries.length, centralDirectory.length, centralDirectoryOffset);
   return Buffer.concat([...fileChunks, centralDirectory, endRecord]);
+}
+
+function readRequestBody(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let totalBytes = 0;
+
+    req.on('data', (chunk) => {
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        reject(createHttpError('backup upload is too large', 413));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+function normalizeBackupEntryName(entryName) {
+  const normalizedName = String(entryName || '').replace(/\\/g, '/');
+  const cleanName = normalizedName.endsWith('/') ? normalizedName.slice(0, -1) : normalizedName;
+  const parts = cleanName.split('/');
+
+  if (
+    !cleanName ||
+    normalizedName.startsWith('/') ||
+    /^[a-zA-Z]:/.test(normalizedName) ||
+    parts.some((part) => !part || part === '.' || part === '..') ||
+    shouldExcludeFromBackup(cleanName, parts[parts.length - 1])
+  ) {
+    throw createHttpError(`invalid backup entry path: ${entryName}`, 400);
+  }
+
+  return cleanName;
+}
+
+function parseBackupArchive(buffer) {
+  const entries = [];
+  let offset = 0;
+
+  while (offset + 4 <= buffer.length) {
+    const signature = buffer.readUInt32LE(offset);
+    if (signature === 0x02014b50 || signature === 0x06054b50) break;
+    if (signature !== 0x04034b50) {
+      throw createHttpError('backup file format is not supported', 400);
+    }
+
+    if (offset + 30 > buffer.length) {
+      throw createHttpError('backup file is incomplete', 400);
+    }
+
+    const flags = buffer.readUInt16LE(offset + 6);
+    const compressionMethod = buffer.readUInt16LE(offset + 8);
+    const crc = buffer.readUInt32LE(offset + 14);
+    const compressedSize = buffer.readUInt32LE(offset + 18);
+    const uncompressedSize = buffer.readUInt32LE(offset + 22);
+    const nameLength = buffer.readUInt16LE(offset + 26);
+    const extraLength = buffer.readUInt16LE(offset + 28);
+    const nameStart = offset + 30;
+    const contentStart = nameStart + nameLength + extraLength;
+    const contentEnd = contentStart + compressedSize;
+
+    if (contentEnd > buffer.length) {
+      throw createHttpError('backup file is incomplete', 400);
+    }
+
+    if (compressionMethod !== 0 || extraLength !== 0 || (flags & 0x0008) !== 0 || compressedSize !== uncompressedSize) {
+      throw createHttpError('backup file must use the downloaded volume format', 400);
+    }
+
+    const rawName = buffer.subarray(nameStart, nameStart + nameLength).toString('utf8');
+    const isDirectory = rawName.endsWith('/');
+    const relativePath = normalizeBackupEntryName(rawName);
+    const content = isDirectory ? Buffer.alloc(0) : buffer.subarray(contentStart, contentEnd);
+
+    if (isDirectory && compressedSize !== 0) {
+      throw createHttpError(`invalid backup directory entry: ${rawName}`, 400);
+    }
+
+    if (!isDirectory && crc32(content) !== crc) {
+      throw createHttpError(`backup file checksum failed: ${rawName}`, 400);
+    }
+
+    entries.push({ relativePath, isDirectory, content });
+    offset = contentEnd;
+  }
+
+  if (entries.length === 0 || offset + 4 > buffer.length || buffer.readUInt32LE(offset) !== 0x02014b50) {
+    throw createHttpError('backup file must use the downloaded volume format', 400);
+  }
+
+  const fileNames = new Set(entries.filter((entry) => !entry.isDirectory).map((entry) => entry.relativePath));
+  for (const requiredFile of ['approval-records.json', 'approval-accounts.json']) {
+    if (!fileNames.has(requiredFile)) {
+      throw createHttpError(`backup file is missing ${requiredFile}`, 400);
+    }
+  }
+
+  return entries;
+}
+
+async function restoreBackupArchive(buffer) {
+  const entries = parseBackupArchive(buffer);
+  const backupRoot = path.resolve(dataDir);
+  const parentDir = path.dirname(backupRoot);
+  const rollbackDir = path.join(parentDir, `.restore-rollback-${Date.now()}-${crypto.randomBytes(6).toString('hex')}`);
+  const existingItems = [];
+
+  await fs.mkdir(backupRoot, { recursive: true });
+  await fs.mkdir(rollbackDir, { recursive: true });
+
+  try {
+    for (const item of await fs.readdir(backupRoot)) {
+      existingItems.push(item);
+      await fs.rename(path.join(backupRoot, item), path.join(rollbackDir, item));
+    }
+
+    for (const entry of entries) {
+      const targetPath = path.resolve(backupRoot, entry.relativePath);
+      if (!targetPath.startsWith(`${backupRoot}${path.sep}`)) {
+        throw createHttpError(`invalid backup entry path: ${entry.relativePath}`, 400);
+      }
+
+      if (entry.isDirectory) {
+        await fs.mkdir(targetPath, { recursive: true });
+      } else {
+        await fs.mkdir(path.dirname(targetPath), { recursive: true });
+        await fs.writeFile(targetPath, entry.content);
+      }
+    }
+
+    await fs.rm(rollbackDir, { recursive: true, force: true });
+    return { restoredFiles: entries.filter((entry) => !entry.isDirectory).length };
+  } catch (error) {
+    await fs.rm(backupRoot, { recursive: true, force: true });
+    await fs.mkdir(backupRoot, { recursive: true });
+
+    for (const item of existingItems) {
+      try {
+        await fs.rename(path.join(rollbackDir, item), path.join(backupRoot, item));
+      } catch {
+        // Continue restoring the remaining items.
+      }
+    }
+
+    await fs.rm(rollbackDir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function createToken(user) {
@@ -4006,6 +4191,20 @@ app.get('/api/backup/download', authenticateBackup, async (_req, res, next) => {
   }
 });
 
+app.post('/api/backup/upload', authenticateBackup, async (req, res, next) => {
+  try {
+    const archive = await readRequestBody(req, maxBackupUploadBytes);
+    if (!archive.length) {
+      return res.status(400).json({ error: 'missing backup file' });
+    }
+
+    const result = await restoreBackupArchive(archive);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/uploads', authenticate, requireRoles('employee', 'boss'), async (req, res, next) => {
   try {
     const { files } = req.body || {};
@@ -4236,6 +4435,7 @@ app.use('/api', (_req, res) => {
 const distDir = path.resolve(__dirname, '..', 'dist');
 app.use(express.static(distDir));
 app.get('*', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
   res.sendFile(path.join(distDir, 'index.html'));
 });
 
