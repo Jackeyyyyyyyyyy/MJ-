@@ -8,6 +8,9 @@ import ApprovalProgressModal from './ApprovalProgressModal';
 import ApprovalTable from './ApprovalTable';
 import StatsOverview from './StatsOverview';
 import { isLocalToday } from '../lib/time';
+import { cn } from '../lib/utils';
+
+const ALL_STATUS = '全部状态';
 
 function isCurrentUserCc(record: ApprovalRecord, username?: string) {
   if (record.currentUserIsCc) return true;
@@ -23,6 +26,7 @@ export default function CcHome() {
   const [selectedRecord, setSelectedRecord] = useState<ApprovalRecord | null>(null);
   const [showDetail, setShowDetail] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<string>(ALL_STATUS);
 
   const user = auth.getCurrentUser();
 
@@ -50,6 +54,11 @@ export default function CcHome() {
     { total: 0, approved: 0, rejected: 0, today: 0 },
   ), [records]);
 
+  const filteredRecords = useMemo(() => {
+    if (filterStatus === ALL_STATUS) return records;
+    return records.filter(record => record.status === filterStatus);
+  }, [records, filterStatus]);
+
   const summaryItems = [
     { label: '总抄送', value: stats.total, icon: Send, tone: 'text-midnight-graphite', bg: 'bg-lightest-gray-background' },
     { label: '今日新增', value: stats.today, icon: FileText, tone: 'text-medium-gray', bg: 'bg-lightest-gray-background' },
@@ -66,10 +75,28 @@ export default function CcHome() {
       />
 
       <div className="space-y-5">
-        <h2 className="text-[20px] font-bold tracking-tight">抄送记录</h2>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <h2 className="text-[20px] font-bold tracking-tight">抄送记录</h2>
+          <div className="flex bg-lightest-gray-background p-1 rounded-xl w-fit">
+            {(['ALL', ApprovalStatus.PENDING, ApprovalStatus.APPROVED, ApprovalStatus.REJECTED] as string[]).map((status) => (
+              <button
+                key={status}
+                onClick={() => setFilterStatus(status === 'ALL' ? ALL_STATUS : status)}
+                className={cn(
+                  "px-4 py-1.5 text-[11px] font-bold rounded-lg transition-all",
+                  (filterStatus === status || (filterStatus === ALL_STATUS && status === 'ALL'))
+                    ? "bg-white text-black shadow-sm"
+                    : "text-light-gray hover:text-black"
+                )}
+              >
+                {status === 'ALL' ? '全部' : (status === ApprovalStatus.PENDING ? '待处理' : (status === ApprovalStatus.APPROVED ? '已通过' : '驳回'))}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="bg-white border border-border-silver rounded-2xl overflow-hidden shadow-sm">
           <ApprovalTable
-            records={records}
+            records={filteredRecords}
             onViewDetail={(record) => { setSelectedRecord(record); setShowDetail(true); }}
             onViewProgress={(record) => { setSelectedRecord(record); setShowProgress(true); }}
             showActions

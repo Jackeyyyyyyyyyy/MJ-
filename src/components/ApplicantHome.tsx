@@ -7,7 +7,10 @@ import CreateApprovalModal from './CreateApprovalModal';
 import ApprovalDetailModal from './ApprovalDetailModal';
 import ApprovalProgressModal from './ApprovalProgressModal';
 import StatsOverview from './StatsOverview';
+import { cn } from '../lib/utils';
 import { Plus, FileText, CheckCircle2, Clock, XCircle } from 'lucide-react';
+
+const ALL_STATUS = '全部状态';
 
 export default function ApplicantHome() {
   const [records, setRecords] = useState<ApprovalRecord[]>([]);
@@ -15,6 +18,7 @@ export default function ApplicantHome() {
   const [selectedRecord, setSelectedRecord] = useState<ApprovalRecord | null>(null);
   const [showDetail, setShowDetail] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<string>(ALL_STATUS);
 
   const user = auth.getCurrentUser();
 
@@ -42,6 +46,11 @@ export default function ApplicantHome() {
     { total: 0, pending: 0, approved: 0, rejected: 0 },
   ), [records]);
 
+  const filteredRecords = useMemo(() => {
+    if (filterStatus === ALL_STATUS) return records;
+    return records.filter(record => record.status === filterStatus);
+  }, [records, filterStatus]);
+
   const summaryItems = [
     { label: '总申请', value: stats.total, icon: FileText, tone: 'text-midnight-graphite', bg: 'bg-lightest-gray-background' },
     { label: '待审批', value: stats.pending, icon: Clock, tone: 'text-medium-gray', bg: 'bg-lightest-gray-background' },
@@ -58,19 +67,37 @@ export default function ApplicantHome() {
       />
 
       <div className="space-y-5">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <h2 className="text-[20px] font-bold tracking-tight">历史记录</h2>
-          <button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="h-11 px-5 bg-black text-white rounded-full text-[14px] font-bold hover:bg-zinc-800 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-sm"
-          >
-            <Plus size={15} strokeWidth={3} />
-            <span>新建申请</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex bg-lightest-gray-background p-1 rounded-xl">
+              {(['ALL', ApprovalStatus.PENDING, ApprovalStatus.APPROVED, ApprovalStatus.REJECTED] as string[]).map((status) => (
+                <button
+                  key={status}
+                  onClick={() => setFilterStatus(status === 'ALL' ? ALL_STATUS : status)}
+                  className={cn(
+                    "px-4 py-1.5 text-[11px] font-bold rounded-lg transition-all",
+                    (filterStatus === status || (filterStatus === ALL_STATUS && status === 'ALL'))
+                      ? "bg-white text-black shadow-sm"
+                      : "text-light-gray hover:text-black"
+                  )}
+                >
+                  {status === 'ALL' ? '全部' : (status === ApprovalStatus.PENDING ? '待处理' : (status === ApprovalStatus.APPROVED ? '已通过' : '驳回'))}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="h-11 px-5 bg-black text-white rounded-full text-[14px] font-bold hover:bg-zinc-800 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-sm"
+            >
+              <Plus size={15} strokeWidth={3} />
+              <span>新建申请</span>
+            </button>
+          </div>
         </div>
         <div className="bg-white border border-border-silver rounded-2xl overflow-hidden shadow-sm">
           <ApprovalTable 
-            records={records}
+            records={filteredRecords}
             onViewDetail={(r) => { setSelectedRecord(r); setShowDetail(true); }}
             onViewProgress={(r) => { setSelectedRecord(r); setShowProgress(true); }}
             showActions={true}
