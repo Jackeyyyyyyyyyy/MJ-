@@ -1,14 +1,12 @@
 import express from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
-import { promisify } from 'node:util';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const gzip = promisify(zlib.gzip);
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -343,7 +341,7 @@ function getBackupFileName(date = new Date()) {
     String(date.getMinutes()).padStart(2, '0'),
   ];
 
-  return `backup-${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}-${parts[4]}.tar.gz`;
+  return `backup-${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}-${parts[4]}.zip`;
 }
 
 function shouldExcludeFromBackup(relativePath, entryName) {
@@ -366,61 +364,7 @@ function shouldExcludeFromBackup(relativePath, entryName) {
   );
 }
 
-function writeTarString(buffer, offset, value, length) {
-  buffer.write(String(value || '').slice(0, length), offset, length, 'utf8');
-}
-
-function writeTarOctal(buffer, offset, value, length) {
-  const octal = Math.max(0, Number(value) || 0).toString(8);
-  buffer.write(octal.padStart(length - 1, '0').slice(0, length - 1), offset, length - 1, 'ascii');
-  buffer[offset + length - 1] = 0;
-}
-
-function splitTarPath(relativePath) {
-  const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
-  if (Buffer.byteLength(normalized) <= 100) {
-    return { name: normalized, prefix: '' };
-  }
-
-  const parts = normalized.split('/');
-  const name = parts.pop() || '';
-  const prefix = parts.join('/');
-  if (Buffer.byteLength(name) > 100 || Buffer.byteLength(prefix) > 155) {
-    throw createHttpError(`backup path is too long: ${normalized}`, 500);
-  }
-
-  return { name, prefix };
-}
-
-function createTarHeader(relativePath, stats, typeFlag = '0') {
-  const header = Buffer.alloc(512, 0);
-  const { name, prefix } = splitTarPath(relativePath);
-  const isDirectory = typeFlag === '5';
-
-  writeTarString(header, 0, isDirectory && !name.endsWith('/') ? `${name}/` : name, 100);
-  writeTarOctal(header, 100, isDirectory ? 0o755 : 0o644, 8);
-  writeTarOctal(header, 108, 0, 8);
-  writeTarOctal(header, 116, 0, 8);
-  writeTarOctal(header, 124, isDirectory ? 0 : stats.size, 12);
-  writeTarOctal(header, 136, Math.floor(stats.mtimeMs / 1000), 12);
-  header.fill(' ', 148, 156);
-  writeTarString(header, 156, typeFlag, 1);
-  writeTarString(header, 257, 'ustar', 6);
-  writeTarString(header, 263, '00', 2);
-  writeTarString(header, 345, prefix, 155);
-
-  let checksum = 0;
-  for (const byte of header) checksum += byte;
-  writeTarOctal(header, 148, checksum, 8);
-  return header;
-}
-
-function padTarContent(buffer) {
-  const remainder = buffer.length % 512;
-  return remainder === 0 ? Buffer.alloc(0) : Buffer.alloc(512 - remainder, 0);
-}
-
-async function collectTarEntries(rootDir, currentDir = rootDir, entries = []) {
+async function collectBackupEntries(rootDir, currentDir = rootDir, entries = []) {
   const items = await fs.readdir(currentDir, { withFileTypes: true });
 
   for (const item of items) {
@@ -433,13 +377,98 @@ async function collectTarEntries(rootDir, currentDir = rootDir, entries = []) {
 
     if (stats.isDirectory()) {
       entries.push({ absolutePath, relativePath: relativePath.replace(/\\/g, '/'), stats, type: 'directory' });
-      await collectTarEntries(rootDir, absolutePath, entries);
+      await collectBackupEntries(rootDir, absolutePath, entries);
     } else if (stats.isFile()) {
       entries.push({ absolutePath, relativePath: relativePath.replace(/\\/g, '/'), stats, type: 'file' });
     }
   }
 
   return entries;
+}
+
+function makeCrcTable() {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < 256; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value & 1) ? (0xedb88320 ^ (value >>> 1)) : (value >>> 1);
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+}
+
+const crcTable = makeCrcTable();
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function getZipDateParts(date) {
+  const year = Math.max(1980, date.getFullYear());
+  const dosTime = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+  const dosDate = ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+  return { dosTime, dosDate };
+}
+
+function createZipLocalHeader({ nameBuffer, contentBuffer, stats, isDirectory }) {
+  const header = Buffer.alloc(30);
+  const { dosTime, dosDate } = getZipDateParts(stats.mtime || new Date());
+  const crc = isDirectory ? 0 : crc32(contentBuffer);
+  const size = isDirectory ? 0 : contentBuffer.length;
+
+  header.writeUInt32LE(0x04034b50, 0);
+  header.writeUInt16LE(20, 4);
+  header.writeUInt16LE(0x0800, 6);
+  header.writeUInt16LE(0, 8);
+  header.writeUInt16LE(dosTime, 10);
+  header.writeUInt16LE(dosDate, 12);
+  header.writeUInt32LE(crc, 14);
+  header.writeUInt32LE(size, 18);
+  header.writeUInt32LE(size, 22);
+  header.writeUInt16LE(nameBuffer.length, 26);
+  header.writeUInt16LE(0, 28);
+
+  return { header, crc, size, dosTime, dosDate };
+}
+
+function createZipCentralHeader({ nameBuffer, crc, size, dosTime, dosDate, localHeaderOffset, isDirectory }) {
+  const header = Buffer.alloc(46);
+  header.writeUInt32LE(0x02014b50, 0);
+  header.writeUInt16LE(20, 4);
+  header.writeUInt16LE(20, 6);
+  header.writeUInt16LE(0x0800, 8);
+  header.writeUInt16LE(0, 10);
+  header.writeUInt16LE(dosTime, 12);
+  header.writeUInt16LE(dosDate, 14);
+  header.writeUInt32LE(crc, 16);
+  header.writeUInt32LE(size, 20);
+  header.writeUInt32LE(size, 24);
+  header.writeUInt16LE(nameBuffer.length, 28);
+  header.writeUInt16LE(0, 30);
+  header.writeUInt16LE(0, 32);
+  header.writeUInt16LE(0, 34);
+  header.writeUInt16LE(0, 36);
+  header.writeUInt32LE(isDirectory ? 0x10 : 0, 38);
+  header.writeUInt32LE(localHeaderOffset, 42);
+  return header;
+}
+
+function createZipEndRecord(entryCount, centralDirectorySize, centralDirectoryOffset) {
+  const record = Buffer.alloc(22);
+  record.writeUInt32LE(0x06054b50, 0);
+  record.writeUInt16LE(0, 4);
+  record.writeUInt16LE(0, 6);
+  record.writeUInt16LE(entryCount, 8);
+  record.writeUInt16LE(entryCount, 10);
+  record.writeUInt32LE(centralDirectorySize, 12);
+  record.writeUInt32LE(centralDirectoryOffset, 16);
+  record.writeUInt16LE(0, 20);
+  return record;
 }
 
 async function createBackupArchive() {
@@ -449,21 +478,42 @@ async function createBackupArchive() {
     throw createHttpError('persistent data directory is not available', 500);
   }
 
-  const entries = await collectTarEntries(backupRoot);
-  const chunks = [];
+  const entries = await collectBackupEntries(backupRoot);
+  const fileChunks = [];
+  const centralChunks = [];
+  let offset = 0;
 
   for (const entry of entries) {
-    if (entry.type === 'directory') {
-      chunks.push(createTarHeader(entry.relativePath.endsWith('/') ? entry.relativePath : `${entry.relativePath}/`, entry.stats, '5'));
-      continue;
-    }
+    const isDirectory = entry.type === 'directory';
+    const entryName = isDirectory && !entry.relativePath.endsWith('/') ? `${entry.relativePath}/` : entry.relativePath;
+    const nameBuffer = Buffer.from(entryName, 'utf8');
+    const contentBuffer = isDirectory ? Buffer.alloc(0) : await fs.readFile(entry.absolutePath);
+    const localHeaderOffset = offset;
+    const local = createZipLocalHeader({
+      nameBuffer,
+      contentBuffer,
+      stats: entry.stats,
+      isDirectory,
+    });
+    const centralHeader = createZipCentralHeader({
+      nameBuffer,
+      crc: local.crc,
+      size: local.size,
+      dosTime: local.dosTime,
+      dosDate: local.dosDate,
+      localHeaderOffset,
+      isDirectory,
+    });
 
-    const content = await fs.readFile(entry.absolutePath);
-    chunks.push(createTarHeader(entry.relativePath, entry.stats, '0'), content, padTarContent(content));
+    fileChunks.push(local.header, nameBuffer, contentBuffer);
+    centralChunks.push(centralHeader, nameBuffer);
+    offset += local.header.length + nameBuffer.length + contentBuffer.length;
   }
 
-  chunks.push(Buffer.alloc(1024, 0));
-  return gzip(Buffer.concat(chunks));
+  const centralDirectoryOffset = offset;
+  const centralDirectory = Buffer.concat(centralChunks);
+  const endRecord = createZipEndRecord(entries.length, centralDirectory.length, centralDirectoryOffset);
+  return Buffer.concat([...fileChunks, centralDirectory, endRecord]);
 }
 
 function createToken(user) {
@@ -3859,7 +3909,7 @@ app.get('/api/backup/download', authenticateBackup, async (_req, res, next) => {
     const archive = await createBackupArchive();
     const fileName = getBackupFileName();
 
-    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.setHeader('Cache-Control', 'no-store');
     res.send(archive);

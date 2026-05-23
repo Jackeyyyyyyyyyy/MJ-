@@ -32,7 +32,7 @@ function readBackupSession(): BackupSession | null {
 
 function getDownloadedFileName(disposition: string | null) {
   const match = disposition?.match(/filename="([^"]+)"/i);
-  return match?.[1] || 'backup.tar.gz';
+  return match?.[1] || 'backup.zip';
 }
 
 export default function BackupPage() {
