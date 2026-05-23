@@ -4036,7 +4036,7 @@ export default function WorkflowAdmin() {
   };
 
   if (isLoading) {
-    return <div className="text-[15px] font-bold text-medium-gray">正在加载审批流配置...</div>;
+    return <div className="text-[15px] font-bold text-medium-gray">正在加载审批流配置... v2026-05-23-timeout</div>;
   }
 
   if (loadError) {
