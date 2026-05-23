@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, KeyRound, Plus, RefreshCw, ShieldCheck, UserCog, Users } from 'lucide-react';
+import { Check, KeyRound, Plus, RefreshCw, ShieldCheck, Trash2, UserCog, Users } from 'lucide-react';
 import { storage } from '../storage';
 import { AccountInput, Role, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
@@ -156,6 +156,30 @@ export default function AccountPermissionAdmin() {
     }
   };
 
+  const handleDelete = async (account: SystemAccount) => {
+    if (account.isSuperAdmin) return;
+
+    const label = account.linkedMember
+      ? `${account.username}（${account.linkedMember.name}）`
+      : account.username;
+    const confirmed = window.confirm(`确定删除账号「${label}」吗？删除后该账号将无法登录；如果已绑定组织成员，也会同步解除绑定。`);
+    if (!confirmed) return;
+
+    setError('');
+    setNotice('');
+    setSavingId(`delete:${account.id}`);
+
+    try {
+      await storage.deleteAccount(account.id);
+      setNotice('账号已删除');
+      await loadAccounts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '账号删除失败');
+    } finally {
+      setSavingId('');
+    }
+  };
+
   return (
     <div className="space-y-8 pb-40 animate-in fade-in duration-700">
       <div>
@@ -302,15 +326,26 @@ export default function AccountPermissionAdmin() {
                     </div>
 
                     {!account.isSuperAdmin && (
-                      <button
-                        type="button"
-                        onClick={() => void handleSave(account)}
-                        disabled={savingId === account.id}
-                        className="h-10 px-4 bg-black text-white rounded-lg text-[13px] font-bold hover:bg-zinc-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                      >
-                        <Check size={15} strokeWidth={3} />
-                        保存修改
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleDelete(account)}
+                          disabled={savingId === `delete:${account.id}` || savingId === account.id}
+                          className="h-10 px-4 bg-white text-[#c62828] border border-[#ffcdd2] rounded-lg text-[13px] font-bold hover:bg-[#ffebee] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          <Trash2 size={15} strokeWidth={2.6} />
+                          删除账号
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleSave(account)}
+                          disabled={savingId === account.id || savingId === `delete:${account.id}`}
+                          className="h-10 px-4 bg-black text-white rounded-lg text-[13px] font-bold hover:bg-zinc-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          <Check size={15} strokeWidth={3} />
+                          保存修改
+                        </button>
+                      </div>
                     )}
                   </div>
 
