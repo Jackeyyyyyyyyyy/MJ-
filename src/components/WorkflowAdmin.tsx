@@ -19,7 +19,7 @@ import {
   Users,
 } from 'lucide-react';
 import { storage } from '../storage';
-import { approvalSchema } from '../approvalSchema';
+import { approvalSchema, replaceApprovalSchema } from '../approvalSchema';
 import {
   ApprovalMode,
   ApprovalStep,
@@ -160,6 +160,18 @@ function getBusinessScopeKey(moduleName?: string, approvalTypeName?: string) {
   return `${moduleName || ''}${BUSINESS_SCOPE_SEPARATOR}${approvalTypeName || ''}`;
 }
 
+function getTemplateBusinessScopeKey(template: WorkflowTemplate) {
+  return getBusinessScopeKey(
+    template.moduleName || template.draft?.basic?.moduleName || template.publishedVersion?.basic?.moduleName,
+    template.approvalTypeName || template.draft?.basic?.approvalTypeName || template.publishedVersion?.basic?.approvalTypeName,
+  );
+}
+
+function filterWorkflowTemplatesByBusinessScope(templates: WorkflowTemplate[]) {
+  const activeScopeKeys = new Set(getBusinessScopeOptions().map((option) => option.key));
+  return templates.filter((template) => activeScopeKeys.has(getTemplateBusinessScopeKey(template)));
+}
+
 function getBusinessScopeByNames(moduleName?: string, approvalTypeName?: string) {
   return getBusinessScopeOptions().find((option) => (
     option.moduleName === moduleName && option.approvalTypeName === approvalTypeName
@@ -178,8 +190,8 @@ function sortWorkflowTemplatesByBusinessScope(templates: WorkflowTemplate[]) {
   const orderByScope = new Map(getBusinessScopeOptions().map((option, index) => [option.key, index]));
 
   return [...templates].sort((left, right) => {
-    const leftKey = getBusinessScopeKey(left.moduleName || left.draft?.basic?.moduleName, left.approvalTypeName || left.draft?.basic?.approvalTypeName);
-    const rightKey = getBusinessScopeKey(right.moduleName || right.draft?.basic?.moduleName, right.approvalTypeName || right.draft?.basic?.approvalTypeName);
+    const leftKey = getTemplateBusinessScopeKey(left);
+    const rightKey = getTemplateBusinessScopeKey(right);
     const leftOrder = orderByScope.get(leftKey);
     const rightOrder = orderByScope.get(rightKey);
 
@@ -3417,10 +3429,7 @@ export default function WorkflowAdmin() {
 
   const ensureDefaultWorkflowTemplates = async (sourceTemplates: WorkflowTemplate[]) => {
     const templatesByScope = new Set(
-      sourceTemplates.map((template) => getBusinessScopeKey(
-        template.moduleName || template.draft?.basic?.moduleName,
-        template.approvalTypeName || template.draft?.basic?.approvalTypeName,
-      )),
+      sourceTemplates.map(getTemplateBusinessScopeKey),
     );
     const missingScopes = getBusinessScopeOptions().filter((scope) => !templatesByScope.has(scope.key));
     if (missingScopes.length === 0) return sourceTemplates;
@@ -3445,12 +3454,17 @@ export default function WorkflowAdmin() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [fetchedTemplates, nextDirectory] = await Promise.all([
+      const [nextSchema, fetchedTemplates, nextDirectory] = await Promise.all([
+        storage.getApprovalSchema(),
         storage.getWorkflowTemplates(),
         storage.getOrganizationDirectory(),
       ]);
-      const nextTemplates = await ensureDefaultWorkflowTemplates(fetchedTemplates);
-      const normalizedTemplates = sortWorkflowTemplatesByBusinessScope(nextTemplates.map(normalizeTemplateForEditor));
+      replaceApprovalSchema(nextSchema);
+      const activeTemplates = filterWorkflowTemplatesByBusinessScope(fetchedTemplates);
+      const nextTemplates = await ensureDefaultWorkflowTemplates(activeTemplates);
+      const normalizedTemplates = sortWorkflowTemplatesByBusinessScope(
+        filterWorkflowTemplatesByBusinessScope(nextTemplates).map(normalizeTemplateForEditor),
+      );
       setTemplates(normalizedTemplates);
       setDirectory(nextDirectory);
       const nextSelected = normalizedTemplates[0] || null;

@@ -887,7 +887,30 @@ async function deleteBusinessForm(moduleName, approvalTypeName) {
     schema.modules.splice(moduleIndex, 1);
   }
 
-  return writeApprovalSchema(schema);
+  const nextSchema = await writeApprovalSchema(schema);
+  await deleteWorkflowTemplatesForBusinessForm(targetModuleName, targetApprovalTypeName);
+  return nextSchema;
+}
+
+function getWorkflowTemplateBusinessKey(template) {
+  return getBusinessFormConfigKey(
+    template?.moduleName || template?.draft?.basic?.moduleName || template?.publishedVersion?.basic?.moduleName,
+    template?.approvalTypeName || template?.draft?.basic?.approvalTypeName || template?.publishedVersion?.basic?.approvalTypeName,
+  );
+}
+
+async function deleteWorkflowTemplatesForBusinessForm(moduleName, approvalTypeName) {
+  const targetKey = getBusinessFormConfigKey(moduleName, approvalTypeName);
+
+  await updateWorkflowTemplates((templates) => {
+    for (let index = templates.length - 1; index >= 0; index -= 1) {
+      if (getWorkflowTemplateBusinessKey(templates[index]) === targetKey) {
+        templates.splice(index, 1);
+      }
+    }
+
+    return null;
+  });
 }
 
 async function listBusinessRecordFiles() {
