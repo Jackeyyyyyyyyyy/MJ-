@@ -26,6 +26,8 @@ interface RequestOptions {
   skipImpersonation?: boolean;
 }
 
+const apiRequestTimeoutMs = 15000;
+
 function getClientTimeZone() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
@@ -33,16 +35,30 @@ function getClientTimeZone() {
 async function request<T>(path: string, options?: RequestInit, requestOptions?: RequestOptions): Promise<T> {
   const token = auth.getToken();
   const impersonatedUsername = requestOptions?.skipImpersonation ? null : auth.getImpersonatedUsername();
-  const response = await fetch(`/api${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-MJ-Timezone': getClientTimeZone(),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(impersonatedUsername ? { 'X-MJ-Impersonate': impersonatedUsername } : {}),
-      ...options?.headers,
-    },
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), apiRequestTimeoutMs);
+  let response: Response;
+
+  try {
+    response = await fetch(`/api${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-MJ-Timezone': getClientTimeZone(),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(impersonatedUsername ? { 'X-MJ-Impersonate': impersonatedUsername } : {}),
+        ...options?.headers,
+      },
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`API request timed out: ${path}`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     let message = `API request failed: ${response.status}`;

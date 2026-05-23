@@ -3395,6 +3395,7 @@ export default function WorkflowAdmin() {
   const [selectedId, setSelectedId] = useState('');
   const [draft, setDraft] = useState<WorkflowVersion | null>(null);
   const [message, setMessage] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [validation, setValidation] = useState<ValidationState>(createValidationState());
@@ -3453,6 +3454,7 @@ export default function WorkflowAdmin() {
 
   const loadData = async () => {
     setIsLoading(true);
+    setLoadError('');
     try {
       const [nextSchema, fetchedTemplates, nextDirectory] = await Promise.all([
         storage.getApprovalSchema(),
@@ -3460,10 +3462,8 @@ export default function WorkflowAdmin() {
         storage.getOrganizationDirectory(),
       ]);
       replaceApprovalSchema(nextSchema);
-      const activeTemplates = filterWorkflowTemplatesByBusinessScope(fetchedTemplates);
-      const nextTemplates = await ensureDefaultWorkflowTemplates(activeTemplates);
       const normalizedTemplates = sortWorkflowTemplatesByBusinessScope(
-        filterWorkflowTemplatesByBusinessScope(nextTemplates).map(normalizeTemplateForEditor),
+        filterWorkflowTemplatesByBusinessScope(fetchedTemplates).map(normalizeTemplateForEditor),
       );
       setTemplates(normalizedTemplates);
       setDirectory(nextDirectory);
@@ -3472,6 +3472,12 @@ export default function WorkflowAdmin() {
       setDraft(nextSelected ? normalizeDraftForEditor(JSON.parse(JSON.stringify(nextSelected.draft))) : null);
       setValidation(createValidationState());
       setDesignerSelection(submitDesignerSelection);
+    } catch (error) {
+      setTemplates([]);
+      setDirectory({ departments: [], members: [] });
+      setSelectedId('');
+      setDraft(null);
+      setLoadError(error instanceof Error ? error.message : '审批流配置加载失败');
     } finally {
       setIsLoading(false);
     }
@@ -4031,6 +4037,19 @@ export default function WorkflowAdmin() {
 
   if (isLoading) {
     return <div className="text-[15px] font-bold text-medium-gray">正在加载审批流配置...</div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="space-y-3">
+        <div className="rounded-lg border border-[#ffcdd2] bg-[#ffebee] px-4 py-3 text-[14px] font-bold text-[#b71c1c]">
+          审批流配置加载失败：{loadError}
+        </div>
+        <button type="button" className="btn-primary" onClick={() => void loadData()}>
+          重新加载
+        </button>
+      </div>
+    );
   }
 
   const submitPermission = draft?.submitPermission || defaultSubmitPermission();
