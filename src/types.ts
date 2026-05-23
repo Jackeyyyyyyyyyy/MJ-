@@ -286,6 +286,7 @@ export interface BusinessField {
 export interface ApprovalType {
   name: string;
   businessFields: string[];
+  amountFields?: string[];
   commonFields: string[];
   notes?: string;
 }

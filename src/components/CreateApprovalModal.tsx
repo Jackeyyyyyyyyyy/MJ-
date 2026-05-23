@@ -263,8 +263,20 @@ function isMoneyField(field: string) {
   return /金额|价格|利润|总额/.test(field);
 }
 
+function isConfiguredMoneyField(type: ApprovalType | null, field: string) {
+  if (!type) return isMoneyField(field);
+  if (Array.isArray(type.amountFields) && type.amountFields.length > 0) {
+    return type.amountFields.includes(field);
+  }
+  return isMoneyField(field);
+}
+
 function isNumericField(field: string) {
   return isMoneyField(field) || field.includes('汇率');
+}
+
+function isConfiguredNumericField(type: ApprovalType | null, field: string) {
+  return isConfiguredMoneyField(type, field) || field.includes('汇率');
 }
 
 function isMoneyInputValue(value: unknown): value is MoneyInputValue {
@@ -507,7 +519,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         return;
       }
 
-      if (isMoneyField(field)) {
+      if (isConfiguredMoneyField(selectedType, field)) {
         const moneyValue = toMoneyInputValue(value);
         if (!moneyValue.currency || !moneyValue.amount || !Number.isFinite(Number(moneyValue.amount))) {
           newErrors[field] = '请填写币种和数字金额';
@@ -515,7 +527,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         return;
       }
 
-      if (isNumericField(field)) {
+      if (isConfiguredNumericField(selectedType, field)) {
         if (!String(value || '').trim() || !Number.isFinite(Number(value))) {
           newErrors[field] = '请填写数字';
         }
@@ -1183,8 +1195,8 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     const isDate = field.includes('日期') || field.includes('时间');
-    const isMoney = isMoneyField(field);
-    const isNumeric = isNumericField(field);
+    const isMoney = isConfiguredMoneyField(selectedType, field);
+    const isNumeric = isConfiguredNumericField(selectedType, field);
     const isFile = field.includes('附件');
 
     if (isFile) {

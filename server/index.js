@@ -719,6 +719,11 @@ function normalizeStringList(items) {
   )];
 }
 
+function normalizeAmountFields(amountFields, businessFields) {
+  const businessFieldSet = new Set(normalizeStringList(businessFields));
+  return normalizeStringList(amountFields).filter((field) => businessFieldSet.has(field));
+}
+
 function normalizeApprovalSchema(schema) {
   const modules = Array.isArray(schema?.modules) ? schema.modules : [];
 
@@ -732,6 +737,7 @@ function normalizeApprovalSchema(schema) {
           .map((approvalType) => ({
             name: String(approvalType?.name || '').trim(),
             businessFields: normalizeStringList(approvalType?.businessFields),
+            amountFields: normalizeAmountFields(approvalType?.amountFields, approvalType?.businessFields),
             commonFields: normalizeStringList(approvalType?.commonFields),
             ...(String(approvalType?.notes || '').trim() ? { notes: String(approvalType.notes).trim() } : {}),
           }))
@@ -757,11 +763,12 @@ async function writeApprovalSchema(schema) {
   return normalized;
 }
 
-async function createBusinessForm({ moduleName, approvalTypeName, businessFields }) {
+async function createBusinessForm({ moduleName, approvalTypeName, businessFields, amountFields }) {
   const schema = await readApprovalSchema();
   const nextModuleName = String(moduleName || '').trim();
   const nextApprovalTypeName = String(approvalTypeName || '').trim();
   const nextBusinessFields = normalizeStringList(businessFields);
+  const nextAmountFields = normalizeAmountFields(amountFields, nextBusinessFields);
 
   if (!nextModuleName || !nextApprovalTypeName || nextBusinessFields.length === 0) {
     throw createHttpError('missing business form fields', 400);
@@ -784,19 +791,21 @@ async function createBusinessForm({ moduleName, approvalTypeName, businessFields
   module.approvalTypes.push({
     name: nextApprovalTypeName,
     businessFields: nextBusinessFields,
+    amountFields: nextAmountFields,
     commonFields,
   });
 
   return writeApprovalSchema(schema);
 }
 
-async function updateBusinessForm(oldModuleName, oldApprovalTypeName, { moduleName, approvalTypeName, businessFields }) {
+async function updateBusinessForm(oldModuleName, oldApprovalTypeName, { moduleName, approvalTypeName, businessFields, amountFields }) {
   const schema = await readApprovalSchema();
   const currentModuleName = String(oldModuleName || '').trim();
   const currentApprovalTypeName = String(oldApprovalTypeName || '').trim();
   const nextModuleName = String(moduleName || '').trim();
   const nextApprovalTypeName = String(approvalTypeName || '').trim();
   const nextBusinessFields = normalizeStringList(businessFields);
+  const nextAmountFields = normalizeAmountFields(amountFields, nextBusinessFields);
 
   if (!currentModuleName || !currentApprovalTypeName) {
     throw createHttpError('missing business form target', 400);
@@ -840,6 +849,7 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, { moduleNa
     ...existingType,
     name: nextApprovalTypeName,
     businessFields: nextBusinessFields,
+    amountFields: nextAmountFields,
     commonFields: existingType.commonFields?.length ? existingType.commonFields : schema.commonFields,
   });
 
@@ -1898,7 +1908,12 @@ function findBusinessDataValue(businessData, aliases) {
   return loose?.[1];
 }
 
-function findWorkflowAmountValue(businessData) {
+function findWorkflowAmountValue(businessData, context = {}) {
+  if (Array.isArray(context.amountFields) && context.amountFields.length > 0) {
+    const configuredAmountValue = findBusinessDataValue(businessData, context.amountFields);
+    if (configuredAmountValue !== undefined) return configuredAmountValue;
+  }
+
   return findBusinessDataValue(businessData, [
     'amount',
     '金额',
@@ -1923,12 +1938,12 @@ function findWorkflowAmountValue(businessData) {
   ]);
 }
 
-function findWorkflowCurrencyValue(businessData) {
+function findWorkflowCurrencyValue(businessData, context = {}) {
   const directCurrency = findBusinessDataValue(businessData, ['currency', '币种', '币别', '变更前币别', '变更后币别']);
   const directSymbol = parseWorkflowCurrencySymbol(directCurrency);
   if (directSymbol) return directSymbol;
 
-  const amountValue = findWorkflowAmountValue(businessData);
+  const amountValue = findWorkflowAmountValue(businessData, context);
   const amountSymbol = parseWorkflowCurrencySymbol(amountValue);
   if (amountSymbol) return amountSymbol;
 
@@ -1945,11 +1960,11 @@ function getWorkflowConditionValue(condition, context) {
   const field = normalizeWorkflowText(condition?.field);
 
   if (field === 'currency') {
-    return findWorkflowCurrencyValue(businessData);
+    return findWorkflowCurrencyValue(businessData, context);
   }
 
   if (field === 'amount') {
-    return findWorkflowAmountValue(businessData);
+    return findWorkflowAmountValue(businessData, context);
   }
 
   if (field.startsWith('form:')) {
@@ -1969,7 +1984,7 @@ function getWorkflowConditionValue(condition, context) {
   }
 
   if (field === 'amount') {
-    return findBusinessDataValue(businessData, ['amount', '金额', '付款总额', '付款金额', '报销金额', '填写价格', '标准价格', '申请利润']);
+    return findWorkflowAmountValue(businessData, context);
   }
 
   if (field === 'category') {
@@ -2006,7 +2021,7 @@ function workflowConditionMatches(condition, context) {
   if (isNumericWorkflowConditionField(condition.field) || actualNumber !== undefined) {
     if (condition.currencyValue) {
       const expectedSymbol = parseWorkflowCurrencySymbol(condition.currencyValue) || normalizeWorkflowText(condition.currencyValue);
-      const actualSymbol = parseWorkflowCurrencySymbol(findWorkflowCurrencyValue(context?.businessData)) || normalizeWorkflowText(findWorkflowCurrencyValue(context?.businessData));
+      const actualSymbol = parseWorkflowCurrencySymbol(findWorkflowCurrencyValue(context?.businessData, context)) || normalizeWorkflowText(findWorkflowCurrencyValue(context?.businessData, context));
       if (!expectedSymbol || !actualSymbol || actualSymbol !== expectedSymbol) return false;
     }
 
@@ -2480,6 +2495,10 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
 
   const version = getPublishedVersion(template);
   const directory = await readOrganizationDirectory();
+  const schema = await readApprovalSchema();
+  const schemaType = schema.modules
+    .find((module) => module.name === moduleName)
+    ?.approvalTypes.find((approvalType) => approvalType.name === approvalTypeName);
   const applicantMember = findMemberByAccount(directory, applicantUsername);
   const ccRecipients = resolveCcRecipientsForRule(version.ccRule, directory);
   const nodes = await getLinearApproverNodes(version, {
@@ -2487,6 +2506,7 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
     directory,
     applicantMember,
     applicantName: applicantMember?.name || applicantUsername,
+    amountFields: schemaType?.amountFields || [],
     moduleName,
     approvalTypeName,
     recordId,
@@ -3047,15 +3067,17 @@ function getLocalDateKey(value, timeZone) {
 function buildOverview(records, timeZone = 'UTC') {
   const localTimeZone = normalizeTimeZone(timeZone);
   const today = getLocalDateKey(new Date(), localTimeZone);
+  const pendingRecords = records.filter((record) => record.status === STATUS_PENDING);
+  const pendingRecordIds = new Set(pendingRecords.map((record) => record.id));
   const summary = records.reduce(
     (current, record) => {
       current.total += 1;
-      if (record.status === '待审批') current.pending += 1;
-      if (record.status === '已批准') current.approved += 1;
-      if (record.status === '已拒绝') current.rejected += 1;
+      if (record.status === STATUS_PENDING) current.pending += 1;
+      if (record.status === STATUS_APPROVED) current.approved += 1;
+      if (record.status === STATUS_REJECTED) current.rejected += 1;
       if (getLocalDateKey(record.createdAt, localTimeZone) === today) current.today += 1;
-      if (getRiskRank(record) === 3) current.highRisk += 1;
-      if (['failed', 'generating', 'skipped'].includes(record.aiSuggestion?.status)) current.aiAttention += 1;
+      if (record.status === STATUS_PENDING && getRiskRank(record) === 3) current.highRisk += 1;
+      if (record.status === STATUS_PENDING && ['failed', 'generating', 'skipped'].includes(record.aiSuggestion?.status)) current.aiAttention += 1;
       return current;
     },
     { total: 0, pending: 0, approved: 0, rejected: 0, today: 0, highRisk: 0, aiAttention: 0 },
@@ -3066,8 +3088,8 @@ function buildOverview(records, timeZone = 'UTC') {
   records.forEach((record) => {
     const moduleStat = moduleMap.get(record.moduleName) || { moduleName: record.moduleName, total: 0, pending: 0, highRisk: 0 };
     moduleStat.total += 1;
-    if (record.status === '待审批') moduleStat.pending += 1;
-    if (getRiskRank(record) === 3) moduleStat.highRisk += 1;
+    if (record.status === STATUS_PENDING) moduleStat.pending += 1;
+    if (record.status === STATUS_PENDING && getRiskRank(record) === 3) moduleStat.highRisk += 1;
     moduleMap.set(record.moduleName, moduleStat);
 
     applicantMap.set(record.applicant, (applicantMap.get(record.applicant) || 0) + 1);
@@ -3078,17 +3100,17 @@ function buildOverview(records, timeZone = 'UTC') {
     if (riskDelta !== 0) return riskDelta;
     return (Date.parse(right.createdAt || '') || 0) - (Date.parse(left.createdAt || '') || 0);
   });
+  const sortedPendingRecords = sortedRecords.filter((record) => pendingRecordIds.has(record.id));
 
   return {
     aiEnabled: isAiConfigured(),
     summary,
-    highRiskRecords: sortedRecords.filter((record) => getRiskRank(record) === 3).slice(0, 6).map(toAssistantRecord),
-    aiAttentionRecords: sortedRecords
+    highRiskRecords: sortedPendingRecords.filter((record) => getRiskRank(record) === 3).slice(0, 6).map(toAssistantRecord),
+    aiAttentionRecords: sortedPendingRecords
       .filter((record) => ['failed', 'generating', 'skipped'].includes(record.aiSuggestion?.status))
       .slice(0, 6)
       .map(toAssistantRecord),
-    priorityRecords: sortedRecords
-      .filter((record) => record.status === '待审批')
+    priorityRecords: sortedPendingRecords
       .slice(0, 8)
       .map(toAssistantRecord),
     moduleStats: [...moduleMap.values()].sort((left, right) => right.pending - left.pending || right.total - left.total),
@@ -3098,7 +3120,6 @@ function buildOverview(records, timeZone = 'UTC') {
       .slice(0, 5),
   };
 }
-
 function parseAssistantJson(rawText) {
   const text = String(rawText || '').trim();
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -3569,6 +3590,7 @@ app.post('/api/business-forms', authenticate, requireRoles('developer'), async (
       moduleName: req.body?.moduleName,
       approvalTypeName: req.body?.approvalTypeName,
       businessFields: req.body?.businessFields,
+      amountFields: req.body?.amountFields,
     });
 
     res.status(201).json(schema);
@@ -3586,6 +3608,7 @@ app.patch('/api/business-forms/:moduleName/:approvalTypeName', authenticate, req
         moduleName: req.body?.moduleName,
         approvalTypeName: req.body?.approvalTypeName,
         businessFields: req.body?.businessFields,
+        amountFields: req.body?.amountFields,
       },
     );
 
@@ -3851,6 +3874,48 @@ app.patch('/api/accounts/:id', authenticate, requireRoles('developer'), async (r
     });
 
     res.json(toPublicAccount(updatedAccount, directory));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/accounts/:id', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (id === superAdmin.id) {
+      return res.status(400).json({ error: 'super admin is managed by environment variables' });
+    }
+
+    const deletedAccount = await updateAccounts((accounts) => {
+      const index = accounts.findIndex((item) => item.id === id);
+      if (index < 0) {
+        throw createHttpError('account not found', 404);
+      }
+
+      const [account] = accounts.splice(index, 1);
+      return account;
+    });
+
+    await updateOrganizationDirectory((directory) => {
+      let changed = false;
+      const deletedUsername = normalizeWorkflowText(deletedAccount.username).toLowerCase();
+      const members = directory.members.map((member) => {
+        if (normalizeWorkflowText(member.accountUsername).toLowerCase() !== deletedUsername) return member;
+        changed = true;
+        const { accountUsername, ...nextMember } = member;
+        return nextMember;
+      });
+
+      if (!changed) return directory;
+      return {
+        ...directory,
+        members,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    res.status(204).end();
   } catch (error) {
     next(error);
   }

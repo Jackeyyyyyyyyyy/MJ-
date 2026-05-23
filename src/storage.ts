@@ -84,7 +84,7 @@ export const storage = {
     return request<Schema>('/approval-schema');
   },
 
-  createBusinessForm(input: { moduleName: string; approvalTypeName: string; businessFields: string[] }): Promise<Schema> {
+  createBusinessForm(input: { moduleName: string; approvalTypeName: string; businessFields: string[]; amountFields?: string[] }): Promise<Schema> {
     return request<Schema>('/business-forms', {
       method: 'POST',
       body: JSON.stringify(input),
@@ -94,7 +94,7 @@ export const storage = {
   updateBusinessForm(
     moduleName: string,
     approvalTypeName: string,
-    input: { moduleName: string; approvalTypeName: string; businessFields: string[] },
+    input: { moduleName: string; approvalTypeName: string; businessFields: string[]; amountFields?: string[] },
   ): Promise<Schema> {
     return request<Schema>(
       `/business-forms/${encodeURIComponent(moduleName)}/${encodeURIComponent(approvalTypeName)}`,
@@ -131,6 +131,12 @@ export const storage = {
     return request<SystemAccount>(`/accounts/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(account),
+    });
+  },
+
+  deleteAccount(id: string): Promise<void> {
+    return request<void>(`/accounts/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
     });
   },
 

@@ -51,6 +51,7 @@ interface BusinessScopeOption {
   label: string;
   businessType: WorkflowBusinessType;
   fields: string[];
+  amountFields: string[];
 }
 
 type ConditionFieldKind = 'number' | 'currency' | 'text' | 'member' | 'department';
@@ -96,6 +97,9 @@ function getBusinessScopeOptions(): BusinessScopeOption[] {
   return approvalSchema.modules.flatMap((module) => (
     module.approvalTypes.map((approvalType) => {
       const fields = approvalType.businessFields;
+      const amountFields = Array.isArray(approvalType.amountFields) && approvalType.amountFields.length > 0
+        ? approvalType.amountFields
+        : fields.filter(isAmountCurrencyBusinessField);
       return {
         key: `${module.name}${BUSINESS_SCOPE_SEPARATOR}${approvalType.name}`,
         moduleName: module.name,
@@ -103,6 +107,7 @@ function getBusinessScopeOptions(): BusinessScopeOption[] {
         label: `${module.name} / ${approvalType.name}`,
         businessType: inferBusinessTypeFromNames(module.name, approvalType.name),
         fields: [...new Set(fields.filter(Boolean))],
+        amountFields: [...new Set(amountFields.filter(Boolean))],
       };
     })
   ));
@@ -227,7 +232,7 @@ function isAmountCurrencyBusinessField(field: string) {
 }
 
 function scopeSupportsAmountCurrencyConditions(scope?: BusinessScopeOption | null) {
-  return Boolean(scope?.fields?.some(isAmountCurrencyBusinessField));
+  return Boolean(scope?.amountFields?.length);
 }
 
 function getConditionFieldLabel(field: string) {
@@ -1480,9 +1485,7 @@ function FlowInsertButton({
           ))}
           <div className="my-1 h-px bg-border-silver" />
           {[
-            ...(canUseRuleConditions
-              ? [{ label: '添加条件分化', icon: <GitBranch size={14} strokeWidth={2.4} />, onClick: onCondition }]
-              : []),
+            { label: '添加条件分化', icon: <GitBranch size={14} strokeWidth={2.4} />, onClick: onCondition },
             { label: '添加 AI 条件分化', icon: <Bot size={14} strokeWidth={2.4} />, onClick: onAiCondition },
           ].map((group) => (
             <div key={group.label} className="px-1 py-1">
@@ -1605,6 +1608,22 @@ function getAiBranchLetter(index: number) {
   return String.fromCharCode(65 + index);
 }
 
+function getAiBranchTitle(index: number) {
+  return `${getAiBranchLetter(index)} 分支`;
+}
+
+function getAiBranchSelectionExpression(index: number, isDefault = false) {
+  const letter = getAiBranchLetter(index);
+  return isDefault ? `AI 选择 ${letter}，或 AI 失败时兜底` : `AI 选择 ${letter}`;
+}
+
+function getAiBranchDescription(index: number, isDefault = false) {
+  const title = getAiBranchTitle(index);
+  return isDefault
+    ? `未选择其他分支，或 AI 无法判断时进入 ${title}`
+    : `符合 AI 判断规则时进入 ${title}`;
+}
+
 function createConditionBranch(
   isAiCondition: boolean,
   index: number,
@@ -1613,18 +1632,15 @@ function createConditionBranch(
 ): WorkflowConditionBranch {
   const isDefault = index === totalCount - 1;
   const condition = defaultCondition(field);
-  const aiLetter = getAiBranchLetter(index);
 
   if (isAiCondition) {
     return {
       id: createId(isDefault ? 'flow-else' : 'flow-branch'),
-      title: `${aiLetter} 分支`,
-      expression: isDefault ? `AI 选择 ${aiLetter}，或 AI 失败时兜底` : `AI 选择 ${aiLetter}`,
+      title: getAiBranchTitle(index),
+      expression: getAiBranchSelectionExpression(index, isDefault),
       priority: isDefault ? 999 : index + 1,
       isDefault,
-      aiDescription: isDefault
-        ? `未选择其他分支，或 AI 无法判断时进入 ${aiLetter} 分支`
-        : `符合 AI 判断规则时进入 ${aiLetter} 分支`,
+      aiDescription: getAiBranchDescription(index, isDefault),
       workflowConditions: [],
       nodes: [],
     };
@@ -1661,8 +1677,8 @@ function resizeConditionBranches(
     if (existing) {
       return {
         ...existing,
-        title: existing.title || (isAiCondition ? `${getAiBranchLetter(index)} 分支` : `条件 ${index + 1}`),
-        expression: existing.expression || (isAiCondition ? `AI 选择 ${getAiBranchLetter(index)}` : getFlowBranchExpression(existing.workflowConditions || [])),
+        title: existing.title || (isAiCondition ? getAiBranchTitle(index) : `条件 ${index + 1}`),
+        expression: existing.expression || (isAiCondition ? getAiBranchSelectionExpression(index) : getFlowBranchExpression(existing.workflowConditions || [])),
         priority: index + 1,
         isDefault: false,
       };
@@ -1673,8 +1689,9 @@ function resizeConditionBranches(
   const fallbackBranch = defaultBranch
     ? {
         ...defaultBranch,
-        title: defaultBranch.title || (isAiCondition ? `${getAiBranchLetter(totalCount - 1)} 分支` : '其余情况'),
-        expression: defaultBranch.expression || (isAiCondition ? `AI 选择 ${getAiBranchLetter(totalCount - 1)}，或 AI 失败时兜底` : ''),
+        title: isAiCondition ? getAiBranchTitle(totalCount - 1) : (defaultBranch.title || '其余情况'),
+        expression: isAiCondition ? getAiBranchSelectionExpression(totalCount - 1, true) : (defaultBranch.expression || ''),
+        aiDescription: isAiCondition ? getAiBranchDescription(totalCount - 1, true) : defaultBranch.aiDescription,
         priority: 999,
         isDefault: true,
         workflowConditions: [],
@@ -2521,7 +2538,7 @@ function FlowConditionBranchEditor({
             className="input-field mt-3 min-h-[76px] resize-none text-[13px]"
             value={branch.aiDescription || ''}
             onChange={(event) => onUpdateFlowBranch(nodeId, branch.id, { aiDescription: event.target.value })}
-            placeholder="写给 AI 看的 B 分支说明"
+            placeholder={`写给 AI 看的 ${branch.title || '兜底分支'}说明`}
           />
         )}
       </div>
@@ -2880,7 +2897,7 @@ function DesignerInspector({
           <InspectorHeader
             label={isAiCondition ? 'AI 条件分化' : '条件分化'}
             title={selectedFlowNode.title || (isAiCondition ? 'AI 条件分化' : '条件分化')}
-            description={isAiCondition ? 'AI 只负责在 A/B 分支中做选择，后续审批节点仍按人工配置执行。' : '条件分化会按命中的分支继续执行。'}
+            description={isAiCondition ? 'AI 只负责在配置的分支中做选择，后续审批节点仍按人工配置执行。' : '条件分化会按命中的分支继续执行。'}
           />
           <div className="space-y-5 p-5">
             <label className="block space-y-2">
@@ -3617,7 +3634,7 @@ export default function WorkflowAdmin() {
         id: createId('flow-condition'),
         type: 'condition',
         title: isAiCondition ? 'AI 条件分化' : '条件分化',
-        subtitle: isAiCondition ? 'AI 根据提示词选择 A/B 分支' : '按条件进入不同分支',
+        subtitle: isAiCondition ? 'AI 根据提示词选择分支' : '按条件进入不同分支',
         conditionMode: isAiCondition ? 'ai' : 'rules',
         ...(isAiCondition ? { aiBranchRule: { prompt: '请根据申请表单内容判断应该进入哪个分支。' } } : {}),
         conditions: createConditionBranches(isAiCondition, branchCount, field),
@@ -3974,6 +3991,7 @@ export default function WorkflowAdmin() {
       label: `${draft.basic.moduleName} / ${draft.basic.approvalTypeName}`,
       businessType: draft.businessType || selectedTemplate.businessType || 'general',
       fields: [],
+      amountFields: [],
     };
 
     const confirmed = window.confirm(`确认初始化「${scope.approvalTypeName}」审批流？当前草稿会被重置为空白流程。`);

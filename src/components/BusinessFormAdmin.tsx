@@ -38,6 +38,15 @@ function getFieldText(type: ApprovalType) {
   return type.businessFields.join('\n');
 }
 
+function getInitialAmountFields(type: ApprovalType) {
+  const configuredFields = Array.isArray(type.amountFields) ? type.amountFields : [];
+  const sourceFields = configuredFields.length > 0
+    ? configuredFields
+    : type.businessFields.filter(isAmountCurrencyField);
+  const businessFieldSet = new Set(type.businessFields);
+  return sourceFields.filter((field) => businessFieldSet.has(field));
+}
+
 function isAmountCurrencyField(field: string) {
   return /金额|价格|利润|总额/.test(field);
 }
@@ -56,13 +65,18 @@ export default function BusinessFormAdmin() {
   const [moduleName, setModuleName] = React.useState('');
   const [approvalTypeName, setApprovalTypeName] = React.useState('');
   const [fieldText, setFieldText] = React.useState('');
+  const [amountFields, setAmountFields] = React.useState<string[]>([]);
   const [editingTarget, setEditingTarget] = React.useState<EditingTarget | null>(null);
   const [message, setMessage] = React.useState('');
   const [error, setError] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
 
   const businessFields = React.useMemo(() => normalizeFields(fieldText), [fieldText]);
-  const hasAmountCurrencyField = businessFields.some(isAmountCurrencyField);
+  const selectedAmountFields = React.useMemo(
+    () => amountFields.filter((field) => businessFields.includes(field)),
+    [amountFields, businessFields],
+  );
+  const hasAmountCurrencyField = selectedAmountFields.length > 0;
   const hasCurrencyOnlyField = businessFields.some(isCurrencyOnlyField);
   const moduleOptions = approvalSchema.modules.map((module) => module.name);
   const isEditing = Boolean(editingTarget);
@@ -71,14 +85,19 @@ export default function BusinessFormAdmin() {
     setFieldText([...new Set(fields.map((field) => field.trim()).filter(Boolean))].join('\n'));
   };
 
-  const appendBusinessField = (field: string) => {
-    updateBusinessFields([...businessFields, field]);
+  const toggleAmountField = (field: string) => {
+    setAmountFields((current) => (
+      current.includes(field)
+        ? current.filter((item) => item !== field)
+        : [...current, field]
+    ));
   };
 
   const resetForm = () => {
     setModuleName('');
     setApprovalTypeName('');
     setFieldText('');
+    setAmountFields([]);
     setEditingTarget(null);
     setError('');
   };
@@ -92,6 +111,7 @@ export default function BusinessFormAdmin() {
     setModuleName(module.name);
     setApprovalTypeName(type.name);
     setFieldText(getFieldText(type));
+    setAmountFields(getInitialAmountFields(type));
     setEditingTarget({
       moduleName: module.name,
       approvalTypeName: type.name,
@@ -149,11 +169,13 @@ export default function BusinessFormAdmin() {
             moduleName: nextModuleName,
             approvalTypeName: nextApprovalTypeName,
             businessFields,
+            amountFields: selectedAmountFields,
           })
         : await storage.createBusinessForm({
             moduleName: nextModuleName,
             approvalTypeName: nextApprovalTypeName,
             businessFields,
+            amountFields: selectedAmountFields,
           });
 
       replaceApprovalSchema(nextSchema);
@@ -241,29 +263,47 @@ export default function BusinessFormAdmin() {
           </label>
 
           <div className="rounded-2xl border border-[#d8e8ff] bg-[#f5fbff] p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
                   <DollarSign size={15} strokeWidth={2.8} />
                   金额字段
                 </div>
                 <p className="mt-1 text-[12px] font-semibold text-medium-gray">
-                  字段名包含金额、价格、利润、总额时，发起申请会自动使用“币种 + 数字金额”，后续条件分化也会识别。
+                  从上面的业务字段里选择哪些是金额字段。被选中的字段会在发起申请时使用“币种 + 数字金额”，流程条件分化也会按金额识别。
                 </p>
               </div>
-              <div className="flex shrink-0 flex-wrap gap-2">
-                {['申请金额', '付款金额', '合同总额'].map((field) => (
-                  <button
-                    key={field}
-                    type="button"
-                    onClick={() => appendBusinessField(field)}
-                    disabled={businessFields.includes(field)}
-                    className="h-9 rounded-full bg-white px-3 text-[12px] font-black text-interactive-blue shadow-sm transition-colors hover:bg-[#e7f1ff] disabled:cursor-not-allowed disabled:text-light-gray"
-                  >
-                    {businessFields.includes(field) ? '已添加' : `添加${field}`}
-                  </button>
-                ))}
-              </div>
+              {businessFields.length > 0 ? (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {businessFields.map((field) => {
+                    const checked = selectedAmountFields.includes(field);
+
+                    return (
+                      <label
+                        key={field}
+                        className={cn(
+                          'flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border bg-white px-3 py-2 text-[12px] font-black transition-colors',
+                          checked
+                            ? 'border-interactive-blue text-interactive-blue shadow-sm'
+                            : 'border-border-silver text-midnight-graphite hover:border-[#b9d8ff]',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleAmountField(field)}
+                          className="h-4 w-4 accent-interactive-blue"
+                        />
+                        <span className="min-w-0 truncate">{field}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
+                  先填写业务字段，再选择哪些字段是金额字段。
+                </div>
+              )}
             </div>
             {hasCurrencyOnlyField && !hasAmountCurrencyField && (
               <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-[12px] font-bold text-amber-700">
@@ -275,14 +315,19 @@ export default function BusinessFormAdmin() {
           {businessFields.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {businessFields.map((field) => {
-                const fieldKindLabel = getFieldKindLabel(field);
+                const isSelectedAmountField = selectedAmountFields.includes(field);
+                const fieldKindLabel = isSelectedAmountField
+                  ? '金额+币种'
+                  : isCurrencyOnlyField(field)
+                    ? getFieldKindLabel(field)
+                    : '';
 
                 return (
                   <span
                     key={field}
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-bold",
-                      isAmountCurrencyField(field)
+                      isSelectedAmountField
                         ? "bg-[#e7f1ff] text-interactive-blue"
                         : isCurrencyOnlyField(field)
                           ? "bg-amber-50 text-amber-700"
