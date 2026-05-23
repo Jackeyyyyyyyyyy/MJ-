@@ -104,7 +104,7 @@ export const storage = {
     return request<Schema>('/business-forms', {
       method: 'POST',
       body: JSON.stringify(input),
-    });
+    }, { skipImpersonation: true });
   },
 
   updateBusinessForm(
@@ -118,6 +118,7 @@ export const storage = {
         method: 'PATCH',
         body: JSON.stringify(input),
       },
+      { skipImpersonation: true },
     );
   },
 
@@ -125,6 +126,7 @@ export const storage = {
     return request<Schema>(
       `/business-forms/${encodeURIComponent(moduleName)}/${encodeURIComponent(approvalTypeName)}`,
       { method: 'DELETE' },
+      { skipImpersonation: true },
     );
   },
 
@@ -158,7 +160,7 @@ export const storage = {
 
   getAiPrompt(moduleName: string, approvalTypeName: string): Promise<AiPromptConfig> {
     const params = new URLSearchParams({ moduleName, approvalTypeName });
-    return request<AiPromptConfig>(`/ai-prompts?${params.toString()}`);
+    return request<AiPromptConfig>(`/ai-prompts?${params.toString()}`, undefined, { skipImpersonation: true });
   },
 
   updateAiPrompt(
@@ -169,7 +171,7 @@ export const storage = {
     return request<AiPromptConfig>('/ai-prompts', {
       method: 'PATCH',
       body: JSON.stringify({ moduleName, approvalTypeName, prompt }),
-    });
+    }, { skipImpersonation: true });
   },
 
   getAiAssistantOverview(): Promise<AiAssistantOverview> {
@@ -184,72 +186,72 @@ export const storage = {
   },
 
   getAiAssistantPrompt(): Promise<AiAssistantPromptConfig> {
-    return request<AiAssistantPromptConfig>('/ai-assistant/prompt');
+    return request<AiAssistantPromptConfig>('/ai-assistant/prompt', undefined, { skipImpersonation: true });
   },
 
   updateAiAssistantPrompt(prompt: string): Promise<AiAssistantPromptConfig> {
     return request<AiAssistantPromptConfig>('/ai-assistant/prompt', {
       method: 'PATCH',
       body: JSON.stringify({ prompt }),
-    });
+    }, { skipImpersonation: true });
   },
 
   getAiBranchDecisionLogs(): Promise<AiBranchDecisionLog[]> {
-    return request<AiBranchDecisionLog[]>('/ai-branch-logs');
+    return request<AiBranchDecisionLog[]>('/ai-branch-logs', undefined, { skipImpersonation: true });
   },
 
   getOrganizationDirectory(): Promise<OrganizationDirectory> {
-    return request<OrganizationDirectory>('/organization');
+    return request<OrganizationDirectory>('/organization', undefined, { skipImpersonation: true });
   },
 
   saveOrganizationDirectory(directory: OrganizationDirectory): Promise<OrganizationDirectory> {
     return request<OrganizationDirectory>('/organization', {
       method: 'PUT',
       body: JSON.stringify(directory),
-    });
+    }, { skipImpersonation: true });
   },
 
   getWorkflowTemplates(): Promise<WorkflowTemplate[]> {
-    return request<WorkflowTemplate[]>('/workflow-templates');
+    return request<WorkflowTemplate[]>('/workflow-templates', undefined, { skipImpersonation: true });
   },
 
   createWorkflowTemplate(input: WorkflowTemplateInput): Promise<WorkflowTemplate> {
     return request<WorkflowTemplate>('/workflow-templates', {
       method: 'POST',
       body: JSON.stringify(input),
-    });
+    }, { skipImpersonation: true });
   },
 
   updateWorkflowDraft(id: string, draft: WorkflowVersion): Promise<WorkflowTemplate> {
     return request<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(id)}/draft`, {
       method: 'PATCH',
       body: JSON.stringify({ draft }),
-    });
+    }, { skipImpersonation: true });
   },
 
   publishWorkflowTemplate(id: string): Promise<WorkflowTemplate> {
     return request<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(id)}/publish`, {
       method: 'POST',
-    });
+    }, { skipImpersonation: true });
   },
 
   duplicateWorkflowTemplate(id: string): Promise<WorkflowTemplate> {
     return request<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(id)}/duplicate`, {
       method: 'POST',
-    });
+    }, { skipImpersonation: true });
   },
 
   setWorkflowTemplateStatus(id: string, status: WorkflowTemplate['status']): Promise<WorkflowTemplate> {
     return request<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(id)}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
-    });
+    }, { skipImpersonation: true });
   },
 
   deleteWorkflowTemplate(id: string): Promise<void> {
     return request<void>(`/workflow-templates/${encodeURIComponent(id)}`, {
       method: 'DELETE',
-    });
+    }, { skipImpersonation: true });
   },
 
   addRecord(record: NewApprovalRecord): Promise<ApprovalRecord> {
@@ -274,7 +276,7 @@ export const storage = {
   clearAll(): Promise<void> {
     return request<void>('/records', {
       method: 'DELETE',
-    });
+    }, { skipImpersonation: true });
   },
 
   uploadFiles(files: UploadInput[]): Promise<ApprovalAttachment[]> {

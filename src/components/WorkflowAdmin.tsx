@@ -3461,7 +3461,7 @@ export default function WorkflowAdmin() {
         storage.getWorkflowTemplates(),
         storage.getOrganizationDirectory(),
       ]);
-      replaceApprovalSchema(nextSchema);
+      replaceApprovalSchema(nextSchema, { notify: false });
       const normalizedTemplates = sortWorkflowTemplatesByBusinessScope(
         filterWorkflowTemplatesByBusinessScope(fetchedTemplates).map(normalizeTemplateForEditor),
       );
@@ -4036,7 +4036,7 @@ export default function WorkflowAdmin() {
   };
 
   if (isLoading) {
-    return <div className="text-[15px] font-bold text-medium-gray">正在加载审批流配置... v2026-05-23-timeout</div>;
+    return <div className="text-[15px] font-bold text-medium-gray">正在加载审批流配置...</div>;
   }
 
   if (loadError) {

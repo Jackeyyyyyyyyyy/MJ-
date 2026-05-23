@@ -569,11 +569,11 @@ export const approvalSchema: Schema = {
   ]
 };
 
-export function replaceApprovalSchema(nextSchema: Schema) {
+export function replaceApprovalSchema(nextSchema: Schema, options: { notify?: boolean } = {}) {
   approvalSchema.systemName = nextSchema.systemName;
   approvalSchema.commonFields = nextSchema.commonFields;
   approvalSchema.modules = nextSchema.modules;
-  if (typeof window !== 'undefined') {
+  if (options.notify !== false && typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('approval-schema-updated'));
   }
 }
