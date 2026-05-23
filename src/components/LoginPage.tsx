@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { auth } from '../auth';
+import { loginBackup } from '../backupAuth';
 import { motion } from 'motion/react';
 
 interface LoginPageProps {
@@ -22,7 +23,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       if (user) {
         onLogin();
       } else {
-        setError('认证失败：请核对账号或密码');
+        const isBackupLogin = await loginBackup(username, password);
+        if (isBackupLogin) {
+          window.location.assign('/backup');
+        } else {
+          setError('认证失败：请核对账号或密码');
+        }
       }
     } catch {
       setError('认证服务暂不可用，请稍后再试');
