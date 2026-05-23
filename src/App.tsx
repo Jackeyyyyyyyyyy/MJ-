@@ -13,6 +13,7 @@ import ApprovalProgressModal from './components/ApprovalProgressModal';
 import AiPromptEditor from './components/AiPromptEditor';
 import AiAssistantHome from './components/AiAssistantHome';
 import AiAssistantPromptAdmin from './components/AiAssistantPromptAdmin';
+import BackupPage from './components/BackupPage';
 import { auth } from './auth';
 import { storage } from './storage';
 import { AdminView, Role, ApprovalRecord, ApprovalStatus } from './types';
@@ -86,7 +87,7 @@ function replaceRoute(route: AppRoute) {
   }
 }
 
-export default function App() {
+function MainApp() {
   const initialRoute = parseRoute();
   const [isAuthenticated, setIsAuthenticated] = useState(!!auth.getCurrentUser());
   const [perspective, setPerspective] = useState<Role | null>(auth.getPerspective());
@@ -393,4 +394,8 @@ export default function App() {
       <React.Fragment key={schemaVersion}>{renderContent()}</React.Fragment>
     </AppLayout>
   );
+}
+
+export default function App() {
+  return window.location.pathname === '/backup' ? <BackupPage /> : <MainApp />;
 }

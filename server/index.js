@@ -1,11 +1,14 @@
 import express from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import { promisify } from 'node:util';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const gzip = promisify(zlib.gzip);
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -116,6 +119,13 @@ const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD?.trim() || requireEn
 const superAdminUsername = process.env.SUPER_ADMIN_USERNAME?.trim() || 'developer';
 const superAdminName = process.env.SUPER_ADMIN_NAME?.trim() || '超级管理员';
 const authSecret = requireEnv('AUTH_SECRET');
+const backupUsername = process.env.BACKUP_ADMIN_USER?.trim();
+const backupPassword = process.env.BACKUP_ADMIN_PASSWORD?.trim();
+const configuredBackupTokenTtlMs = Number(process.env.BACKUP_TOKEN_TTL_MS);
+const backupTokenTtlMs =
+  Number.isFinite(configuredBackupTokenTtlMs) && configuredBackupTokenTtlMs > 0
+    ? configuredBackupTokenTtlMs
+    : 30 * 60 * 1000;
 const configuredTokenTtlMs = Number(process.env.AUTH_TOKEN_TTL_MS);
 const tokenTtlMs =
   Number.isFinite(configuredTokenTtlMs) && configuredTokenTtlMs > 0
@@ -258,6 +268,202 @@ function toPublicAccount(account, directory = { departments: [], members: [] }) 
 
 function sign(value) {
   return crypto.createHmac('sha256', authSecret).update(value).digest('base64url');
+}
+
+function isBackupConfigured() {
+  return Boolean(backupUsername && backupPassword);
+}
+
+function createBackupToken(username) {
+  const expiresAt = Date.now() + backupTokenTtlMs;
+  const payload = Buffer.from(JSON.stringify({
+    sub: username,
+    scope: 'volume-backup',
+    exp: expiresAt,
+  })).toString('base64url');
+
+  return {
+    token: `${payload}.${sign(payload)}`,
+    expiresAt,
+  };
+}
+
+function verifyBackupToken(token) {
+  const [payload, signature] = String(token || '').split('.');
+  if (!payload || !signature) return null;
+
+  const expected = sign(payload);
+  const expectedBuffer = Buffer.from(expected);
+  const signatureBuffer = Buffer.from(signature);
+  if (
+    expectedBuffer.length !== signatureBuffer.length ||
+    !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)
+  ) {
+    return null;
+  }
+
+  try {
+    const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (session?.scope !== 'volume-backup' || !session?.sub || !session?.exp || Date.now() > session.exp) {
+      return null;
+    }
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+function timingSafeStringEqual(actual, expected) {
+  const actualBuffer = Buffer.from(String(actual || ''));
+  const expectedBuffer = Buffer.from(String(expected || ''));
+  return (
+    actualBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(actualBuffer, expectedBuffer)
+  );
+}
+
+function authenticateBackup(req, res, next) {
+  const authorization = req.get('authorization') || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  const session = match ? verifyBackupToken(match[1]) : null;
+  if (!session) {
+    return res.status(401).json({ error: 'backup authentication required' });
+  }
+
+  req.backupSession = session;
+  next();
+}
+
+function getBackupFileName(date = new Date()) {
+  const parts = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+    String(date.getHours()).padStart(2, '0'),
+    String(date.getMinutes()).padStart(2, '0'),
+  ];
+
+  return `backup-${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}-${parts[4]}.tar.gz`;
+}
+
+function shouldExcludeFromBackup(relativePath, entryName) {
+  const normalizedPath = relativePath.replace(/\\/g, '/');
+  const parts = normalizedPath.split('/').filter(Boolean);
+  const name = entryName || parts[parts.length - 1] || '';
+  const lowerName = name.toLowerCase();
+
+  if (parts.some((part) => ['.git', 'node_modules', '.cache', 'cache', 'tmp', 'temp'].includes(part.toLowerCase()))) {
+    return true;
+  }
+
+  return (
+    lowerName === '.env' ||
+    lowerName.startsWith('.env.') ||
+    lowerName.endsWith('.log') ||
+    lowerName.endsWith('.tmp') ||
+    lowerName.endsWith('.temp') ||
+    lowerName.endsWith('.cache')
+  );
+}
+
+function writeTarString(buffer, offset, value, length) {
+  buffer.write(String(value || '').slice(0, length), offset, length, 'utf8');
+}
+
+function writeTarOctal(buffer, offset, value, length) {
+  const octal = Math.max(0, Number(value) || 0).toString(8);
+  buffer.write(octal.padStart(length - 1, '0').slice(0, length - 1), offset, length - 1, 'ascii');
+  buffer[offset + length - 1] = 0;
+}
+
+function splitTarPath(relativePath) {
+  const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (Buffer.byteLength(normalized) <= 100) {
+    return { name: normalized, prefix: '' };
+  }
+
+  const parts = normalized.split('/');
+  const name = parts.pop() || '';
+  const prefix = parts.join('/');
+  if (Buffer.byteLength(name) > 100 || Buffer.byteLength(prefix) > 155) {
+    throw createHttpError(`backup path is too long: ${normalized}`, 500);
+  }
+
+  return { name, prefix };
+}
+
+function createTarHeader(relativePath, stats, typeFlag = '0') {
+  const header = Buffer.alloc(512, 0);
+  const { name, prefix } = splitTarPath(relativePath);
+  const isDirectory = typeFlag === '5';
+
+  writeTarString(header, 0, isDirectory && !name.endsWith('/') ? `${name}/` : name, 100);
+  writeTarOctal(header, 100, isDirectory ? 0o755 : 0o644, 8);
+  writeTarOctal(header, 108, 0, 8);
+  writeTarOctal(header, 116, 0, 8);
+  writeTarOctal(header, 124, isDirectory ? 0 : stats.size, 12);
+  writeTarOctal(header, 136, Math.floor(stats.mtimeMs / 1000), 12);
+  header.fill(' ', 148, 156);
+  writeTarString(header, 156, typeFlag, 1);
+  writeTarString(header, 257, 'ustar', 6);
+  writeTarString(header, 263, '00', 2);
+  writeTarString(header, 345, prefix, 155);
+
+  let checksum = 0;
+  for (const byte of header) checksum += byte;
+  writeTarOctal(header, 148, checksum, 8);
+  return header;
+}
+
+function padTarContent(buffer) {
+  const remainder = buffer.length % 512;
+  return remainder === 0 ? Buffer.alloc(0) : Buffer.alloc(512 - remainder, 0);
+}
+
+async function collectTarEntries(rootDir, currentDir = rootDir, entries = []) {
+  const items = await fs.readdir(currentDir, { withFileTypes: true });
+
+  for (const item of items) {
+    const absolutePath = path.join(currentDir, item.name);
+    const relativePath = path.relative(rootDir, absolutePath);
+    if (!relativePath || shouldExcludeFromBackup(relativePath, item.name)) continue;
+
+    const stats = await fs.lstat(absolutePath);
+    if (stats.isSymbolicLink()) continue;
+
+    if (stats.isDirectory()) {
+      entries.push({ absolutePath, relativePath: relativePath.replace(/\\/g, '/'), stats, type: 'directory' });
+      await collectTarEntries(rootDir, absolutePath, entries);
+    } else if (stats.isFile()) {
+      entries.push({ absolutePath, relativePath: relativePath.replace(/\\/g, '/'), stats, type: 'file' });
+    }
+  }
+
+  return entries;
+}
+
+async function createBackupArchive() {
+  const backupRoot = path.resolve(dataDir);
+  const rootStats = await fs.stat(backupRoot);
+  if (!rootStats.isDirectory()) {
+    throw createHttpError('persistent data directory is not available', 500);
+  }
+
+  const entries = await collectTarEntries(backupRoot);
+  const chunks = [];
+
+  for (const entry of entries) {
+    if (entry.type === 'directory') {
+      chunks.push(createTarHeader(entry.relativePath.endsWith('/') ? entry.relativePath : `${entry.relativePath}/`, entry.stats, '5'));
+      continue;
+    }
+
+    const content = await fs.readFile(entry.absolutePath);
+    chunks.push(createTarHeader(entry.relativePath, entry.stats, '0'), content, padTarContent(content));
+  }
+
+  chunks.push(Buffer.alloc(1024, 0));
+  return gzip(Buffer.concat(chunks));
 }
 
 function createToken(user) {
@@ -3625,6 +3831,38 @@ app.post('/api/auth/login', async (req, res, next) => {
       user: toPublicUser(user),
       ...session,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/backup/login', (req, res) => {
+  if (!isBackupConfigured()) {
+    return res.status(503).json({ error: 'backup access is not configured' });
+  }
+
+  const username = String(req.body?.username || '').trim();
+  const password = String(req.body?.password || '');
+
+  if (
+    !timingSafeStringEqual(username, backupUsername) ||
+    !timingSafeStringEqual(password, backupPassword)
+  ) {
+    return res.status(401).json({ error: 'invalid backup credentials' });
+  }
+
+  res.json(createBackupToken(username));
+});
+
+app.get('/api/backup/download', authenticateBackup, async (_req, res, next) => {
+  try {
+    const archive = await createBackupArchive();
+    const fileName = getBackupFileName();
+
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(archive);
   } catch (error) {
     next(error);
   }
