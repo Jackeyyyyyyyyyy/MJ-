@@ -1,0 +1,1127 @@
+{
+  "departments": [
+    {
+      "id": "dept-001",
+      "name": "金华魔术信息科技有限公司"
+    },
+    {
+      "id": "dept-002",
+      "name": "佳程集团",
+      "parentId": "dept-001"
+    },
+    {
+      "id": "dept-003",
+      "name": "集团总经理",
+      "parentId": "dept-002"
+    },
+    {
+      "id": "dept-004",
+      "name": "研发部",
+      "parentId": "dept-003"
+    },
+    {
+      "id": "dept-005",
+      "name": "前端组",
+      "parentId": "dept-004"
+    },
+    {
+      "id": "dept-006",
+      "name": "开发组",
+      "parentId": "dept-004"
+    },
+    {
+      "id": "dept-007",
+      "name": "后端组1",
+      "parentId": "dept-006"
+    },
+    {
+      "id": "dept-008",
+      "name": "后端组2",
+      "parentId": "dept-006"
+    },
+    {
+      "id": "dept-009",
+      "name": "产品组",
+      "parentId": "dept-004"
+    },
+    {
+      "id": "dept-010",
+      "name": "运营部",
+      "parentId": "dept-003"
+    },
+    {
+      "id": "dept-011",
+      "name": "大客户销售部",
+      "parentId": "dept-010"
+    },
+    {
+      "id": "dept-012",
+      "name": "商务部",
+      "parentId": "dept-010"
+    },
+    {
+      "id": "dept-013",
+      "name": "境外组",
+      "parentId": "dept-012"
+    },
+    {
+      "id": "dept-014",
+      "name": "商务部",
+      "parentId": "dept-012"
+    },
+    {
+      "id": "dept-015",
+      "name": "箱管组",
+      "parentId": "dept-012"
+    },
+    {
+      "id": "dept-016",
+      "name": "操作部",
+      "parentId": "dept-010"
+    },
+    {
+      "id": "dept-017",
+      "name": "国内操作",
+      "parentId": "dept-016"
+    },
+    {
+      "id": "dept-018",
+      "name": "出口组",
+      "parentId": "dept-017"
+    },
+    {
+      "id": "dept-019",
+      "name": "进口组",
+      "parentId": "dept-017"
+    },
+    {
+      "id": "dept-020",
+      "name": "班列操作",
+      "parentId": "dept-016"
+    },
+    {
+      "id": "dept-021",
+      "name": "操作专家",
+      "parentId": "dept-016"
+    },
+    {
+      "id": "dept-022",
+      "name": "二手舱商务部",
+      "parentId": "dept-010"
+    },
+    {
+      "id": "dept-023",
+      "name": "商务组",
+      "parentId": "dept-022"
+    },
+    {
+      "id": "dept-024",
+      "name": "俄罗斯",
+      "parentId": "dept-022"
+    },
+    {
+      "id": "dept-025",
+      "name": "哈萨克斯坦",
+      "parentId": "dept-022"
+    },
+    {
+      "id": "dept-026",
+      "name": "销售组",
+      "parentId": "dept-022"
+    },
+    {
+      "id": "dept-027",
+      "name": "运营部",
+      "parentId": "dept-010"
+    },
+    {
+      "id": "dept-028",
+      "name": "法务部",
+      "parentId": "dept-003"
+    },
+    {
+      "id": "dept-029",
+      "name": "业财部",
+      "parentId": "dept-003"
+    },
+    {
+      "id": "dept-030",
+      "name": "财务部",
+      "parentId": "dept-003"
+    },
+    {
+      "id": "dept-031",
+      "name": "国际财务处",
+      "parentId": "dept-030"
+    },
+    {
+      "id": "dept-032",
+      "name": "财务部",
+      "parentId": "dept-030"
+    },
+    {
+      "id": "dept-033",
+      "name": "人事行政部",
+      "parentId": "dept-003"
+    },
+    {
+      "id": "dept-034",
+      "name": "人事部",
+      "parentId": "dept-033"
+    },
+    {
+      "id": "dept-035",
+      "name": "行政部",
+      "parentId": "dept-033"
+    },
+    {
+      "id": "dept-036",
+      "name": "人资后勤部",
+      "parentId": "dept-035"
+    },
+    {
+      "id": "dept-037",
+      "name": "后勤部",
+      "parentId": "dept-036"
+    },
+    {
+      "id": "dept-038",
+      "name": "餐饮",
+      "parentId": "dept-036"
+    },
+    {
+      "id": "dept-039",
+      "name": "司机",
+      "parentId": "dept-035"
+    },
+    {
+      "id": "dept-040",
+      "name": "岚隐",
+      "parentId": "dept-035"
+    },
+    {
+      "id": "dept-041",
+      "name": "Spa板块",
+      "parentId": "dept-040"
+    },
+    {
+      "id": "dept-042",
+      "name": "Fit板块",
+      "parentId": "dept-040"
+    },
+    {
+      "id": "dept-043",
+      "name": "综管部",
+      "parentId": "dept-042"
+    },
+    {
+      "id": "dept-044",
+      "name": "教练部",
+      "parentId": "dept-042"
+    },
+    {
+      "id": "dept-045",
+      "name": "海外事业部",
+      "parentId": "dept-003"
+    },
+    {
+      "id": "dept-046",
+      "name": "总经办",
+      "parentId": "dept-045"
+    },
+    {
+      "id": "dept-047",
+      "name": "总经办",
+      "parentId": "dept-003"
+    },
+    {
+      "id": "dept-048",
+      "name": "应收应付组",
+      "parentId": "dept-047"
+    },
+    {
+      "id": "dept-049",
+      "name": "业务部",
+      "parentId": "dept-003"
+    },
+    {
+      "id": "dept-050",
+      "name": "FT",
+      "parentId": "dept-003"
+    }
+  ],
+  "members": [
+    {
+      "id": "member-001",
+      "name": "徐鹏飞",
+      "departmentId": "dept-005",
+      "title": "Leader｜资深前端开发工程师",
+      "enabled": true,
+      "supervisorId": "member-006"
+    },
+    {
+      "id": "member-002",
+      "name": "胡晓泉",
+      "departmentId": "dept-007",
+      "title": "Sub Admin｜.NET工程师",
+      "enabled": true,
+      "supervisorId": "member-006"
+    },
+    {
+      "id": "member-003",
+      "name": "陈晓华",
+      "departmentId": "dept-008",
+      "title": ".net工程师",
+      "enabled": true,
+      "supervisorId": "member-006"
+    },
+    {
+      "id": "member-004",
+      "name": "华国俊",
+      "departmentId": "dept-006",
+      "title": ".net工程师",
+      "enabled": true,
+      "supervisorId": "member-006"
+    },
+    {
+      "id": "member-005",
+      "name": "傅旭东",
+      "departmentId": "dept-009",
+      "title": "产品经理",
+      "enabled": true,
+      "supervisorId": "member-006"
+    },
+    {
+      "id": "member-006",
+      "name": "吴剑波",
+      "departmentId": "dept-004",
+      "title": "Sub Admin｜Leader｜研发经理",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "member-007",
+      "name": "谭聪",
+      "departmentId": "dept-011",
+      "title": "Leader｜销售专员",
+      "enabled": true,
+      "supervisorId": "ye-fei"
+    },
+    {
+      "id": "member-008",
+      "name": "陈雨萱",
+      "departmentId": "dept-011",
+      "title": "销售专员",
+      "enabled": true,
+      "supervisorId": "member-007"
+    },
+    {
+      "id": "member-009",
+      "name": "胡晓",
+      "departmentId": "dept-011",
+      "title": "销售专员",
+      "enabled": true,
+      "supervisorId": "member-007"
+    },
+    {
+      "id": "member-010",
+      "name": "黄翠丽",
+      "departmentId": "dept-011",
+      "title": "大客户维护",
+      "enabled": true,
+      "supervisorId": "member-007"
+    },
+    {
+      "id": "member-011",
+      "name": "楼子怡",
+      "departmentId": "dept-011",
+      "title": "大客户维护",
+      "enabled": true,
+      "supervisorId": "member-007"
+    },
+    {
+      "id": "member-012",
+      "name": "叶智艳",
+      "departmentId": "dept-011",
+      "title": "销售专员",
+      "enabled": true,
+      "supervisorId": "member-007"
+    },
+    {
+      "id": "member-013",
+      "name": "张妙琴",
+      "departmentId": "dept-011",
+      "title": "销售专员",
+      "enabled": true,
+      "supervisorId": "member-007"
+    },
+    {
+      "id": "member-014",
+      "name": "叶健幸",
+      "departmentId": "dept-011",
+      "title": "销售专员",
+      "enabled": true,
+      "supervisorId": "member-007"
+    },
+    {
+      "id": "member-015",
+      "name": "李利东",
+      "departmentId": "dept-011",
+      "title": "销售专员",
+      "enabled": true,
+      "supervisorId": "member-007"
+    },
+    {
+      "id": "member-016",
+      "name": "王晓茹",
+      "departmentId": "dept-013",
+      "title": "境外成本支持",
+      "enabled": true,
+      "supervisorId": "hong-wei"
+    },
+    {
+      "id": "member-017",
+      "name": "戚梦茹",
+      "departmentId": "dept-013",
+      "title": "境外成本支持",
+      "enabled": true,
+      "supervisorId": "hong-wei"
+    },
+    {
+      "id": "member-018",
+      "name": "何敏丽",
+      "departmentId": "dept-014",
+      "title": "商务专员",
+      "enabled": true,
+      "supervisorId": "hong-wei"
+    },
+    {
+      "id": "member-019",
+      "name": "李爽莲",
+      "departmentId": "dept-015",
+      "title": "箱管",
+      "enabled": true,
+      "supervisorId": "hong-wei"
+    },
+    {
+      "id": "hong-wei",
+      "name": "洪伟",
+      "departmentId": "dept-012",
+      "title": "Leader｜高级商务专员",
+      "enabled": true,
+      "supervisorId": "ye-fei"
+    },
+    {
+      "id": "member-021",
+      "name": "徐伟良",
+      "departmentId": "dept-012",
+      "title": "拖车司机",
+      "enabled": true,
+      "supervisorId": "hong-wei"
+    },
+    {
+      "id": "member-022",
+      "name": "周昕宁",
+      "departmentId": "dept-012",
+      "title": "商务专员",
+      "enabled": true,
+      "supervisorId": "hong-wei"
+    },
+    {
+      "id": "member-023",
+      "name": "吴宇萍",
+      "departmentId": "dept-018",
+      "title": "销售专员",
+      "enabled": true,
+      "supervisorId": "member-033"
+    },
+    {
+      "id": "member-024",
+      "name": "翁嘉琪",
+      "departmentId": "dept-018",
+      "title": "操作专家",
+      "enabled": true,
+      "supervisorId": "member-033"
+    },
+    {
+      "id": "member-025",
+      "name": "罗芳",
+      "departmentId": "dept-018",
+      "title": "操作专员",
+      "enabled": true,
+      "supervisorId": "member-033"
+    },
+    {
+      "id": "member-026",
+      "name": "马梦娇",
+      "departmentId": "dept-018",
+      "title": "操作专员",
+      "enabled": true,
+      "supervisorId": "member-033"
+    },
+    {
+      "id": "member-027",
+      "name": "经诗逢",
+      "departmentId": "dept-018",
+      "title": "国内操作",
+      "enabled": true,
+      "supervisorId": "member-033"
+    },
+    {
+      "id": "member-028",
+      "name": "吴霞",
+      "departmentId": "dept-018",
+      "title": "操作专员",
+      "enabled": true,
+      "supervisorId": "member-033"
+    },
+    {
+      "id": "member-029",
+      "name": "朱晨妍",
+      "departmentId": "dept-019",
+      "title": "销售助理",
+      "enabled": true,
+      "supervisorId": "member-033"
+    },
+    {
+      "id": "member-030",
+      "name": "曲冬",
+      "departmentId": "dept-017",
+      "title": "国内操作",
+      "enabled": true,
+      "supervisorId": "member-033"
+    },
+    {
+      "id": "member-031",
+      "name": "蔡大江",
+      "departmentId": "dept-020",
+      "title": "班列支持",
+      "enabled": true,
+      "supervisorId": "member-033"
+    },
+    {
+      "id": "member-032",
+      "name": "王雨倩",
+      "departmentId": "dept-020",
+      "title": "班列支持专员",
+      "enabled": true,
+      "supervisorId": "member-033"
+    },
+    {
+      "id": "member-033",
+      "name": "冯纯",
+      "departmentId": "dept-016",
+      "title": "Sub Admin｜Leader｜操作专家",
+      "enabled": true,
+      "supervisorId": "ye-fei"
+    },
+    {
+      "id": "member-034",
+      "name": "倪慧珍",
+      "departmentId": "dept-023",
+      "title": "商务专员",
+      "enabled": true,
+      "supervisorId": "member-042"
+    },
+    {
+      "id": "member-035",
+      "name": "邵莹",
+      "departmentId": "dept-023",
+      "title": "销售专员",
+      "enabled": true,
+      "supervisorId": "member-042"
+    },
+    {
+      "id": "member-lisa",
+      "name": "Lisa",
+      "departmentId": "dept-024",
+      "title": "莫斯科子公司总经理",
+      "enabled": true,
+      "supervisorId": "member-042"
+    },
+    {
+      "id": "member-037",
+      "name": "贺雷",
+      "departmentId": "dept-024",
+      "title": "班列拖车支持",
+      "enabled": true,
+      "supervisorId": "member-lisa"
+    },
+    {
+      "id": "member-038",
+      "name": "弗拉基米尔",
+      "departmentId": "dept-024",
+      "title": "兼职律师",
+      "enabled": true,
+      "supervisorId": "member-lisa"
+    },
+    {
+      "id": "member-039",
+      "name": "白山 叶尔那尔",
+      "departmentId": "dept-025",
+      "title": "哈萨克斯坦子公司经理",
+      "enabled": true,
+      "supervisorId": "member-040"
+    },
+    {
+      "id": "member-040",
+      "name": "胡萨因",
+      "departmentId": "dept-025",
+      "title": "哈萨克斯坦子公司总经理",
+      "enabled": true,
+      "supervisorId": "member-042"
+    },
+    {
+      "id": "member-041",
+      "name": "郑赛",
+      "departmentId": "dept-026",
+      "title": "销售专员",
+      "enabled": true,
+      "supervisorId": "member-042"
+    },
+    {
+      "id": "member-042",
+      "name": "赵云萱",
+      "departmentId": "dept-022",
+      "title": "Leader｜二手舱商务负责人",
+      "enabled": true,
+      "supervisorId": "ye-fei"
+    },
+    {
+      "id": "member-043",
+      "name": "刘胤泉",
+      "departmentId": "dept-027",
+      "title": "Leader｜储备干部",
+      "enabled": true,
+      "supervisorId": "ye-fei"
+    },
+    {
+      "id": "member-044",
+      "name": "袁国梁",
+      "departmentId": "dept-027",
+      "title": "仓库管理员",
+      "enabled": true,
+      "supervisorId": "member-043"
+    },
+    {
+      "id": "ye-fei",
+      "name": "叶飞",
+      "departmentId": "dept-010",
+      "title": "Leader｜运营总监",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "qian-lin",
+      "name": "钱琳",
+      "departmentId": "dept-032",
+      "title": "Sub Admin｜Leader｜财务总监",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "member-047",
+      "name": "应芷",
+      "departmentId": "dept-028",
+      "title": "法务专员",
+      "enabled": true,
+      "supervisorId": "qian-lin"
+    },
+    {
+      "id": "member-048",
+      "name": "马律",
+      "departmentId": "dept-028",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "qian-lin"
+    },
+    {
+      "id": "member-049",
+      "name": "董安然",
+      "departmentId": "dept-028",
+      "title": "法务",
+      "enabled": true,
+      "supervisorId": "qian-lin"
+    },
+    {
+      "id": "member-050",
+      "name": "邵卓可",
+      "departmentId": "dept-031",
+      "title": "财务助理",
+      "enabled": true,
+      "supervisorId": "qian-lin"
+    },
+    {
+      "id": "member-051",
+      "name": "丁佳琪",
+      "departmentId": "dept-031",
+      "title": "财务助理",
+      "enabled": true,
+      "supervisorId": "qian-lin"
+    },
+    {
+      "id": "member-052",
+      "name": "赵梓彤",
+      "departmentId": "dept-031",
+      "title": "俄子公司财务部会计助理",
+      "enabled": true,
+      "supervisorId": "qian-lin"
+    },
+    {
+      "id": "member-053",
+      "name": "余杭",
+      "departmentId": "dept-032",
+      "title": "Sub Admin｜收入会计",
+      "enabled": true,
+      "supervisorId": "qian-lin"
+    },
+    {
+      "id": "member-054",
+      "name": "赵柯",
+      "departmentId": "dept-032",
+      "title": "Sub Admin｜总账会计",
+      "enabled": true,
+      "supervisorId": "qian-lin"
+    },
+    {
+      "id": "member-055",
+      "name": "王丽敏",
+      "departmentId": "dept-032",
+      "title": "会计",
+      "enabled": true,
+      "supervisorId": "qian-lin"
+    },
+    {
+      "id": "hu-ning-fei",
+      "name": "胡宁飞",
+      "departmentId": "dept-032",
+      "title": "境外财务助理",
+      "enabled": true,
+      "supervisorId": "qian-lin"
+    },
+    {
+      "id": "wang-tumiao",
+      "name": "王涂妙",
+      "departmentId": "dept-032",
+      "title": "会计",
+      "enabled": true,
+      "supervisorId": "qian-lin"
+    },
+    {
+      "id": "jiang-hua",
+      "name": "姜华",
+      "departmentId": "dept-032",
+      "title": "出纳",
+      "enabled": true,
+      "supervisorId": "qian-lin"
+    },
+    {
+      "id": "member-059",
+      "name": "方安敬",
+      "departmentId": "dept-034",
+      "title": "Sub Admin｜Leader｜人事经理",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "member-060",
+      "name": "李绳瑶",
+      "departmentId": "dept-034",
+      "title": "Sub Admin｜人事行政",
+      "enabled": true,
+      "supervisorId": "member-059"
+    },
+    {
+      "id": "member-061",
+      "name": "钱维佳",
+      "departmentId": "dept-037",
+      "title": "Super Admin｜Leader｜运维工程师",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-062",
+      "name": "钱淑婵",
+      "departmentId": "dept-038",
+      "title": "后厨",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-063",
+      "name": "何旭东",
+      "departmentId": "dept-038",
+      "title": "厨师",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-064",
+      "name": "范磊",
+      "departmentId": "dept-038",
+      "title": "厨师",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-065",
+      "name": "盛卸妹",
+      "departmentId": "dept-036",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-066",
+      "name": "范林萱",
+      "departmentId": "dept-039",
+      "title": "商务司机",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-067",
+      "name": "于侠麟",
+      "departmentId": "dept-039",
+      "title": "商务司机",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-068",
+      "name": "曾林",
+      "departmentId": "dept-041",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-069",
+      "name": "胡梦燕",
+      "departmentId": "dept-043",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-070",
+      "name": "汤小妹",
+      "departmentId": "dept-043",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-071",
+      "name": "李婧",
+      "departmentId": "dept-043",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-072",
+      "name": "管冠",
+      "departmentId": "dept-044",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-073",
+      "name": "刘阳琪",
+      "departmentId": "dept-044",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-074",
+      "name": "刘天珍",
+      "departmentId": "dept-044",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-075",
+      "name": "Six🦁",
+      "departmentId": "dept-044",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-076",
+      "name": "张彩花",
+      "departmentId": "dept-040",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-077",
+      "name": "周婉桢",
+      "departmentId": "dept-035",
+      "title": "Sub Admin｜Leader｜行政经理",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "member-078",
+      "name": "陆雨",
+      "departmentId": "dept-035",
+      "title": "Sub Admin｜行政专员",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-079",
+      "name": "金玉英",
+      "departmentId": "dept-035",
+      "title": "行政前台",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-080",
+      "name": "吴建华",
+      "departmentId": "dept-035",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-077"
+    },
+    {
+      "id": "member-081",
+      "name": "临时人员3",
+      "departmentId": "dept-033",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-059"
+    },
+    {
+      "id": "member-082",
+      "name": "临时人员4",
+      "departmentId": "dept-033",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-059"
+    },
+    {
+      "id": "member-083",
+      "name": "临时人员",
+      "departmentId": "dept-033",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-059"
+    },
+    {
+      "id": "member-084",
+      "name": "临时人员2",
+      "departmentId": "dept-033",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-059"
+    },
+    {
+      "id": "member-085",
+      "name": "谢植银",
+      "departmentId": "dept-046",
+      "title": "海外事业部负责人",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "yang-nan",
+      "name": "杨宿南",
+      "departmentId": "dept-046",
+      "title": "物流经理",
+      "enabled": true,
+      "supervisorId": "member-085"
+    },
+    {
+      "id": "member-087",
+      "name": "陈光权",
+      "departmentId": "dept-046",
+      "title": "管理培训生",
+      "enabled": true,
+      "supervisorId": "member-085"
+    },
+    {
+      "id": "member-088",
+      "name": "熊纪乾",
+      "departmentId": "dept-046",
+      "title": "销售专员",
+      "enabled": true,
+      "supervisorId": "member-085"
+    },
+    {
+      "id": "member-089",
+      "name": "刘小贝",
+      "departmentId": "dept-046",
+      "title": "储备干部",
+      "enabled": true,
+      "supervisorId": "member-085"
+    },
+    {
+      "id": "member-090",
+      "name": "童宗海",
+      "departmentId": "dept-046",
+      "title": "海外事业部副总",
+      "enabled": true,
+      "supervisorId": "member-085"
+    },
+    {
+      "id": "member-091",
+      "name": "郑望发",
+      "departmentId": "dept-046",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-085"
+    },
+    {
+      "id": "lin-jin-biao",
+      "name": "林金彪",
+      "departmentId": "dept-045",
+      "title": "人事行政",
+      "enabled": true,
+      "supervisorId": "member-085"
+    },
+    {
+      "id": "member-093",
+      "name": "林德福",
+      "departmentId": "dept-045",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "member-085"
+    },
+    {
+      "id": "member-094",
+      "name": "洪俊勇",
+      "departmentId": "dept-048",
+      "title": "Sub Admin｜Leader｜分析专家",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "member-095",
+      "name": "肖林风",
+      "departmentId": "dept-048",
+      "title": "应收应付",
+      "enabled": true,
+      "supervisorId": "member-094"
+    },
+    {
+      "id": "member-096",
+      "name": "杨志芬",
+      "departmentId": "dept-048",
+      "title": "应收应付专员",
+      "enabled": true,
+      "supervisorId": "member-094"
+    },
+    {
+      "id": "member-097",
+      "name": "王祺",
+      "departmentId": "dept-048",
+      "title": "应收应付",
+      "enabled": true,
+      "supervisorId": "member-094"
+    },
+    {
+      "id": "fan-lu",
+      "name": "范璐",
+      "departmentId": "dept-003",
+      "title": "Leader｜集团总经理",
+      "enabled": true,
+      "supervisorId": "qin-an-tang"
+    },
+    {
+      "id": "member-099",
+      "name": "赵求全",
+      "departmentId": "dept-047",
+      "title": "Sub Admin｜总经办主任",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "member-100",
+      "name": "王巧敏",
+      "departmentId": "dept-047",
+      "title": "储备干部",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "member-101",
+      "name": "鲍旭升",
+      "departmentId": "dept-047",
+      "title": "采购",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "member-102",
+      "name": "方哲",
+      "departmentId": "dept-047",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "member-103",
+      "name": "赵文韬",
+      "departmentId": "dept-047",
+      "title": "Sub Admin",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "member-eric",
+      "name": "Eric",
+      "departmentId": "dept-047",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "member-105",
+      "name": "陈益新",
+      "departmentId": "dept-049",
+      "title": "销售经理",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "member-106",
+      "name": "谭展昱",
+      "departmentId": "dept-050",
+      "title": "储备干部",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "member-107",
+      "name": "王凤英",
+      "departmentId": "dept-003",
+      "title": "集团副总经理",
+      "enabled": true,
+      "supervisorId": "fan-lu"
+    },
+    {
+      "id": "qin-an-tang",
+      "name": "秦笙",
+      "departmentId": "dept-002",
+      "title": "Super Admin｜Leader｜集团董事长",
+      "enabled": true
+    },
+    {
+      "id": "member-109",
+      "name": "顾超（john）",
+      "departmentId": "dept-002",
+      "title": "成员",
+      "enabled": true,
+      "supervisorId": "qin-an-tang"
+    }
+  ],
+  "updatedAt": "2026-06-05T04:40:45.743Z"
+}

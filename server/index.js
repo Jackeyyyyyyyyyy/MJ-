@@ -57,7 +57,10 @@ const aiAssistantConfigFile = path.join(dataDir, 'ai-assistant-config.json');
 const aiBranchLogsFile = path.join(dataDir, 'ai-branch-decision-logs.json');
 const workflowTemplatesFile = path.join(dataDir, 'workflow-templates.json');
 const organizationFile = path.join(dataDir, 'organization-directory.json');
+const organizationSeedStateFile = path.join(dataDir, 'organization-seed-state.json');
+const bundledOrganizationDirectoryFile = path.resolve(__dirname, 'default-organization-directory.json');
 const approvalSchemaFile = path.join(dataDir, 'approval-schema.json');
+const shouldSyncBundledOrganization = process.env.ORGANIZATION_SEED_SYNC !== 'false';
 const STATUS_DRAFT = '\u8349\u7a3f';
 const STATUS_PENDING = '\u5f85\u5ba1\u6279';
 const STATUS_APPROVED = '\u5df2\u6279\u51c6';
@@ -2008,6 +2011,116 @@ function validateOrganizationDirectory(directory) {
       accountUsernames.set(member.accountUsername, member.id);
     }
   });
+}
+
+function hashOrganizationDirectory(directory) {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify({
+      departments: directory.departments || [],
+      members: (directory.members || []).map(({ accountUsername: _accountUsername, ...member }) => member),
+    }))
+    .digest('hex');
+}
+
+async function readBundledOrganizationDirectory() {
+  try {
+    const content = await fs.readFile(bundledOrganizationDirectoryFile, 'utf8');
+    const directory = JSON.parse(content);
+    if (
+      !Array.isArray(directory?.departments) ||
+      !Array.isArray(directory?.members)
+    ) {
+      throw new Error('bundled organization directory must include departments and members arrays');
+    }
+
+    return {
+      ...normalizeOrganizationDirectoryInput({
+        departments: directory.departments,
+        members: directory.members,
+      }),
+      ...(directory.updatedAt ? { updatedAt: directory.updatedAt } : {}),
+    };
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function preserveOrganizationAccountBindings(nextDirectory, currentDirectory) {
+  const accountByMemberId = new Map();
+  const accountsByMemberName = new Map();
+
+  (currentDirectory.members || []).forEach((member) => {
+    const accountUsername = normalizeWorkflowText(member.accountUsername);
+    if (!accountUsername) return;
+
+    accountByMemberId.set(member.id, accountUsername);
+    const names = accountsByMemberName.get(member.name) || new Set();
+    names.add(accountUsername);
+    accountsByMemberName.set(member.name, names);
+  });
+
+  const usedAccounts = new Set();
+  const members = nextDirectory.members.map((member) => {
+    const accountUsername =
+      normalizeWorkflowText(member.accountUsername) ||
+      accountByMemberId.get(member.id) ||
+      (
+        accountsByMemberName.get(member.name)?.size === 1
+          ? [...accountsByMemberName.get(member.name)][0]
+          : ''
+      );
+
+    if (!accountUsername || usedAccounts.has(accountUsername)) {
+      const { accountUsername: _accountUsername, ...memberWithoutAccount } = member;
+      return memberWithoutAccount;
+    }
+
+    usedAccounts.add(accountUsername);
+    return {
+      ...member,
+      accountUsername,
+    };
+  });
+
+  const directory = {
+    ...nextDirectory,
+    members,
+  };
+  validateOrganizationDirectory(directory);
+  return directory;
+}
+
+async function syncBundledOrganizationDirectory() {
+  if (!shouldSyncBundledOrganization) return;
+
+  const seedDirectory = await readBundledOrganizationDirectory();
+  if (!seedDirectory) return;
+
+  const seedHash = hashOrganizationDirectory(seedDirectory);
+  const seedState = await readJsonObjectFile(organizationSeedStateFile, {});
+  const currentRawDirectory = await readJsonObjectFile(organizationFile, {});
+  const hasCurrentDirectory = Array.isArray(currentRawDirectory.departments) && Array.isArray(currentRawDirectory.members);
+  if (seedState.hash === seedHash && hasCurrentDirectory) return;
+
+  const currentDirectory = await readOrganizationDirectory();
+  const now = new Date().toISOString();
+  const nextDirectory = preserveOrganizationAccountBindings(
+    {
+      ...seedDirectory,
+      updatedAt: now,
+    },
+    currentDirectory,
+  );
+
+  await writeJsonObjectFile(organizationFile, nextDirectory);
+  await writeJsonObjectFile(organizationSeedStateFile, {
+    hash: seedHash,
+    syncedAt: now,
+    source: path.basename(bundledOrganizationDirectoryFile),
+  });
+  console.log(`Bundled organization directory synced: ${nextDirectory.departments.length} departments, ${nextDirectory.members.length} members`);
 }
 
 function updateOrganizationDirectory(mutator) {
@@ -4445,6 +4558,8 @@ app.use((error, _req, res, _next) => {
     error: error.message || 'internal server error',
   });
 });
+
+await syncBundledOrganizationDirectory();
 
 app.listen(port, () => {
   console.log(`MJ approval server listening on ${port}`);
