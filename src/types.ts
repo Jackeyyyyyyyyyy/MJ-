@@ -164,9 +164,12 @@ export interface WorkflowProcessorSnapshot {
 
 export interface WorkflowInstanceStep {
   stepId: string;
+  stepType?: 'approver' | 'processor';
   name: string;
   order: number;
   approvers: WorkflowApproverSnapshot[];
+  processors?: WorkflowProcessorSnapshot[];
+  processorTaskName?: string;
   approvalMode?: ApprovalMode;
   status: WorkflowStepStatus;
   actedByMemberId?: string;
@@ -193,7 +196,7 @@ export interface WorkflowFormField {
 
 export interface WorkflowNode {
   id: string;
-  type: 'start' | 'approver' | 'condition' | 'cc';
+  type: 'start' | 'approver' | 'condition' | 'cc' | 'processor';
   title: string;
   subtitle?: string;
   conditionMode?: 'rules' | 'ai';

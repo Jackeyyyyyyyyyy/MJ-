@@ -224,6 +224,42 @@ function formatWorkflowStepDesc(step: NonNullable<ApprovalRecord['workflowInstan
   ].filter(Boolean).join(' ｜ ');
 }
 
+function isProcessorWorkflowStep(step: NonNullable<ApprovalRecord['workflowInstance']>['steps'][number]) {
+  return step.stepType === 'processor' || Boolean(step.processors?.length);
+}
+
+function getWorkflowTimelineItem(step: NonNullable<ApprovalRecord['workflowInstance']>['steps'][number]) {
+  if (isProcessorWorkflowStep(step)) {
+    const processors = step.processors || [];
+    const processorNames = processors.map((processor) => processor.name).filter(Boolean).join('、');
+    const completedBy = step.actedByName || processors.find((processor) => processor.status === 'completed')?.name;
+
+    return {
+      title: step.processorTaskName || step.name || '办理任务',
+      desc: step.status === 'approved'
+        ? `办理人：${completedBy || processorNames || '未记录'} 已完成`
+        : `待办理人处理：${processorNames || '未解析'}`,
+      time: step.actedAt,
+      stepStatus: step.status,
+      state: step.status === 'approved' || step.status === 'skipped'
+        ? 'done'
+        : (step.status === 'pending' ? 'active' : (step.status === 'rejected' ? 'failed' : 'pending')),
+    };
+  }
+
+  return {
+    title: step.name,
+    desc: formatWorkflowStepDesc(step),
+    time: step.actedAt,
+    approvers: step.approvers || [],
+    approvalMode: step.approvalMode,
+    stepStatus: step.status,
+    state: step.status === 'approved' || step.status === 'skipped'
+      ? 'done'
+      : (step.status === 'pending' ? 'active' : (step.status === 'rejected' ? 'failed' : 'pending')),
+  };
+}
+
 function getApprovalModeDesc(mode?: ApprovalMode) {
   return mode === 'all_of' ? '通过方式：所有人都要通过' : '通过方式：任意一人通过';
 }
@@ -245,7 +281,8 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
   const aiSuggestion = getAiSuggestionDisplay(record);
   const finishedAt = record.processedAt || record.approvedAt || record.rejectedAt;
   const workflowSteps = record.workflowInstance?.steps;
-  const processorTimelineItem = getProcessorTimelineItem(record);
+  const hasWorkflowProcessorStep = Boolean(workflowSteps?.some(isProcessorWorkflowStep));
+  const processorTimelineItem = hasWorkflowProcessorStep ? null : getProcessorTimelineItem(record);
   const ccTimelineItem = getCcTimelineItem(record, finishedAt);
   const hasResultPanel = [
     ApprovalStatus.PROCESSING,
@@ -274,17 +311,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
           time: record.createdAt,
           state: 'done',
         },
-        ...workflowSteps.map((step) => ({
-          title: step.name,
-          desc: formatWorkflowStepDesc(step),
-          time: step.actedAt,
-          approvers: step.approvers || [],
-          approvalMode: step.approvalMode,
-          stepStatus: step.status,
-          state: step.status === 'approved' || step.status === 'skipped'
-            ? 'done'
-            : (step.status === 'pending' ? 'active' : (step.status === 'rejected' ? 'failed' : 'pending')),
-        })),
+        ...workflowSteps.map(getWorkflowTimelineItem),
         ...(processorTimelineItem ? [processorTimelineItem] : []),
         ...(ccTimelineItem ? [ccTimelineItem] : []),
       ]

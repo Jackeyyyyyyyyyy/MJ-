@@ -1089,6 +1089,23 @@ function getWorkflowTemplateBusinessKey(template) {
   );
 }
 
+function getWorkflowTemplateOrganizationId(template) {
+  return normalizeWorkflowText(
+    template?.organizationId ||
+    template?.draft?.organizationId ||
+    template?.publishedVersion?.organizationId ||
+    DEFAULT_ORGANIZATION_ID,
+  );
+}
+
+function getWorkflowTemplateScopeKey(template) {
+  return `${getWorkflowTemplateOrganizationId(template)}|||${getWorkflowTemplateBusinessKey(template)}`;
+}
+
+function getWorkflowTemplateScopeKeyFromFields(organizationId, moduleName, approvalTypeName) {
+  return `${normalizeWorkflowText(organizationId) || DEFAULT_ORGANIZATION_ID}|||${getBusinessFormConfigKey(moduleName, approvalTypeName)}`;
+}
+
 async function deleteWorkflowTemplatesForBusinessForm(moduleName, approvalTypeName) {
   const targetKey = getBusinessFormConfigKey(moduleName, approvalTypeName);
 
@@ -1795,6 +1812,9 @@ function validateWorkflowDraftForPublish(draft) {
     (permissionType === 'departments' && Array.isArray(submitPermission.departmentIds) && submitPermission.departmentIds.length > 0);
   if (!hasSubmitScope) errors.push('至少配置一个提交权限范围');
   if (!defaultBranch) errors.push('必须包含 default branch');
+  if (containsProcessorFlowNode(draft?.nodes || []) && !hasProcessorRule(draft?.processorRule)) {
+    errors.push('办理任务必须选择办理成员或办理部门');
+  }
 
   branches.forEach((branch, branchIndex) => {
     const branchName = branch?.name || `Branch ${branchIndex + 1}`;
@@ -2599,29 +2619,55 @@ async function selectAiWorkflowBranch(node, context = {}) {
   }
 }
 
-async function getLinearApproverNodes(version, context = {}) {
+function containsProcessorFlowNode(nodes = []) {
+  return (Array.isArray(nodes) ? nodes : []).some((node) => (
+    node?.type === 'processor'
+    || (node?.type === 'condition' && containsProcessorFlowNode(
+      (Array.isArray(node.conditions) ? node.conditions : []).flatMap((condition) => condition?.nodes || []),
+    ))
+  ));
+}
+
+function createProcessorFlowNode(processorRule) {
+  return {
+    id: 'flow-processor',
+    type: 'processor',
+    title: normalizeWorkflowText(processorRule?.taskName) || '办理任务',
+  };
+}
+
+async function getLinearWorkflowNodes(version, context = {}) {
   const flowNodes = Array.isArray(version?.nodes)
     ? version.nodes.filter((node) => node?.type !== 'start')
     : [];
-  if (flowNodes.some((node) => node?.type === 'approver' || node?.type === 'condition')) {
-    return getLinearApproverNodesFromFlow(flowNodes, context);
+  if (flowNodes.some((node) => ['approver', 'condition', 'processor'].includes(node?.type))) {
+    const nodesWithLegacyProcessor = hasProcessorRule(version?.processorRule) && !containsProcessorFlowNode(flowNodes)
+      ? [...flowNodes, createProcessorFlowNode(version.processorRule)]
+      : flowNodes;
+    return getLinearWorkflowNodesFromFlow(nodesWithLegacyProcessor, context);
   }
 
   const selectedBranch = selectWorkflowBranch(version, context);
   if (selectedBranch) {
-    return (selectedBranch.approvalSteps || []).map((step, index) => approvalStepToLegacyNode(step, index));
+    const legacyNodes = (selectedBranch.approvalSteps || []).map((step, index) => approvalStepToLegacyNode(step, index));
+    return hasProcessorRule(version?.processorRule)
+      ? [...legacyNodes, createProcessorFlowNode(version.processorRule)]
+      : legacyNodes;
   }
 
-  return Array.isArray(version?.nodes)
+  const legacyNodes = Array.isArray(version?.nodes)
     ? version.nodes.filter((node) => node?.type === 'approver')
     : [];
+  return hasProcessorRule(version?.processorRule)
+    ? [...legacyNodes, createProcessorFlowNode(version.processorRule)]
+    : legacyNodes;
 }
 
-async function getLinearApproverNodesFromFlow(nodes, context = {}) {
+async function getLinearWorkflowNodesFromFlow(nodes, context = {}) {
   const result = [];
 
   for (const node of (Array.isArray(nodes) ? nodes : [])) {
-    if (node?.type === 'approver') {
+    if (node?.type === 'approver' || node?.type === 'processor') {
       result.push(node);
       continue;
     }
@@ -2642,7 +2688,7 @@ async function getLinearApproverNodesFromFlow(nodes, context = {}) {
       });
       selectedBranch = matchedBranch || defaultBranch || branches[0];
     }
-    result.push(...await getLinearApproverNodesFromFlow(selectedBranch?.nodes || [], context));
+    result.push(...await getLinearWorkflowNodesFromFlow(selectedBranch?.nodes || [], context));
   }
 
   return result;
@@ -2870,6 +2916,7 @@ function resolveProcessorsForRule(processorRule, directory) {
 function createWorkflowStep(node, order, approvers, status = STEP_NOT_STARTED, comment) {
   return {
     stepId: node.id || `step-${order}`,
+    stepType: 'approver',
     name: node.title || `Step ${order}`,
     order,
     approvalMode: node.approvalMode === 'all_of' ? 'all_of' : 'one_of',
@@ -2879,6 +2926,31 @@ function createWorkflowStep(node, order, approvers, status = STEP_NOT_STARTED, c
     })),
     status,
     ...(comment ? { comment } : {}),
+  };
+}
+
+function cloneProcessorSnapshots(processors = []) {
+  return processors.map((processor) => ({
+    memberId: processor.memberId,
+    name: processor.name,
+    ...(processor.accountUsername ? { accountUsername: processor.accountUsername } : {}),
+    status: processor.status === 'completed' ? 'completed' : 'pending',
+    ...(processor.actedAt ? { actedAt: processor.actedAt } : {}),
+    ...(processor.comment ? { comment: processor.comment } : {}),
+  }));
+}
+
+function createProcessorWorkflowStep(node, order, processors, processorRule) {
+  const taskName = normalizeWorkflowText(node?.title || processorRule?.taskName) || '办理任务';
+  return {
+    stepId: node?.id || `processor-${order}`,
+    stepType: 'processor',
+    name: taskName,
+    processorTaskName: taskName,
+    order,
+    approvers: [],
+    processors: cloneProcessorSnapshots(processors),
+    status: STEP_NOT_STARTED,
   };
 }
 
@@ -2916,12 +2988,7 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
     ?.approvalTypes.find((approvalType) => approvalType.name === approvalTypeName);
   const applicantMember = findMemberByAccount(directory, applicantUsername);
   const ccRecipients = resolveCcRecipientsForRule(version.ccRule, directory);
-  const hasProcessor = hasProcessorRule(version.processorRule);
-  const processors = resolveProcessorsForRule(version.processorRule, directory);
-  if (hasProcessor && processors.length === 0) {
-    throw createHttpError('No processor can be resolved for this workflow. Please bind the processor to a login account.', 400);
-  }
-  const nodes = await getLinearApproverNodes(version, {
+  const nodes = await getLinearWorkflowNodes(version, {
     businessData,
     directory,
     applicantMember,
@@ -2934,10 +3001,22 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
     workflowName: version.basic?.name || template.name,
     workflowVersion: Number(version.version || template.currentVersion || 1),
   });
+  const hasProcessorStep = nodes.some((node) => node?.type === 'processor');
+  const processors = hasProcessorStep ? resolveProcessorsForRule(version.processorRule, directory) : [];
+  if (hasProcessorStep && processors.length === 0) {
+    throw createHttpError('No processor can be resolved for this workflow. Please bind the processor to a login account.', 400);
+  }
 
   const steps = [];
 
   nodes.forEach((node) => {
+    if (node?.type === 'processor') {
+      steps.push(createProcessorWorkflowStep(node, steps.length, processors, version.processorRule));
+      return;
+    }
+
+    if (node?.type !== 'approver') return;
+
     const rule = node.rule || {};
     const supervisorSteps = createSupervisorChainWorkflowSteps(node, steps.length, directory, applicantMember);
     if (supervisorSteps) {
@@ -2972,6 +3051,13 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
   if (firstPendingIndex >= 0) {
     steps[firstPendingIndex].status = STEP_PENDING;
   }
+  const firstPendingStep = firstPendingIndex >= 0 ? steps[firstPendingIndex] : null;
+  const initialProcessors = firstPendingStep?.stepType === 'processor'
+    ? cloneProcessorSnapshots(firstPendingStep.processors || [])
+    : [];
+  const initialProcessorTaskName = firstPendingStep?.stepType === 'processor'
+    ? (firstPendingStep.processorTaskName || firstPendingStep.name || '办理任务')
+    : undefined;
 
   return {
     instance: {
@@ -2982,9 +3068,11 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
       steps,
     },
     ccRecipients,
-    processors,
-    processorTaskName: processors.length > 0 ? (normalizeWorkflowText(version.processorRule?.taskName) || '办理任务') : undefined,
-    initialStatus: firstPendingIndex >= 0 ? STATUS_PENDING : (processors.length > 0 ? STATUS_PROCESSING : STATUS_APPROVED),
+    processors: initialProcessors,
+    processorTaskName: initialProcessorTaskName,
+    initialStatus: firstPendingIndex >= 0
+      ? (firstPendingStep?.stepType === 'processor' ? STATUS_PROCESSING : STATUS_PENDING)
+      : (hasProcessorStep ? STATUS_COMPLETED : STATUS_APPROVED),
   };
 }
 
@@ -3003,7 +3091,7 @@ function canUserApproveRecord(user, record) {
     return ['boss', 'developer'].includes(normalizeRole(user.role));
   }
 
-  if (!currentStep) return false;
+  if (!currentStep || isProcessorWorkflowStep(currentStep)) return false;
   return (currentStep.approvers || []).some((approver) => (
     normalizeWorkflowText(approver.accountUsername).toLowerCase() === normalizeWorkflowText(user.username).toLowerCase()
     && approver.status !== 'approved'
@@ -3108,21 +3196,57 @@ function appendProcessorLog(record, user, details) {
   appendApprovalLog(record, '进入办理', user, details || `审批通过，等待办理人：${getProcessorNames(record) || '未配置'}`);
 }
 
-function startProcessingOrApproveRecord(record, user, now, currentStep) {
-  if (Array.isArray(record.processors) && record.processors.length > 0) {
-    record.workflowInstance.currentStepIndex = -1;
-    record.status = STATUS_PROCESSING;
-    record.approvedAt = now;
-    appendApprovalLog(record, '\u5b8c\u6210', user, 'Workflow approved', currentStep);
-    appendProcessorLog(record, user, `审批通过，等待${record.processorTaskName || '办理任务'}办理人：${getProcessorNames(record) || '未配置'}`);
+function isProcessorWorkflowStep(step) {
+  return step?.stepType === 'processor' || (
+    Array.isArray(step?.processors) &&
+    step.processors.length > 0 &&
+    (!Array.isArray(step.approvers) || step.approvers.length === 0)
+  );
+}
+
+function workflowHasProcessorStep(record) {
+  return (record?.workflowInstance?.steps || []).some(isProcessorWorkflowStep);
+}
+
+function enterProcessorStep(record, user, now, step, stepIndex) {
+  step.status = STEP_PENDING;
+  step.processors = cloneProcessorSnapshots(step.processors || []);
+  record.workflowInstance.currentStepIndex = stepIndex;
+  record.status = STATUS_PROCESSING;
+  record.updatedAt = now;
+  record.approvedAt = record.approvedAt || now;
+  record.processors = cloneProcessorSnapshots(step.processors);
+  record.processorTaskName = step.processorTaskName || step.name || record.processorTaskName || '办理任务';
+  appendProcessorLog(record, user, `流程到达${record.processorTaskName || '办理任务'}，等待办理人：${getProcessorNames(record) || '未配置'}`);
+}
+
+function completeWorkflowRecord(record, user, now, currentStep) {
+  record.workflowInstance.currentStepIndex = -1;
+  record.status = workflowHasProcessorStep(record) ? STATUS_COMPLETED : STATUS_APPROVED;
+  record.approvedAt = now;
+  record.updatedAt = now;
+  appendApprovalLog(record, '\u5b8c\u6210', user, 'Workflow completed', currentStep);
+  appendCcLog(record, user);
+}
+
+function advanceToNextWorkflowStep(record, user, now, currentStep) {
+  const nextStepIndex = record.workflowInstance.steps.findIndex((step) => step.status === STEP_NOT_STARTED);
+  if (nextStepIndex < 0) {
+    completeWorkflowRecord(record, user, now, currentStep);
     return;
   }
 
-  record.workflowInstance.currentStepIndex = -1;
-  record.status = STATUS_APPROVED;
-  record.approvedAt = now;
-  appendApprovalLog(record, '\u5b8c\u6210', user, 'Workflow approved', currentStep);
-  appendCcLog(record, user);
+  const nextStep = record.workflowInstance.steps[nextStepIndex];
+  if (isProcessorWorkflowStep(nextStep)) {
+    enterProcessorStep(record, user, now, nextStep, nextStepIndex);
+    return;
+  }
+
+  nextStep.status = STEP_PENDING;
+  record.workflowInstance.currentStepIndex = nextStepIndex;
+  record.status = STATUS_PENDING;
+  record.updatedAt = now;
+  appendApprovalLog(record, '\u6d41\u7a0b\u63a8\u8fdb', user, `Moved to ${nextStep.name}`, nextStep);
 }
 
 function getActingApprover(user, step) {
@@ -3196,14 +3320,7 @@ function advanceWorkflowRecord(record, user, status, reason) {
   currentStep.status = STEP_APPROVED;
   currentStep.comment = requiresAllApprovers ? '所有审批人已通过' : currentStep.comment;
 
-  const nextStepIndex = record.workflowInstance.steps.findIndex((step) => step.status === STEP_NOT_STARTED);
-  if (nextStepIndex >= 0) {
-    record.workflowInstance.steps[nextStepIndex].status = STEP_PENDING;
-    record.workflowInstance.currentStepIndex = nextStepIndex;
-    appendApprovalLog(record, '\u6d41\u7a0b\u63a8\u8fdb', user, `Moved to ${record.workflowInstance.steps[nextStepIndex].name}`, record.workflowInstance.steps[nextStepIndex]);
-  } else {
-    startProcessingOrApproveRecord(record, user, now, currentStep);
-  }
+  advanceToNextWorkflowStep(record, user, now, currentStep);
 
   return record;
 }
@@ -3219,6 +3336,12 @@ function completeProcessingRecord(record, user, comment) {
 
   const now = new Date().toISOString();
   const details = normalizeWorkflowText(comment);
+  const currentStep = getCurrentWorkflowStep(record);
+  const hasInlineProcessorStep = isProcessorWorkflowStep(currentStep);
+  if (!hasInlineProcessorStep && record.workflowInstance && Number(record.workflowInstance.currentStepIndex) !== -1) {
+    throw createHttpError('approval record has no pending processor step', 409);
+  }
+
   (record.processors || []).forEach((processor) => {
     if (normalizeWorkflowText(processor.accountUsername).toLowerCase() !== normalizeWorkflowText(user.username).toLowerCase()) return;
     processor.status = 'completed';
@@ -3226,14 +3349,25 @@ function completeProcessingRecord(record, user, comment) {
     processor.comment = details || `${record.processorTaskName || '办理任务'}已完成`;
   });
 
-  record.status = STATUS_COMPLETED;
   record.updatedAt = now;
   record.processedBy = user.name;
   record.processedByAccountUsername = user.username;
   record.processedAt = now;
   if (details) record.processComment = details;
   appendApprovalLog(record, '办理完成', user, details || `${record.processorTaskName || '办理任务'}已完成`);
-  appendCcLog(record, user);
+
+  if (hasInlineProcessorStep) {
+    currentStep.processors = cloneProcessorSnapshots(record.processors || []);
+    currentStep.status = STEP_APPROVED;
+    currentStep.actedByName = user.name;
+    currentStep.actedByAccountUsername = user.username;
+    currentStep.actedAt = now;
+    currentStep.comment = details || `${record.processorTaskName || currentStep.name || '办理任务'}已完成`;
+    advanceToNextWorkflowStep(record, user, now, currentStep);
+  } else {
+    record.status = STATUS_COMPLETED;
+    appendCcLog(record, user);
+  }
 
   return record;
 }
@@ -3754,15 +3888,11 @@ app.post('/api/workflow-templates', authenticate, requireRoles('developer'), asy
 
     const now = new Date().toISOString();
     const template = await updateWorkflowTemplates((templates) => {
-      const duplicated = templates.some((item) => (
-        normalizeWorkflowText(item.organizationId) === organizationId &&
-        normalizeWorkflowText(item.moduleName || item.draft?.basic?.moduleName) === moduleName &&
-        normalizeWorkflowText(item.approvalTypeName || item.draft?.basic?.approvalTypeName) === approvalTypeName &&
-        item.status === 'published'
-      ));
+      const targetScopeKey = getWorkflowTemplateScopeKeyFromFields(organizationId, moduleName, approvalTypeName);
+      const duplicated = templates.some((item) => getWorkflowTemplateScopeKey(item) === targetScopeKey);
 
       if (duplicated) {
-        throw createHttpError('published workflow template already exists for this organization and approval type', 409);
+        throw createHttpError('workflow template already exists for this organization and approval type', 409);
       }
 
       const draft = normalizeWorkflowDraft({
@@ -4643,7 +4773,7 @@ app.post('/api/records', authenticate, requireRoles('employee', 'boss'), async (
         createLog('\u53d1\u8d77\u7533\u8bf7', applicant, '\u63d0\u4ea4\u4e86\u5ba1\u6279\u5355'),
         createLog('\u5339\u914d\u5ba1\u6279\u6d41', 'system', `Matched workflow: ${workflow.instance.workflowName} v${workflow.instance.workflowVersion}`),
         ...(workflow.initialStatus === STATUS_PROCESSING
-          ? [createLog('进入办理', 'system', `审批通过，等待${workflow.processorTaskName || '办理任务'}办理人：${workflow.processors.map((processor) => processor.name).join('、')}`)]
+          ? [createLog('进入办理', 'system', `流程到达${workflow.processorTaskName || '办理任务'}，等待办理人：${workflow.processors.map((processor) => processor.name).join('、')}`)]
           : []),
         ...(workflow.initialStatus === STATUS_APPROVED && workflow.ccRecipients.length > 0
           ? [createLog('抄送', 'system', `流程结束，已同步给：${workflow.ccRecipients.map((recipient) => recipient.name).join('、')}`)]

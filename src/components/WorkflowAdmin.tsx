@@ -19,6 +19,7 @@ import {
   UserCheck,
   UserRound,
   Users,
+  X,
 } from 'lucide-react';
 import { storage } from '../storage';
 import { approvalSchema, replaceApprovalSchema } from '../approvalSchema';
@@ -95,6 +96,8 @@ const currencyConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'ne
 const textConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'neq', 'contains', 'not_contains']);
 const identityConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'neq']);
 const workflowCurrencyOptions = ['CNY', 'USD', 'EUR', 'HKD', 'JPY', 'GBP'];
+const duplicateWorkflowTemplateMessage = 'workflow template already exists for this organization and approval type';
+let defaultWorkflowTemplateSyncPromise: Promise<WorkflowTemplate[]> | null = null;
 
 function getBusinessScopeOptions(): BusinessScopeOption[] {
   return approvalSchema.modules.flatMap((module) => (
@@ -163,6 +166,10 @@ function getBusinessScopeKey(moduleName?: string, approvalTypeName?: string) {
   return `${moduleName || ''}${BUSINESS_SCOPE_SEPARATOR}${approvalTypeName || ''}`;
 }
 
+function getTemplateOrganizationId(template: WorkflowTemplate) {
+  return template.organizationId || template.draft?.organizationId || template.publishedVersion?.organizationId || DEFAULT_ORG_ID;
+}
+
 function getTemplateBusinessScopeKey(template: WorkflowTemplate) {
   return getBusinessScopeKey(
     template.moduleName || template.draft?.basic?.moduleName || template.publishedVersion?.basic?.moduleName,
@@ -170,9 +177,81 @@ function getTemplateBusinessScopeKey(template: WorkflowTemplate) {
   );
 }
 
+function getTemplateUniqueScopeKey(template: WorkflowTemplate) {
+  return `${getTemplateOrganizationId(template)}${BUSINESS_SCOPE_SEPARATOR}${getTemplateBusinessScopeKey(template)}`;
+}
+
+function getWorkflowVersionConfiguredWeight(version?: WorkflowVersion) {
+  if (!version) return 0;
+
+  const branchSteps = (version.branches || []).reduce(
+    (total, branch) => total + (branch.approvalSteps || []).length,
+    0,
+  );
+  const flowNodes = (version.nodes || []).filter((node) => node.type && node.type !== 'start').length;
+  const branchConditions = (version.branches || []).reduce(
+    (total, branch) => total + (branch.conditions || []).length,
+    0,
+  );
+  const submitScope = (version.submitPermission?.memberIds || []).length
+    + (version.submitPermission?.departmentIds || []).length
+    + (version.submitPermission?.excludedMemberIds || []).length;
+  const ccScope = (version.ccRule?.memberIds || []).length + (version.ccRule?.departmentIds || []).length;
+  const processorScope = (version.processorRule?.enabled ? 4 : 0)
+    + (version.processorRule?.memberIds || []).length
+    + (version.processorRule?.departmentIds || []).length;
+
+  return (
+    branchSteps * 1000
+    + flowNodes * 100
+    + branchConditions * 50
+    + submitScope * 20
+    + ccScope * 10
+    + processorScope * 25
+    + (version.formFields || []).length
+  );
+}
+
+function getTemplateRetentionScore(template: WorkflowTemplate) {
+  return (
+    (template.publishedVersion ? 1_000_000 : 0)
+    + (template.status === 'published' ? 500_000 : 0)
+    + (template.currentVersion || 0) * 1000
+    + getWorkflowVersionConfiguredWeight(template.publishedVersion) * 2
+    + getWorkflowVersionConfiguredWeight(template.draft)
+  );
+}
+
+function getTemplateTimestamp(template: WorkflowTemplate) {
+  return Date.parse(template.updatedAt || template.draft?.savedAt || template.createdAt || '') || 0;
+}
+
+function shouldPreferTemplate(candidate: WorkflowTemplate, current: WorkflowTemplate) {
+  const scoreDifference = getTemplateRetentionScore(candidate) - getTemplateRetentionScore(current);
+  if (scoreDifference !== 0) return scoreDifference > 0;
+  return getTemplateTimestamp(candidate) > getTemplateTimestamp(current);
+}
+
+function compactWorkflowTemplatesByScope(templates: WorkflowTemplate[]) {
+  const selected = new Map<string, WorkflowTemplate>();
+
+  templates.forEach((template) => {
+    const key = getTemplateUniqueScopeKey(template);
+    const current = selected.get(key);
+    if (!current || shouldPreferTemplate(template, current)) {
+      selected.set(key, template);
+    }
+  });
+
+  return Array.from(selected.values());
+}
+
 function filterWorkflowTemplatesByBusinessScope(templates: WorkflowTemplate[]) {
   const activeScopeKeys = new Set(getBusinessScopeOptions().map((option) => option.key));
-  return templates.filter((template) => activeScopeKeys.has(getTemplateBusinessScopeKey(template)));
+  return compactWorkflowTemplatesByScope(templates).filter((template) => (
+    getTemplateOrganizationId(template) === DEFAULT_ORG_ID &&
+    activeScopeKeys.has(getTemplateBusinessScopeKey(template))
+  ));
 }
 
 function getBusinessScopeByNames(moduleName?: string, approvalTypeName?: string) {
@@ -221,7 +300,10 @@ function getWorkflowMeta(moduleName?: string, version?: number) {
 function getTemplateOptionLabel(template: WorkflowTemplate) {
   const moduleName = template.moduleName || template.draft?.basic?.moduleName;
   const approvalTypeName = template.approvalTypeName || template.draft?.basic?.approvalTypeName;
-  return `${getWorkflowTitle(moduleName, approvalTypeName)} · ${statusLabels[template.status]} · v${template.currentVersion || 1}`;
+  const title = moduleName
+    ? `${moduleName} / ${getWorkflowTitle(moduleName, approvalTypeName)}`
+    : getWorkflowTitle(moduleName, approvalTypeName);
+  return `${title} · ${statusLabels[template.status]} · v${template.currentVersion || 1}`;
 }
 
 function collectWorkflowNodeSearchText(nodes: WorkflowNode[] | undefined): string {
@@ -255,11 +337,16 @@ function collectWorkflowNodeSearchText(nodes: WorkflowNode[] | undefined): strin
 function formatWorkflowMessage(message: string) {
   const knownMessages: Record<string, string> = {
     'published workflow template already exists for this organization and approval type': '该业务已有已发布流程，请先停用旧版本后再发布。',
+    [duplicateWorkflowTemplateMessage]: '该业务表单已有审批流。',
     'missing workflow template fields': '审批流信息不完整，请补齐后再保存。',
     'workflow template not found': '未找到该审批流，可能已被删除。',
   };
 
   return knownMessages[message] || message;
+}
+
+function isDuplicateWorkflowTemplateError(error: unknown) {
+  return error instanceof Error && error.message === duplicateWorkflowTemplateMessage;
 }
 
 function getBusinessTypeMeta(type?: string) {
@@ -538,11 +625,47 @@ function stepToFlowNode(step: ApprovalStep, index: number): WorkflowNode {
   };
 }
 
+function createProcessorFlowNode(rule?: ProcessorRule): WorkflowNode {
+  return {
+    id: createId('flow-processor'),
+    type: 'processor',
+    title: rule?.taskName || '办理任务',
+    subtitle: '由办理人完成后继续流转',
+  };
+}
+
+function containsProcessorNode(nodes: WorkflowNode[]): boolean {
+  return nodes.some((node) => (
+    node.type === 'processor'
+    || (node.type === 'condition' && containsProcessorNode((node.conditions || []).flatMap((condition) => condition.nodes || [])))
+  ));
+}
+
+function updateProcessorNodesInTree(
+  nodes: WorkflowNode[],
+  updater: (node: WorkflowNode) => WorkflowNode,
+): WorkflowNode[] {
+  return nodes.map((node) => {
+    if (node.type === 'processor') return updater(node);
+    if (node.type !== 'condition') return node;
+    return {
+      ...node,
+      conditions: (node.conditions || []).map((condition) => ({
+        ...condition,
+        nodes: updateProcessorNodesInTree(condition.nodes || [], updater),
+      })),
+    };
+  });
+}
+
 function flowNodesFromDraft(draft: WorkflowVersion): WorkflowNode[] {
   if (draft.flowMode !== 'flexible') return [];
 
   const nodes = Array.isArray(draft.nodes) ? draft.nodes.filter((node) => node.type !== 'start') : [];
-  if (nodes.some((node) => node.type === 'approver' || node.type === 'condition' || node.type === 'cc')) {
+  if (nodes.some((node) => node.type === 'approver' || node.type === 'condition' || node.type === 'cc' || node.type === 'processor')) {
+    if (isProcessorTaskEnabled(draft.processorRule) && !containsProcessorNode(nodes)) {
+      return [...nodes, createProcessorFlowNode(draft.processorRule)];
+    }
     return nodes;
   }
 
@@ -550,10 +673,13 @@ function flowNodesFromDraft(draft: WorkflowVersion): WorkflowNode[] {
   const defaultBranch = branches.find((branch) => branch.isDefault) || branches[branches.length - 1];
   const conditionalBranches = branches.filter((branch) => !branch.isDefault);
   if (conditionalBranches.length === 0) {
-    return (defaultBranch?.approvalSteps || []).map(stepToFlowNode);
+    const linearNodes = (defaultBranch?.approvalSteps || []).map(stepToFlowNode);
+    return isProcessorTaskEnabled(draft.processorRule)
+      ? [...linearNodes, createProcessorFlowNode(draft.processorRule)]
+      : linearNodes;
   }
 
-  return [{
+  const conditionalNode: WorkflowNode = {
     id: createId('flow-condition'),
     type: 'condition',
     title: '条件分化',
@@ -578,7 +704,11 @@ function flowNodesFromDraft(draft: WorkflowVersion): WorkflowNode[] {
         nodes: defaultBranch.approvalSteps.map(stepToFlowNode),
       }] : []),
     ],
-  }];
+  };
+
+  return isProcessorTaskEnabled(draft.processorRule)
+    ? [conditionalNode, createProcessorFlowNode(draft.processorRule)]
+    : [conditionalNode];
 }
 
 function collectFlowSteps(nodes: WorkflowNode[]): ApprovalStep[] {
@@ -987,7 +1117,7 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
   });
 
   const processorRule = draft.processorRule || defaultProcessorRule();
-  if (isProcessorTaskEnabled(processorRule) && !hasProcessorAssignees(processorRule)) {
+  if ((containsProcessorNode(flowNodesFromDraft(draft)) || isProcessorTaskEnabled(processorRule)) && !hasProcessorAssignees(processorRule)) {
     addValidationError(state, 'processor', '办理任务必须选择办理成员或办理部门');
   }
 
@@ -1721,7 +1851,7 @@ function FlowNode({
   );
 }
 
-type FlowInsertKind = 'approval' | 'condition' | 'ai-condition' | 'cc';
+type FlowInsertKind = 'approval' | 'condition' | 'ai-condition' | 'cc' | 'processor';
 const FLOW_BRANCH_COUNT_OPTIONS = [2, 3, 4, 5, 6];
 
 function clampFlowBranchCount(value: number) {
@@ -1842,13 +1972,11 @@ function resizeConditionBranches(
 
 function FlowGap({
   onInsert,
-  onAddProcessorTask,
   compact,
   canUseRuleConditions,
   canAddProcessorTask,
 }: {
   onInsert: (kind: FlowInsertKind, branchCount?: number) => void;
-  onAddProcessorTask: () => void;
   compact?: boolean;
   canUseRuleConditions: boolean;
   canAddProcessorTask: boolean;
@@ -1861,7 +1989,7 @@ function FlowGap({
         onCondition={(branchCount) => onInsert('condition', branchCount)}
         onAiCondition={(branchCount) => onInsert('ai-condition', branchCount)}
         onCc={() => onInsert('cc')}
-        onProcessorTask={onAddProcessorTask}
+        onProcessorTask={() => onInsert('processor')}
         canUseRuleConditions={canUseRuleConditions}
         canAddProcessorTask={canAddProcessorTask}
       />
@@ -1870,9 +1998,10 @@ function FlowGap({
   );
 }
 
-function getFlowNodeTone(node: WorkflowNode): 'approval' | 'condition' | 'cc' {
+function getFlowNodeTone(node: WorkflowNode): 'approval' | 'condition' | 'cc' | 'processor' {
   if (node.type === 'condition') return 'condition';
   if (node.type === 'cc') return 'cc';
+  if (node.type === 'processor') return 'processor';
   return 'approval';
 }
 
@@ -1880,10 +2009,11 @@ function getFlowNodeIcon(node: WorkflowNode) {
   if (node.type === 'condition' && node.conditionMode === 'ai') return <Bot size={17} strokeWidth={2.5} />;
   if (node.type === 'condition') return <GitBranch size={17} strokeWidth={2.5} />;
   if (node.type === 'cc') return <Send size={17} strokeWidth={2.5} />;
+  if (node.type === 'processor') return <UserCheck size={17} strokeWidth={2.5} />;
   return <CheckCircle2 size={17} strokeWidth={2.5} />;
 }
 
-function getFlowNodeSubtitle(node: WorkflowNode, directory: OrganizationDirectory) {
+function getFlowNodeSubtitle(node: WorkflowNode, directory: OrganizationDirectory, processorRule: ProcessorRule) {
   if (node.type === 'condition' && node.conditionMode === 'ai') return `AI 二选一 · ${node.conditions?.length || 0} 个分支`;
   if (node.type === 'condition') return `${node.conditions?.length || 0} 个分支`;
   if (node.type === 'cc') {
@@ -1893,6 +2023,7 @@ function getFlowNodeSubtitle(node: WorkflowNode, directory: OrganizationDirector
       rule.departmentIds.length ? `${rule.departmentIds.length} 个部门` : '',
     ].filter(Boolean).join('、') || '到达这里时抄送';
   }
+  if (node.type === 'processor') return formatProcessorRule(processorRule, directory);
   return formatStepRule({
     id: node.id,
     name: node.title,
@@ -1908,9 +2039,10 @@ function FlowSequence({
   directory,
   previewSubmitter,
   selection,
+  validation,
   onSelect,
   onInsert,
-  onAddProcessorTask,
+  processorRule,
   canUseRuleConditions,
   canAddProcessorTask,
 }: {
@@ -1919,9 +2051,10 @@ function FlowSequence({
   directory: OrganizationDirectory;
   previewSubmitter: OrganizationDirectory['members'][number] | null;
   selection: DesignerSelection;
+  validation: ValidationState;
   onSelect: (selection: DesignerSelection) => void;
   onInsert: (path: string[], index: number, kind: FlowInsertKind, branchCount?: number) => void;
-  onAddProcessorTask: () => void;
+  processorRule: ProcessorRule;
   canUseRuleConditions: boolean;
   canAddProcessorTask: boolean;
 }) {
@@ -1931,7 +2064,6 @@ function FlowSequence({
         compact
         canUseRuleConditions={canUseRuleConditions}
         canAddProcessorTask={canAddProcessorTask}
-        onAddProcessorTask={onAddProcessorTask}
         onInsert={(kind, branchCount) => onInsert(path, 0, kind, branchCount)}
       />
       {nodes.map((node, index) => (
@@ -1939,11 +2071,12 @@ function FlowSequence({
           <div className="w-[300px]">
             <FlowNode
               tone={getFlowNodeTone(node)}
-              kicker={node.type === 'condition' ? (node.conditionMode === 'ai' ? 'AI 条件分化' : '条件分化') : node.type === 'cc' ? '抄送' : `审批 ${index + 1}`}
-              title={node.title || (node.type === 'condition' ? (node.conditionMode === 'ai' ? 'AI 条件分化' : '条件分化') : node.type === 'cc' ? '抄送对象' : `审批节点 ${index + 1}`)}
-              subtitle={getFlowNodeSubtitle(node, directory)}
+              kicker={node.type === 'condition' ? (node.conditionMode === 'ai' ? 'AI 条件分化' : '条件分化') : node.type === 'cc' ? '抄送' : node.type === 'processor' ? '办理' : `审批 ${index + 1}`}
+              title={node.type === 'processor' ? (processorRule.taskName || node.title || '办理任务') : (node.title || (node.type === 'condition' ? (node.conditionMode === 'ai' ? 'AI 条件分化' : '条件分化') : node.type === 'cc' ? '抄送对象' : `审批节点 ${index + 1}`))}
+              subtitle={getFlowNodeSubtitle(node, directory, processorRule)}
               icon={getFlowNodeIcon(node)}
               selected={selection.type === 'flow-node' && selection.nodeId === node.id}
+              hasError={node.type === 'processor' && Boolean(validation.sections.processor?.length)}
               onClick={() => onSelect({ type: 'flow-node', nodeId: node.id })}
             >
               {node.type === 'approver' && (
@@ -1983,9 +2116,10 @@ function FlowSequence({
                       directory={directory}
                       previewSubmitter={previewSubmitter}
                       selection={selection}
+                      validation={validation}
                       onSelect={onSelect}
                       onInsert={onInsert}
-                      onAddProcessorTask={onAddProcessorTask}
+                      processorRule={processorRule}
                       canUseRuleConditions={canUseRuleConditions}
                       canAddProcessorTask={canAddProcessorTask}
                     />
@@ -2000,7 +2134,6 @@ function FlowSequence({
             compact
             canUseRuleConditions={canUseRuleConditions}
             canAddProcessorTask={canAddProcessorTask}
-            onAddProcessorTask={onAddProcessorTask}
             onInsert={(kind, branchCount) => onInsert(path, index + 1, kind, branchCount)}
           />
         </React.Fragment>
@@ -2033,7 +2166,6 @@ function WorkflowFlowDesigner({
   onPatchSubmitPermission,
   onPatchCcRule,
   onPatchProcessorRule,
-  onAddProcessorTask,
   onRemoveProcessorTask,
   onAddStep,
   onUpdateStep,
@@ -2099,7 +2231,7 @@ function WorkflowFlowDesigner({
   const selectedStep = selection.type === 'step'
     ? selectedBranch?.approvalSteps.find((step) => step.id === selection.stepId) || null
     : null;
-  const hasProcessorTask = isProcessorTaskEnabled(processorRule);
+  const hasProcessorTask = containsProcessorNode(flowNodes);
   const branchFlowWidth = flowBranches.length > 0
     ? flowBranches.length * FLOW_BRANCH_CARD_WIDTH + Math.max(0, flowBranches.length - 1) * FLOW_BRANCH_GAP
     : FLOW_BRANCH_CARD_WIDTH;
@@ -2108,7 +2240,6 @@ function WorkflowFlowDesigner({
     || (selection.type === 'step' && selectedStep)
     || selection.type === 'flow-node'
     || selection.type === 'cc'
-    || (selection.type === 'processor' && hasProcessorTask)
   ) ? selection : submitDesignerSelection;
   const panStartRef = React.useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [isPanning, setIsPanning] = React.useState(false);
@@ -2361,29 +2492,13 @@ function WorkflowFlowDesigner({
                 directory={directory}
                 previewSubmitter={previewSubmitter}
                 selection={activeSelection}
+                validation={validation}
                 onSelect={onSelect}
                 onInsert={onInsertFlowNode}
-                onAddProcessorTask={onAddProcessorTask}
+                processorRule={processorRule}
                 canUseRuleConditions={fieldOptions.length > 0}
-                canAddProcessorTask={!hasProcessorTask}
+                canAddProcessorTask={!containsProcessorNode(flowNodes)}
               />
-              {hasProcessorTask && (
-                <>
-                  <div className="w-[300px]">
-                    <FlowNode
-                      tone="processor"
-                      kicker="办理"
-                      title={processorRule.taskName || '办理任务'}
-                      subtitle={formatProcessorRule(processorRule, directory)}
-                      icon={<UserCheck size={17} strokeWidth={2.5} />}
-                      selected={isDesignerSelected(activeSelection, 'processor')}
-                      hasError={Boolean(validation.sections.processor?.length)}
-                      onClick={() => onSelect({ type: 'processor' })}
-                    />
-                  </div>
-                  <FlowConnector />
-                </>
-              )}
               <div className="w-[180px]">
                 <FlowNode
                   tone="end"
@@ -3207,6 +3322,62 @@ function DesignerInspector({
       );
     }
 
+    if (selectedFlowNode.type === 'processor') {
+      return (
+        <aside className={inspectorClassName}>
+          <InspectorHeader
+            label="办理"
+            title="办理人配置"
+            description="流程到达这里时进入待办理，办理完成后继续执行后续节点。"
+          />
+          <div className="space-y-5 p-5">
+            {validation.sections.processor?.length > 0 && (
+              <div className="rounded-2xl bg-[#ffebee] px-4 py-3 text-[12px] font-bold text-[#c62828]">
+                {validation.sections.processor[0]}
+              </div>
+            )}
+            <label className="block space-y-2">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">办理事项</span>
+              <input
+                className="input-field text-[13px]"
+                value={processorRule.taskName || ''}
+                onChange={(event) => onPatchProcessorRule({ taskName: event.target.value })}
+                placeholder="例如：付款办理"
+              />
+            </label>
+            <label className="block space-y-2">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">办理成员</span>
+              <MultiSelect
+                value={processorRule.memberIds}
+                options={memberOptions}
+                onChange={(memberIds) => onPatchProcessorRule({ memberIds })}
+                emptyText="暂无成员"
+              />
+            </label>
+            <label className="block space-y-2">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">办理部门</span>
+              <MultiSelect
+                value={processorRule.departmentIds}
+                options={departmentOptions}
+                onChange={(departmentIds) => onPatchProcessorRule({ departmentIds })}
+                emptyText="暂无部门"
+              />
+            </label>
+            <div className="rounded-2xl border border-border-silver bg-white p-4 text-[12px] font-bold leading-5 text-medium-gray">
+              选择办理成员或部门后，流程到达这里会进入“待办理”，办理人点击完成后继续走下面的节点。
+            </div>
+            <button
+              type="button"
+              onClick={() => onRemoveFlowNode(selectedFlowNode.id)}
+              className="h-11 w-full rounded-full bg-[#ffebee] text-[13px] font-black text-[#c62828]"
+            >
+              删除办理任务
+            </button>
+          </div>
+        </aside>
+      );
+    }
+
     const rule = selectedFlowNode.rule || { type: 'specific_members', memberIds: [] };
     return (
       <aside className={inspectorClassName}>
@@ -3682,10 +3853,20 @@ function MultiSelect({
     () => new Set(filteredOptions.map((option) => option.value)),
     [filteredOptions],
   );
+  const selectedOptions = useMemo(() => {
+    const optionMap = new Map(options.map((option) => [option.value, option.label]));
+    return value.map((selectedValue) => ({
+      value: selectedValue,
+      label: optionMap.get(selectedValue) || selectedValue,
+    }));
+  }, [options, value]);
   const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedVisibleValues = readSelectedValues(event);
     const hiddenSelectedValues = value.filter((selectedValue) => !visibleValues.has(selectedValue));
     onChange([...hiddenSelectedValues, ...selectedVisibleValues]);
+  };
+  const removeSelectedValue = (selectedValue: string) => {
+    onChange(value.filter((currentValue) => currentValue !== selectedValue));
   };
 
   return (
@@ -3704,6 +3885,43 @@ function MultiSelect({
           placeholder={searchPlaceholder}
         />
       </div>
+      {selectedOptions.length > 0 && (
+        <div className="rounded-xl border border-border-silver bg-white px-3 py-2">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-black text-medium-gray">已选 {selectedOptions.length} 项</span>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onChange([]);
+              }}
+              className="text-[11px] font-black text-interactive-blue hover:text-midnight-graphite"
+            >
+              清空
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {selectedOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  removeSelectedValue(option.value);
+                }}
+                className="group inline-flex max-w-full items-center gap-1 rounded-full bg-lightest-gray-background px-2.5 py-1 text-left text-[12px] font-bold text-midnight-graphite transition-colors hover:bg-[#ffebee] hover:text-[#c62828]"
+                aria-label={`取消选择 ${option.label}`}
+                title={`取消选择 ${option.label}`}
+              >
+                <span className="truncate">{option.label}</span>
+                <X size={12} strokeWidth={3} className="shrink-0 text-light-gray group-hover:text-[#c62828]" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <select
         multiple
         className="input-field min-h-[116px] text-[13px]"
@@ -3921,27 +4139,56 @@ export default function WorkflowAdmin() {
   }, [message]);
 
   const ensureDefaultWorkflowTemplates = async (sourceTemplates: WorkflowTemplate[]) => {
-    const templatesByScope = new Set(
-      sourceTemplates.map(getTemplateBusinessScopeKey),
-    );
-    const missingScopes = getBusinessScopeOptions().filter((scope) => !templatesByScope.has(scope.key));
-    if (missingScopes.length === 0) return sourceTemplates;
+    if (defaultWorkflowTemplateSyncPromise) return defaultWorkflowTemplateSyncPromise;
 
-    const createdTemplates: WorkflowTemplate[] = [];
-    for (const scope of missingScopes) {
-      const name = getGeneratedWorkflowName(scope);
-      const created = await storage.createWorkflowTemplate({
-        name,
-        businessType: scope.businessType,
-        organizationId: DEFAULT_ORG_ID,
-        moduleName: scope.moduleName,
-        approvalTypeName: scope.approvalTypeName,
-      });
-      const updated = await storage.updateWorkflowDraft(created.id, createDraft(name, scope));
-      createdTemplates.push(updated);
+    defaultWorkflowTemplateSyncPromise = (async () => {
+      let nextTemplates = sourceTemplates;
+
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const compactedTemplates = compactWorkflowTemplatesByScope(nextTemplates);
+        const templatesByScope = new Set(
+          compactedTemplates
+            .filter((template) => getTemplateOrganizationId(template) === DEFAULT_ORG_ID)
+            .map(getTemplateBusinessScopeKey),
+        );
+        const missingScopes = getBusinessScopeOptions().filter((scope) => !templatesByScope.has(scope.key));
+        if (missingScopes.length === 0) return compactedTemplates;
+
+        const createdTemplates: WorkflowTemplate[] = [];
+        let shouldRefresh = false;
+
+        for (const scope of missingScopes) {
+          const name = getGeneratedWorkflowName(scope);
+
+          try {
+            const created = await storage.createWorkflowTemplate({
+              name,
+              businessType: scope.businessType,
+              organizationId: DEFAULT_ORG_ID,
+              moduleName: scope.moduleName,
+              approvalTypeName: scope.approvalTypeName,
+            });
+            const updated = await storage.updateWorkflowDraft(created.id, createDraft(name, scope));
+            createdTemplates.push(updated);
+          } catch (error) {
+            if (!isDuplicateWorkflowTemplateError(error)) throw error;
+            shouldRefresh = true;
+            break;
+          }
+        }
+
+        if (!shouldRefresh) return [...compactedTemplates, ...createdTemplates];
+        nextTemplates = await storage.getWorkflowTemplates();
+      }
+
+      return compactWorkflowTemplatesByScope(await storage.getWorkflowTemplates());
+    })();
+
+    try {
+      return await defaultWorkflowTemplateSyncPromise;
+    } finally {
+      defaultWorkflowTemplateSyncPromise = null;
     }
-
-    return [...sourceTemplates, ...createdTemplates];
   };
 
   const loadData = async () => {
@@ -4023,15 +4270,24 @@ export default function WorkflowAdmin() {
   };
 
   const patchProcessorRule = (patch: Partial<ProcessorRule>) => {
-    patchDraft((current) => ({
-      ...current,
-      processorRule: {
+    patchDraft((current) => {
+      const processorRule: ProcessorRule = {
         ...defaultProcessorRule(),
         ...(current.processorRule || {}),
         ...patch,
+        enabled: true,
         timing: 'approval_completed',
-      },
-    }));
+      };
+      const currentNodes = flowNodesFromDraft({ ...current, processorRule, flowMode: 'flexible' });
+      const nextNodes = updateProcessorNodesInTree(currentNodes, (node) => ({
+        ...node,
+        title: processorRule.taskName || node.title || '办理任务',
+      }));
+      return syncFlowDraft({
+        ...current,
+        processorRule,
+      }, nextNodes);
+    });
   };
 
   const addProcessorTask = () => {
@@ -4201,6 +4457,10 @@ export default function WorkflowAdmin() {
       };
     }
 
+    if (kind === 'processor') {
+      return createProcessorFlowNode(draft?.processorRule || defaultProcessorRule());
+    }
+
     const step = defaultStep(index + 1);
     return {
       ...stepToFlowNode(step, index),
@@ -4333,7 +4593,20 @@ export default function WorkflowAdmin() {
     patchDraft((current) => {
       const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
       const nextNodes = insertFlowNodeInto(currentNodes, path, index, nextNode);
-      return syncFlowDraft(current, nextNodes);
+      return syncFlowDraft({
+        ...current,
+        ...(kind === 'processor'
+          ? {
+              processorRule: {
+                ...defaultProcessorRule(),
+                ...(current.processorRule || {}),
+                enabled: true,
+                taskName: current.processorRule?.taskName || '办理任务',
+                timing: 'approval_completed',
+              },
+            }
+          : {}),
+      }, nextNodes);
     });
     setDesignerSelection({ type: 'flow-node', nodeId: nextNode.id });
   };
@@ -4424,8 +4697,12 @@ export default function WorkflowAdmin() {
   const removeFlowNode = (nodeId: string) => {
     patchDraft((current) => {
       const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
+      const removedNode = findFlowNode(currentNodes, nodeId);
       const nextNodes = removeFlowNodeFromTree(currentNodes, nodeId);
-      return syncFlowDraft(current, nextNodes);
+      return syncFlowDraft({
+        ...current,
+        ...(removedNode?.type === 'processor' ? { processorRule: defaultProcessorRule() } : {}),
+      }, nextNodes);
     });
     setDesignerSelection(submitDesignerSelection);
   };

@@ -60,11 +60,53 @@ function getProcessorProgressStep(record: ApprovalRecord): ProgressStep | null {
   };
 }
 
+function isProcessorWorkflowStep(step: NonNullable<ApprovalRecord['workflowInstance']>['steps'][number]) {
+  return step.stepType === 'processor' || Boolean(step.processors?.length);
+}
+
+function getWorkflowProgressStep(step: NonNullable<ApprovalRecord['workflowInstance']>['steps'][number]): ProgressStep {
+  if (isProcessorWorkflowStep(step)) {
+    const processors = step.processors || [];
+    const processorNames = processors.map((processor) => processor.name).filter(Boolean).join('、');
+    const completedBy = step.actedByName || processors.find((processor) => processor.status === 'completed')?.name;
+
+    return {
+      title: step.processorTaskName || step.name || '办理任务',
+      desc: step.status === 'approved'
+        ? `办理人：${completedBy || processorNames || '未记录'} 已完成`
+        : `待办理人处理：${processorNames || '未解析'}`,
+      time: step.actedAt,
+      stepStatus: step.status,
+      status: step.status === 'approved' || step.status === 'skipped'
+        ? 'completed'
+        : (step.status === 'pending' ? 'current' : (step.status === 'rejected' ? 'failed' : 'pending')),
+    };
+  }
+
+  return {
+    title: step.name,
+    desc: [
+      `审批人：${step.approvers.map((approver) => approver.name).join('、') || '未解析'}`,
+      step.approvers.length > 1 ? getApprovalModeDesc(step.approvalMode) : '',
+      step.actedByName ? `操作人：${step.actedByName}` : '',
+      step.comment ? `意见：${step.comment}` : '',
+    ].filter(Boolean).join(' ｜ '),
+    time: step.actedAt,
+    approvers: step.approvers || [],
+    approvalMode: step.approvalMode,
+    stepStatus: step.status,
+    status: step.status === 'approved' || step.status === 'skipped'
+      ? 'completed'
+      : (step.status === 'pending' ? 'current' : (step.status === 'rejected' ? 'failed' : 'pending')),
+  };
+}
+
 export default function ApprovalProgressModal({ record, onClose }: ApprovalProgressModalProps) {
   if (!record) return null;
 
   const workflowSteps = record.workflowInstance?.steps;
-  const processorProgressStep = getProcessorProgressStep(record);
+  const hasWorkflowProcessorStep = Boolean(workflowSteps?.some(isProcessorWorkflowStep));
+  const processorProgressStep = hasWorkflowProcessorStep ? null : getProcessorProgressStep(record);
   const ccProgressStep = getCcProgressStep(record);
   const steps: ProgressStep[] = workflowSteps?.length
     ? [
@@ -74,22 +116,7 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
           time: record.createdAt,
           status: 'completed'
         },
-        ...workflowSteps.map((step): ProgressStep => ({
-          title: step.name,
-          desc: [
-            `审批人：${step.approvers.map((approver) => approver.name).join('、') || '未解析'}`,
-            step.approvers.length > 1 ? getApprovalModeDesc(step.approvalMode) : '',
-            step.actedByName ? `操作人：${step.actedByName}` : '',
-            step.comment ? `意见：${step.comment}` : '',
-          ].filter(Boolean).join(' ｜ '),
-          time: step.actedAt,
-          approvers: step.approvers || [],
-          approvalMode: step.approvalMode,
-          stepStatus: step.status,
-          status: step.status === 'approved' || step.status === 'skipped'
-            ? 'completed'
-            : (step.status === 'pending' ? 'current' : (step.status === 'rejected' ? 'failed' : 'pending')),
-        })),
+        ...workflowSteps.map(getWorkflowProgressStep),
         ...(processorProgressStep ? [processorProgressStep] : []),
         ...(ccProgressStep ? [ccProgressStep] : []),
         {
