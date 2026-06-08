@@ -130,6 +130,7 @@ export interface CcRule {
 
 export interface ProcessorRule {
   timing: 'approval_completed';
+  enabled?: boolean;
   taskName?: string;
   memberIds: string[];
   departmentIds: string[];

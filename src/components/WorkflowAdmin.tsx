@@ -224,6 +224,34 @@ function getTemplateOptionLabel(template: WorkflowTemplate) {
   return `${getWorkflowTitle(moduleName, approvalTypeName)} · ${statusLabels[template.status]} · v${template.currentVersion || 1}`;
 }
 
+function collectWorkflowNodeSearchText(nodes: WorkflowNode[] | undefined): string {
+  const tokens: string[] = [];
+
+  const visit = (items: WorkflowNode[] | undefined) => {
+    (items || []).forEach((node) => {
+      tokens.push(node.id, node.type, node.title, node.subtitle || '');
+      if (node.rule?.positionTitles?.length) tokens.push(...node.rule.positionTitles);
+      (node.conditions || []).forEach((condition) => {
+        tokens.push(condition.id, condition.title, condition.expression, condition.aiDescription || '');
+        (condition.workflowConditions || []).forEach((workflowCondition) => {
+          tokens.push(
+            workflowCondition.id,
+            workflowCondition.field,
+            workflowCondition.operator,
+            workflowCondition.value || '',
+            workflowCondition.currencyValue || '',
+            workflowCondition.expression || '',
+          );
+        });
+        visit(condition.nodes);
+      });
+    });
+  };
+
+  visit(nodes);
+  return tokens.filter(Boolean).join(' ');
+}
+
 function formatWorkflowMessage(message: string) {
   const knownMessages: Record<string, string> = {
     'published workflow template already exists for this organization and approval type': '该业务已有已发布流程，请先停用旧版本后再发布。',
@@ -309,6 +337,7 @@ function defaultCcRule(): CcRule {
 function defaultProcessorRule(): ProcessorRule {
   return {
     timing: 'approval_completed',
+    enabled: false,
     taskName: '办理任务',
     memberIds: [],
     departmentIds: [],
@@ -814,6 +843,9 @@ function normalizeDraftForEditor(draft: WorkflowVersion): WorkflowVersion {
     processorRule: {
       ...defaultProcessorRule(),
       ...(draft.processorRule || {}),
+      enabled: Boolean(draft.processorRule?.enabled)
+        || Boolean(draft.processorRule?.memberIds?.length)
+        || Boolean(draft.processorRule?.departmentIds?.length),
       taskName: draft.processorRule?.taskName || '办理任务',
       memberIds: draft.processorRule?.memberIds || [],
       departmentIds: draft.processorRule?.departmentIds || [],
@@ -954,6 +986,11 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
     });
   });
 
+  const processorRule = draft.processorRule || defaultProcessorRule();
+  if (isProcessorTaskEnabled(processorRule) && !hasProcessorAssignees(processorRule)) {
+    addValidationError(state, 'processor', '办理任务必须选择办理成员或办理部门');
+  }
+
   return state;
 }
 
@@ -1014,6 +1051,14 @@ function formatSubmitPermission(permission: SubmitPermissionRule, directory: Org
   return excluded ? `${scope}；排除 ${excluded}` : scope;
 }
 
+function hasProcessorAssignees(rule?: ProcessorRule) {
+  return Boolean((rule?.memberIds || []).length || (rule?.departmentIds || []).length);
+}
+
+function isProcessorTaskEnabled(rule?: ProcessorRule) {
+  return Boolean(rule?.enabled || hasProcessorAssignees(rule));
+}
+
 function formatProcessorRule(rule: ProcessorRule, directory: OrganizationDirectory) {
   const memberNames = (rule.memberIds || [])
     .map((memberId) => directory.members.find((member) => member.id === memberId)?.name)
@@ -1026,7 +1071,7 @@ function formatProcessorRule(rule: ProcessorRule, directory: OrganizationDirecto
     departmentNames.length ? `${departmentNames.length} 个部门` : '',
   ].filter(Boolean).join('、');
 
-  return scope || '无需办理';
+  return scope || '待配置办理人';
 }
 
 function formatPreviewSubmitter(member: OrganizationDirectory['members'][number] | null, directory: OrganizationDirectory) {
@@ -1512,18 +1557,25 @@ function FlowInsertButton({
   onCondition,
   onAiCondition,
   onCc,
+  onProcessorTask,
   canUseRuleConditions,
+  canAddProcessorTask,
 }: {
   onApproval: () => void;
   onCondition: (branchCount: number) => void;
   onAiCondition: (branchCount: number) => void;
   onCc: () => void;
+  onProcessorTask: () => void;
   canUseRuleConditions: boolean;
+  canAddProcessorTask: boolean;
 }) {
   const [isOpen, setIsOpen] = React.useState(false);
   const items = [
     { label: '添加审批', icon: <CheckCircle2 size={14} strokeWidth={2.4} />, onClick: onApproval },
     { label: '添加抄送', icon: <Send size={14} strokeWidth={2.4} />, onClick: onCc },
+    ...(canAddProcessorTask
+      ? [{ label: '添加办理任务', icon: <UserCheck size={14} strokeWidth={2.4} />, onClick: onProcessorTask }]
+      : []),
   ];
 
   return (
@@ -1790,12 +1842,16 @@ function resizeConditionBranches(
 
 function FlowGap({
   onInsert,
+  onAddProcessorTask,
   compact,
   canUseRuleConditions,
+  canAddProcessorTask,
 }: {
   onInsert: (kind: FlowInsertKind, branchCount?: number) => void;
+  onAddProcessorTask: () => void;
   compact?: boolean;
   canUseRuleConditions: boolean;
+  canAddProcessorTask: boolean;
 }) {
   return (
     <>
@@ -1805,7 +1861,9 @@ function FlowGap({
         onCondition={(branchCount) => onInsert('condition', branchCount)}
         onAiCondition={(branchCount) => onInsert('ai-condition', branchCount)}
         onCc={() => onInsert('cc')}
+        onProcessorTask={onAddProcessorTask}
         canUseRuleConditions={canUseRuleConditions}
+        canAddProcessorTask={canAddProcessorTask}
       />
       <FlowConnector compact={compact} />
     </>
@@ -1852,7 +1910,9 @@ function FlowSequence({
   selection,
   onSelect,
   onInsert,
+  onAddProcessorTask,
   canUseRuleConditions,
+  canAddProcessorTask,
 }: {
   nodes: WorkflowNode[];
   path: string[];
@@ -1861,11 +1921,19 @@ function FlowSequence({
   selection: DesignerSelection;
   onSelect: (selection: DesignerSelection) => void;
   onInsert: (path: string[], index: number, kind: FlowInsertKind, branchCount?: number) => void;
+  onAddProcessorTask: () => void;
   canUseRuleConditions: boolean;
+  canAddProcessorTask: boolean;
 }) {
   return (
     <div className="flex w-full flex-col items-center">
-      <FlowGap compact canUseRuleConditions={canUseRuleConditions} onInsert={(kind, branchCount) => onInsert(path, 0, kind, branchCount)} />
+      <FlowGap
+        compact
+        canUseRuleConditions={canUseRuleConditions}
+        canAddProcessorTask={canAddProcessorTask}
+        onAddProcessorTask={onAddProcessorTask}
+        onInsert={(kind, branchCount) => onInsert(path, 0, kind, branchCount)}
+      />
       {nodes.map((node, index) => (
         <React.Fragment key={node.id}>
           <div className="w-[300px]">
@@ -1917,7 +1985,9 @@ function FlowSequence({
                       selection={selection}
                       onSelect={onSelect}
                       onInsert={onInsert}
+                      onAddProcessorTask={onAddProcessorTask}
                       canUseRuleConditions={canUseRuleConditions}
+                      canAddProcessorTask={canAddProcessorTask}
                     />
                   </FlowBranchLane>
                 ))}
@@ -1926,7 +1996,13 @@ function FlowSequence({
             </div>
           )}
 
-          <FlowGap compact canUseRuleConditions={canUseRuleConditions} onInsert={(kind, branchCount) => onInsert(path, index + 1, kind, branchCount)} />
+          <FlowGap
+            compact
+            canUseRuleConditions={canUseRuleConditions}
+            canAddProcessorTask={canAddProcessorTask}
+            onAddProcessorTask={onAddProcessorTask}
+            onInsert={(kind, branchCount) => onInsert(path, index + 1, kind, branchCount)}
+          />
         </React.Fragment>
       ))}
     </div>
@@ -1957,6 +2033,8 @@ function WorkflowFlowDesigner({
   onPatchSubmitPermission,
   onPatchCcRule,
   onPatchProcessorRule,
+  onAddProcessorTask,
+  onRemoveProcessorTask,
   onAddStep,
   onUpdateStep,
   onRemoveStep,
@@ -1994,6 +2072,8 @@ function WorkflowFlowDesigner({
   onPatchSubmitPermission: (patch: Partial<SubmitPermissionRule>) => void;
   onPatchCcRule: (patch: Partial<CcRule>) => void;
   onPatchProcessorRule: (patch: Partial<ProcessorRule>) => void;
+  onAddProcessorTask: () => void;
+  onRemoveProcessorTask: () => void;
   onAddStep: (branchId: string) => void;
   onUpdateStep: (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => void;
   onRemoveStep: (branchId: string, stepId: string) => void;
@@ -2019,6 +2099,7 @@ function WorkflowFlowDesigner({
   const selectedStep = selection.type === 'step'
     ? selectedBranch?.approvalSteps.find((step) => step.id === selection.stepId) || null
     : null;
+  const hasProcessorTask = isProcessorTaskEnabled(processorRule);
   const branchFlowWidth = flowBranches.length > 0
     ? flowBranches.length * FLOW_BRANCH_CARD_WIDTH + Math.max(0, flowBranches.length - 1) * FLOW_BRANCH_GAP
     : FLOW_BRANCH_CARD_WIDTH;
@@ -2027,7 +2108,7 @@ function WorkflowFlowDesigner({
     || (selection.type === 'step' && selectedStep)
     || selection.type === 'flow-node'
     || selection.type === 'cc'
-    || selection.type === 'processor'
+    || (selection.type === 'processor' && hasProcessorTask)
   ) ? selection : submitDesignerSelection;
   const panStartRef = React.useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [isPanning, setIsPanning] = React.useState(false);
@@ -2081,7 +2162,7 @@ function WorkflowFlowDesigner({
   React.useEffect(() => {
     const frame = window.requestAnimationFrame(fitWorkflowCanvas);
     return () => window.cancelAnimationFrame(frame);
-  }, [fitWorkflowCanvas, canvasMinWidth, flowBranches.length, branches.length, flowNodes.length]);
+  }, [fitWorkflowCanvas, canvasMinWidth, flowBranches.length, branches.length, flowNodes.length, hasProcessorTask]);
 
   React.useEffect(() => {
     const handleFullscreenChange = () => {
@@ -2282,20 +2363,27 @@ function WorkflowFlowDesigner({
                 selection={activeSelection}
                 onSelect={onSelect}
                 onInsert={onInsertFlowNode}
+                onAddProcessorTask={onAddProcessorTask}
                 canUseRuleConditions={fieldOptions.length > 0}
+                canAddProcessorTask={!hasProcessorTask}
               />
-              <div className="w-[300px]">
-                <FlowNode
-                  tone="processor"
-                  kicker="办理"
-                  title={processorRule.taskName || '办理任务'}
-                  subtitle={formatProcessorRule(processorRule, directory)}
-                  icon={<UserCheck size={17} strokeWidth={2.5} />}
-                  selected={isDesignerSelected(activeSelection, 'processor')}
-                  onClick={() => onSelect({ type: 'processor' })}
-                />
-              </div>
-              <FlowConnector />
+              {hasProcessorTask && (
+                <>
+                  <div className="w-[300px]">
+                    <FlowNode
+                      tone="processor"
+                      kicker="办理"
+                      title={processorRule.taskName || '办理任务'}
+                      subtitle={formatProcessorRule(processorRule, directory)}
+                      icon={<UserCheck size={17} strokeWidth={2.5} />}
+                      selected={isDesignerSelected(activeSelection, 'processor')}
+                      hasError={Boolean(validation.sections.processor?.length)}
+                      onClick={() => onSelect({ type: 'processor' })}
+                    />
+                  </div>
+                  <FlowConnector />
+                </>
+              )}
               <div className="w-[180px]">
                 <FlowNode
                   tone="end"
@@ -2335,6 +2423,7 @@ function WorkflowFlowDesigner({
           onPatchSubmitPermission={onPatchSubmitPermission}
           onPatchCcRule={onPatchCcRule}
           onPatchProcessorRule={onPatchProcessorRule}
+          onRemoveProcessorTask={onRemoveProcessorTask}
           onAddStep={onAddStep}
           onUpdateStep={onUpdateStep}
           onRemoveStep={onRemoveStep}
@@ -2939,6 +3028,7 @@ function DesignerInspector({
   onPatchSubmitPermission,
   onPatchCcRule,
   onPatchProcessorRule,
+  onRemoveProcessorTask,
   onAddStep,
   onUpdateStep,
   onRemoveStep,
@@ -2975,6 +3065,7 @@ function DesignerInspector({
   onPatchSubmitPermission: (patch: Partial<SubmitPermissionRule>) => void;
   onPatchCcRule: (patch: Partial<CcRule>) => void;
   onPatchProcessorRule: (patch: Partial<ProcessorRule>) => void;
+  onRemoveProcessorTask: () => void;
   onAddStep: (branchId: string) => void;
   onUpdateStep: (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => void;
   onRemoveStep: (branchId: string, stepId: string) => void;
@@ -3405,6 +3496,11 @@ function DesignerInspector({
           description="审批通过后，指定人员继续处理付款、归档或其他后续事项。"
         />
         <div className="space-y-5 p-5">
+          {validation.sections.processor?.length > 0 && (
+            <div className="rounded-2xl bg-[#ffebee] px-4 py-3 text-[12px] font-bold text-[#c62828]">
+              {validation.sections.processor[0]}
+            </div>
+          )}
           <label className="block space-y-2">
             <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">办理事项</span>
             <input
@@ -3433,8 +3529,18 @@ function DesignerInspector({
             />
           </label>
           <div className="rounded-2xl border border-border-silver bg-white p-4 text-[12px] font-bold leading-5 text-medium-gray">
-            留空时，审批通过后流程直接结束；选择办理人后，审批通过会进入“待办理”，由办理人点击完成。
+            选择办理成员或部门后，审批通过会进入“待办理”，由办理人点击完成。
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              onRemoveProcessorTask();
+              onSelect({ type: 'submit' });
+            }}
+            className="h-11 w-full rounded-full bg-[#ffebee] text-[13px] font-black text-[#c62828]"
+          >
+            删除办理任务
+          </button>
         </div>
       </aside>
     );
@@ -3655,6 +3761,12 @@ function WorkflowTemplateSearchSelect({
         template.approvalTypeName,
         template.draft?.basic?.moduleName,
         template.draft?.basic?.approvalTypeName,
+        template.draft?.basic?.name,
+        template.draft?.processorRule?.taskName,
+        template.publishedVersion?.basic?.name,
+        template.publishedVersion?.processorRule?.taskName,
+        collectWorkflowNodeSearchText(template.draft?.nodes),
+        collectWorkflowNodeSearchText(template.publishedVersion?.nodes),
       ].filter(Boolean).join(' ').toLowerCase(),
     };
   }), [templates]);
@@ -3920,6 +4032,31 @@ export default function WorkflowAdmin() {
         timing: 'approval_completed',
       },
     }));
+  };
+
+  const addProcessorTask = () => {
+    patchDraft((current) => ({
+      ...current,
+      processorRule: {
+        ...defaultProcessorRule(),
+        ...(current.processorRule || {}),
+        enabled: true,
+        taskName: current.processorRule?.taskName || '办理任务',
+        timing: 'approval_completed',
+      },
+    }));
+    setDesignerSelection({ type: 'processor' });
+  };
+
+  const removeProcessorTask = () => {
+    patchDraft((current) => ({
+      ...current,
+      processorRule: {
+        ...defaultProcessorRule(),
+        enabled: false,
+      },
+    }));
+    setDesignerSelection(submitDesignerSelection);
   };
 
   const updateBranch = (branchId: string, patch: Partial<WorkflowBranch>) => {
@@ -4484,7 +4621,7 @@ export default function WorkflowAdmin() {
         </section>
       ) : (
         <div className="space-y-6">
-            <section className="rounded-xl border border-border-silver bg-white shadow-sm overflow-hidden">
+            <section className="rounded-xl border border-border-silver bg-white shadow-sm overflow-visible">
               <div className="p-5 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                 <div className="min-w-0">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -4576,6 +4713,8 @@ export default function WorkflowAdmin() {
               onPatchSubmitPermission={patchSubmitPermission}
               onPatchCcRule={patchCcRule}
               onPatchProcessorRule={patchProcessorRule}
+              onAddProcessorTask={addProcessorTask}
+              onRemoveProcessorTask={removeProcessorTask}
               onAddStep={addStep}
               onUpdateStep={updateStep}
               onRemoveStep={removeStep}

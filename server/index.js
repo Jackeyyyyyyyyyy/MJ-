@@ -1410,6 +1410,7 @@ function createDefaultCcRule() {
 function createDefaultProcessorRule() {
   return {
     timing: 'approval_completed',
+    enabled: false,
     taskName: '办理任务',
     memberIds: [],
     departmentIds: [],
@@ -1716,6 +1717,9 @@ function normalizeWorkflowDraft(draft) {
     processorRule: {
       ...createDefaultProcessorRule(),
       ...(isFlexibleFlow ? nextDraft.processorRule || {} : {}),
+      enabled: Boolean(nextDraft.processorRule?.enabled)
+        || Boolean(isFlexibleFlow && Array.isArray(nextDraft.processorRule?.memberIds) && nextDraft.processorRule.memberIds.length)
+        || Boolean(isFlexibleFlow && Array.isArray(nextDraft.processorRule?.departmentIds) && nextDraft.processorRule.departmentIds.length),
       taskName: normalizeWorkflowText(nextDraft.processorRule?.taskName) || '办理任务',
       memberIds: isFlexibleFlow && Array.isArray(nextDraft.processorRule?.memberIds) ? nextDraft.processorRule.memberIds : [],
       departmentIds: isFlexibleFlow && Array.isArray(nextDraft.processorRule?.departmentIds) ? nextDraft.processorRule.departmentIds : [],
@@ -2834,6 +2838,7 @@ function resolveCcRecipientsForRule(ccRule, directory) {
 }
 
 function hasProcessorRule(processorRule) {
+  if (processorRule?.enabled === false) return false;
   return Boolean(
     (Array.isArray(processorRule?.memberIds) && processorRule.memberIds.length > 0) ||
     (Array.isArray(processorRule?.departmentIds) && processorRule.departmentIds.length > 0)
