@@ -33,7 +33,7 @@ function getCcProgressStep(record: ApprovalRecord): ProgressStep | null {
   if (recipients.length === 0) return null;
 
   const recipientNames = recipients.map((recipient) => recipient.name).filter(Boolean).join('、');
-  const isFinished = record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.REJECTED;
+  const isFinished = record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.COMPLETED || record.status === ApprovalStatus.REJECTED;
 
   return {
     title: '抄送',
@@ -43,10 +43,28 @@ function getCcProgressStep(record: ApprovalRecord): ProgressStep | null {
   };
 }
 
+function getProcessorProgressStep(record: ApprovalRecord): ProgressStep | null {
+  const processors = record.processors || [];
+  if (processors.length === 0) return null;
+
+  const processorNames = processors.map((processor) => processor.name).filter(Boolean).join('、');
+  const isCompleted = record.status === ApprovalStatus.COMPLETED;
+
+  return {
+    title: record.processorTaskName || '办理任务',
+    desc: isCompleted
+      ? `办理人：${record.processedBy || processorNames || '未记录'} 已完成`
+      : `待办理人处理：${processorNames || '未解析'}`,
+    time: record.processedAt,
+    status: isCompleted ? 'completed' : (record.status === ApprovalStatus.PROCESSING ? 'current' : 'pending')
+  };
+}
+
 export default function ApprovalProgressModal({ record, onClose }: ApprovalProgressModalProps) {
   if (!record) return null;
 
   const workflowSteps = record.workflowInstance?.steps;
+  const processorProgressStep = getProcessorProgressStep(record);
   const ccProgressStep = getCcProgressStep(record);
   const steps: ProgressStep[] = workflowSteps?.length
     ? [
@@ -72,14 +90,15 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
             ? 'completed'
             : (step.status === 'pending' ? 'current' : (step.status === 'rejected' ? 'failed' : 'pending')),
         })),
+        ...(processorProgressStep ? [processorProgressStep] : []),
         ...(ccProgressStep ? [ccProgressStep] : []),
         {
-          title: record.status === ApprovalStatus.REJECTED ? '审批驳回' : '审批完成',
-          desc: record.status === ApprovalStatus.APPROVED
-            ? '审批流程已通过'
-            : (record.status === ApprovalStatus.REJECTED ? '审批流程已被拒绝' : '等待最终审批结果'),
-          time: record.approvedAt || record.rejectedAt,
-          status: record.status === ApprovalStatus.APPROVED
+          title: record.status === ApprovalStatus.REJECTED ? '审批驳回' : (record.status === ApprovalStatus.COMPLETED ? '办理完成' : '审批完成'),
+          desc: record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.COMPLETED
+            ? '流程已结束'
+            : (record.status === ApprovalStatus.PROCESSING ? '审批已通过，等待办理完成' : (record.status === ApprovalStatus.REJECTED ? '审批流程已被拒绝' : '等待最终审批结果')),
+          time: record.processedAt || record.approvedAt || record.rejectedAt,
+          status: record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.COMPLETED
             ? 'completed'
             : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending'),
           isFinal: true,
@@ -98,12 +117,15 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
           time: record.approvedAt || record.rejectedAt,
           status: record.status === ApprovalStatus.PENDING ? 'current' : 'completed'
         },
+        ...(processorProgressStep ? [processorProgressStep] : []),
         ...(ccProgressStep ? [ccProgressStep] : []),
         {
-          title: '审批通过',
-          desc: record.status === ApprovalStatus.APPROVED ? '审批流程顺利结束' : (record.status === ApprovalStatus.REJECTED ? '审批流程已被拒绝' : '待处理'),
-          time: record.approvedAt || record.rejectedAt,
-          status: record.status === ApprovalStatus.APPROVED ? 'completed' : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending'),
+          title: record.status === ApprovalStatus.COMPLETED ? '办理完成' : '审批通过',
+          desc: record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.COMPLETED
+            ? '流程顺利结束'
+            : (record.status === ApprovalStatus.PROCESSING ? '审批已通过，等待办理完成' : (record.status === ApprovalStatus.REJECTED ? '审批流程已被拒绝' : '待处理')),
+          time: record.processedAt || record.approvedAt || record.rejectedAt,
+          status: record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.COMPLETED ? 'completed' : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending'),
           isFinal: true,
         }
       ];

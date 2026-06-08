@@ -273,6 +273,16 @@ export const storage = {
     });
   },
 
+  completeProcessing(
+    id: string,
+    comment?: string,
+  ): Promise<ApprovalRecord> {
+    return request<ApprovalRecord>(`/records/${encodeURIComponent(id)}/process`, {
+      method: 'PATCH',
+      body: JSON.stringify({ comment }),
+    });
+  },
+
   clearAll(): Promise<void> {
     return request<void>('/records', {
       method: 'DELETE',

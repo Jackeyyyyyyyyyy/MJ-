@@ -39,11 +39,13 @@ export default function ApplicantHome() {
     (summary, record) => {
       summary.total += 1;
       if (record.status === ApprovalStatus.PENDING) summary.pending += 1;
+      if (record.status === ApprovalStatus.PROCESSING) summary.processing += 1;
       if (record.status === ApprovalStatus.APPROVED) summary.approved += 1;
+      if (record.status === ApprovalStatus.COMPLETED) summary.completed += 1;
       if (record.status === ApprovalStatus.REJECTED) summary.rejected += 1;
       return summary;
     },
-    { total: 0, pending: 0, approved: 0, rejected: 0 },
+    { total: 0, pending: 0, processing: 0, approved: 0, completed: 0, rejected: 0 },
   ), [records]);
 
   const filteredRecords = useMemo(() => {
@@ -54,7 +56,8 @@ export default function ApplicantHome() {
   const summaryItems = [
     { label: '总申请', value: stats.total, icon: FileText, tone: 'text-midnight-graphite', bg: 'bg-lightest-gray-background' },
     { label: '待审批', value: stats.pending, icon: Clock, tone: 'text-medium-gray', bg: 'bg-lightest-gray-background' },
-    { label: '已通过', value: stats.approved, icon: CheckCircle2, tone: 'text-[#2e7d32]', bg: 'bg-[#e8f5e9]' },
+    { label: '待办理', value: stats.processing, icon: Clock, tone: 'text-[#7b5b18]', bg: 'bg-[#fff7e0]' },
+    { label: '已完成', value: stats.approved + stats.completed, icon: CheckCircle2, tone: 'text-[#2e7d32]', bg: 'bg-[#e8f5e9]' },
     { label: '被驳回', value: stats.rejected, icon: XCircle, tone: 'text-[#c62828]', bg: 'bg-[#ffebee]' },
   ];
 
@@ -71,7 +74,7 @@ export default function ApplicantHome() {
           <h2 className="text-[20px] font-bold tracking-tight">历史记录</h2>
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex bg-lightest-gray-background p-1 rounded-xl">
-              {(['ALL', ApprovalStatus.PENDING, ApprovalStatus.APPROVED, ApprovalStatus.REJECTED] as string[]).map((status) => (
+              {(['ALL', ApprovalStatus.PENDING, ApprovalStatus.PROCESSING, ApprovalStatus.APPROVED, ApprovalStatus.COMPLETED, ApprovalStatus.REJECTED] as string[]).map((status) => (
                 <button
                   key={status}
                   onClick={() => setFilterStatus(status === 'ALL' ? ALL_STATUS : status)}
@@ -82,7 +85,15 @@ export default function ApplicantHome() {
                       : "text-light-gray hover:text-black"
                   )}
                 >
-                  {status === 'ALL' ? '全部' : (status === ApprovalStatus.PENDING ? '待处理' : (status === ApprovalStatus.APPROVED ? '已通过' : '驳回'))}
+                  {status === 'ALL'
+                    ? '全部'
+                    : status === ApprovalStatus.PENDING
+                      ? '待审批'
+                      : status === ApprovalStatus.PROCESSING
+                        ? '待办理'
+                        : status === ApprovalStatus.COMPLETED
+                          ? '已完成'
+                          : (status === ApprovalStatus.APPROVED ? '已通过' : '驳回')}
                 </button>
               ))}
             </div>

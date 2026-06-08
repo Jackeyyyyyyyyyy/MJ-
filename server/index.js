@@ -63,9 +63,11 @@ const approvalSchemaFile = path.join(dataDir, 'approval-schema.json');
 const shouldSyncBundledOrganization = process.env.ORGANIZATION_SEED_SYNC !== 'false';
 const STATUS_DRAFT = '\u8349\u7a3f';
 const STATUS_PENDING = '\u5f85\u5ba1\u6279';
+const STATUS_PROCESSING = '\u5f85\u529e\u7406';
 const STATUS_APPROVED = '\u5df2\u6279\u51c6';
+const STATUS_COMPLETED = '\u5df2\u5b8c\u6210';
 const STATUS_REJECTED = '\u5df2\u62d2\u7edd';
-const validStatuses = new Set([STATUS_DRAFT, STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED]);
+const validStatuses = new Set([STATUS_DRAFT, STATUS_PENDING, STATUS_PROCESSING, STATUS_APPROVED, STATUS_COMPLETED, STATUS_REJECTED]);
 const STEP_NOT_STARTED = 'not_started';
 const STEP_PENDING = 'pending';
 const STEP_APPROVED = 'approved';
@@ -77,7 +79,7 @@ const WORKFLOW_CONDITION_FIELDS = new Set(['amount', 'category', 'project', 'dep
 const WORKFLOW_CONDITION_OPERATORS = new Set(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq', 'contains', 'not_contains']);
 const NUMERIC_WORKFLOW_CONDITION_OPERATORS = new Set(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq']);
 const TEXT_WORKFLOW_CONDITION_OPERATORS = new Set(['eq', 'neq', 'contains', 'not_contains']);
-const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'submitter_manager', 'multi_supervisor']);
+const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'specific_positions', 'submitter_manager', 'multi_supervisor']);
 const WORKFLOW_APPROVAL_MODES = new Set(['one_of', 'all_of']);
 const LEGACY_ROLE_GROUP_MEMBERS = {
   'role-board': ['qin-an-tang'],
@@ -1405,6 +1407,15 @@ function createDefaultCcRule() {
   };
 }
 
+function createDefaultProcessorRule() {
+  return {
+    timing: 'approval_completed',
+    taskName: '办理任务',
+    memberIds: [],
+    departmentIds: [],
+  };
+}
+
 function getLegacyRoleGroupMemberIds(roleGroupId) {
   return LEGACY_ROLE_GROUP_MEMBERS[normalizeWorkflowText(roleGroupId)] || [];
 }
@@ -1443,6 +1454,8 @@ function legacyRuleToApprovalStep(node, index = 0) {
 
   if (rule.type === 'specified') {
     approverRule = { type: 'specific_members', memberIds: Array.isArray(rule.memberIds) ? rule.memberIds : [] };
+  } else if (rule.type === 'specific_positions') {
+    approverRule = { type: 'specific_positions', positionTitles: Array.isArray(rule.positionTitles) ? rule.positionTitles : [] };
   } else if (rule.type === 'role') {
     approverRule = { type: 'specific_members', memberIds: getLegacyRoleGroupMemberIds(rule.roleGroupId) };
   } else if (rule.type === 'direct_supervisor') {
@@ -1474,6 +1487,12 @@ function approvalStepToLegacyNode(step, index = 0) {
       memberIds: Array.isArray(rule.memberIds) ? rule.memberIds : [],
       emptyApproverAction: step?.emptyApproverAction || 'block_submit',
     };
+  } else if (rule.type === 'specific_positions') {
+    legacyRule = {
+      type: 'specific_positions',
+      positionTitles: Array.isArray(rule.positionTitles) ? rule.positionTitles : [],
+      emptyApproverAction: step?.emptyApproverAction || 'block_submit',
+    };
   } else if (rule.type === 'submitter_manager') {
     legacyRule = {
       type: 'direct_supervisor',
@@ -1494,6 +1513,8 @@ function approvalStepToLegacyNode(step, index = 0) {
     title: step?.name || `审批节点 ${index + 1}`,
     subtitle: rule.type === 'multi_supervisor'
       ? `\u8fde\u7eed\u5ba1\u6279\uff1a\u53d1\u8d77\u4eba\u7684\u7b2c ${getSupervisorLevels(rule).join('\u3001')} \u7ea7\u4e3b\u7ba1`
+      : rule.type === 'specific_positions'
+        ? `\u6307\u5b9a\u804c\u4f4d\uff1a${(Array.isArray(rule.positionTitles) ? rule.positionTitles : []).join('\u3001') || '\u672a\u9009\u62e9'}`
       : step?.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
     rule: legacyRule,
     approvalMode: step?.approvalMode === 'all_of' ? 'all_of' : 'one_of',
@@ -1558,6 +1579,9 @@ function normalizeApprovalStep(step, index = 0) {
         ...(rule.supervisorLevels ? { supervisorLevels: normalizeWorkflowText(rule.supervisorLevels) } : {}),
       } : {}),
       memberIds: isLegacyRoleRule ? getLegacyRoleGroupMemberIds(legacyRoleGroupId) : Array.isArray(rule.memberIds) ? rule.memberIds : [],
+      positionTitles: Array.isArray(rule.positionTitles)
+        ? rule.positionTitles.map((title) => normalizeWorkflowText(title)).filter(Boolean)
+        : [],
       departmentIds: Array.isArray(rule.departmentIds) ? rule.departmentIds : [],
     },
     approvalMode: WORKFLOW_APPROVAL_MODES.has(step?.approvalMode) ? step.approvalMode : 'one_of',
@@ -1689,6 +1713,14 @@ function normalizeWorkflowDraft(draft) {
       departmentIds: isFlexibleFlow && Array.isArray(nextDraft.ccRule?.departmentIds) ? nextDraft.ccRule.departmentIds : [],
       timing: 'workflow_completed',
     },
+    processorRule: {
+      ...createDefaultProcessorRule(),
+      ...(isFlexibleFlow ? nextDraft.processorRule || {} : {}),
+      taskName: normalizeWorkflowText(nextDraft.processorRule?.taskName) || '办理任务',
+      memberIds: isFlexibleFlow && Array.isArray(nextDraft.processorRule?.memberIds) ? nextDraft.processorRule.memberIds : [],
+      departmentIds: isFlexibleFlow && Array.isArray(nextDraft.processorRule?.departmentIds) ? nextDraft.processorRule.departmentIds : [],
+      timing: 'approval_completed',
+    },
     formFields: Array.isArray(nextDraft.formFields) ? nextDraft.formFields : [],
     ...(isFlexibleFlow ? { flowMode: 'flexible' } : {}),
     nodes: legacyNodes,
@@ -1798,6 +1830,8 @@ function validateWorkflowDraftForPublish(draft) {
         errors.push(`${stepLabel} 必须配置审批人规则`);
       } else if (rule.type === 'specific_members' && (!Array.isArray(rule.memberIds) || rule.memberIds.length === 0)) {
         errors.push(`${stepLabel} 必须选择指定成员`);
+      } else if (rule.type === 'specific_positions' && (!Array.isArray(rule.positionTitles) || rule.positionTitles.length === 0)) {
+        errors.push(`${stepLabel} 必须选择指定职位`);
       }
     });
   });
@@ -1822,6 +1856,7 @@ function createDefaultWorkflowVersion(status = 'draft') {
     flowMode: 'flexible',
     branches: [createDefaultWorkflowBranch()],
     ccRule: createDefaultCcRule(),
+    processorRule: createDefaultProcessorRule(),
     formFields: [
       { id: 'field-vendor', label: '供应商', type: 'text', required: true },
       { id: 'field-currency', label: '币种', type: 'select', required: true },
@@ -2620,6 +2655,20 @@ function findMemberById(directory, memberId) {
   return (directory.members || []).find((member) => member.id === memberId && member.enabled !== false) || null;
 }
 
+function findMembersByPositionTitles(directory, positionTitles) {
+  const titleSet = new Set(
+    (Array.isArray(positionTitles) ? positionTitles : [])
+      .map((title) => normalizeWorkflowText(title))
+      .filter(Boolean),
+  );
+  if (titleSet.size === 0) return [];
+
+  return (directory.members || []).filter((member) => (
+    member.enabled !== false &&
+    titleSet.has(normalizeWorkflowText(member.title))
+  ));
+}
+
 function toApproverSnapshot(member) {
   return {
     memberId: member.id,
@@ -2633,6 +2682,15 @@ function toCcRecipientSnapshot(member) {
     memberId: member.id,
     name: member.name,
     ...(member.accountUsername ? { accountUsername: member.accountUsername } : {}),
+  };
+}
+
+function toProcessorSnapshot(member) {
+  return {
+    memberId: member.id,
+    name: member.name,
+    ...(member.accountUsername ? { accountUsername: member.accountUsername } : {}),
+    status: 'pending',
   };
 }
 
@@ -2731,6 +2789,8 @@ function resolveApproversForRule(rule, directory, applicantMember) {
 
   if (approverRule.type === 'specified' || approverRule.type === 'specific_members') {
     members = (approverRule.memberIds || []).map((memberId) => findMemberById(directory, memberId)).filter(Boolean);
+  } else if (approverRule.type === 'specific_positions') {
+    members = findMembersByPositionTitles(directory, approverRule.positionTitles);
   } else if (approverRule.type === 'role') {
     members = getLegacyRoleGroupMemberIds(approverRule.roleGroupId).map((memberId) => findMemberById(directory, memberId)).filter(Boolean);
   } else if (approverRule.type === 'direct_supervisor') {
@@ -2771,6 +2831,35 @@ function resolveCcRecipientsForRule(ccRule, directory) {
   }
 
   return uniqueMembers(members).map(toCcRecipientSnapshot);
+}
+
+function hasProcessorRule(processorRule) {
+  return Boolean(
+    (Array.isArray(processorRule?.memberIds) && processorRule.memberIds.length > 0) ||
+    (Array.isArray(processorRule?.departmentIds) && processorRule.departmentIds.length > 0)
+  );
+}
+
+function resolveProcessorsForRule(processorRule, directory) {
+  const rule = processorRule || createDefaultProcessorRule();
+  if (!hasProcessorRule(rule)) return [];
+
+  const members = [];
+  const departmentIds = new Set(Array.isArray(rule.departmentIds) ? rule.departmentIds : []);
+
+  (Array.isArray(rule.memberIds) ? rule.memberIds : []).forEach((memberId) => {
+    members.push(findMemberById(directory, memberId));
+  });
+
+  if (departmentIds.size > 0) {
+    (directory.members || []).forEach((member) => {
+      if (member.enabled !== false && departmentIds.has(member.departmentId)) {
+        members.push(member);
+      }
+    });
+  }
+
+  return uniqueMembers(members).filter((member) => normalizeWorkflowText(member.accountUsername)).map(toProcessorSnapshot);
 }
 
 function createWorkflowStep(node, order, approvers, status = STEP_NOT_STARTED, comment) {
@@ -2822,6 +2911,11 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
     ?.approvalTypes.find((approvalType) => approvalType.name === approvalTypeName);
   const applicantMember = findMemberByAccount(directory, applicantUsername);
   const ccRecipients = resolveCcRecipientsForRule(version.ccRule, directory);
+  const hasProcessor = hasProcessorRule(version.processorRule);
+  const processors = resolveProcessorsForRule(version.processorRule, directory);
+  if (hasProcessor && processors.length === 0) {
+    throw createHttpError('No processor can be resolved for this workflow. Please bind the processor to a login account.', 400);
+  }
   const nodes = await getLinearApproverNodes(version, {
     businessData,
     directory,
@@ -2883,7 +2977,9 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
       steps,
     },
     ccRecipients,
-    initialStatus: firstPendingIndex >= 0 ? STATUS_PENDING : STATUS_APPROVED,
+    processors,
+    processorTaskName: processors.length > 0 ? (normalizeWorkflowText(version.processorRule?.taskName) || '办理任务') : undefined,
+    initialStatus: firstPendingIndex >= 0 ? STATUS_PENDING : (processors.length > 0 ? STATUS_PROCESSING : STATUS_APPROVED),
   };
 }
 
@@ -2911,6 +3007,15 @@ function canUserApproveRecord(user, record) {
   ));
 }
 
+function canUserProcessRecord(user, record) {
+  if (!user || record?.status !== STATUS_PROCESSING) return false;
+
+  return (record.processors || []).some((processor) => (
+    normalizeWorkflowText(processor.accountUsername).toLowerCase() === normalizeWorkflowText(user.username).toLowerCase()
+    && processor.status !== 'completed'
+  ));
+}
+
 function hasUserHandledWorkflowRecord(user, record) {
   if (!user || !record?.workflowInstance?.steps) return false;
 
@@ -2923,8 +3028,20 @@ function hasUserHandledWorkflowRecord(user, record) {
   ));
 }
 
+function hasUserProcessedRecord(user, record) {
+  if (!user) return false;
+  if (normalizeWorkflowText(record?.processedByAccountUsername).toLowerCase() === normalizeWorkflowText(user.username).toLowerCase()) {
+    return true;
+  }
+
+  return (record?.processors || []).some((processor) => (
+    normalizeWorkflowText(processor.accountUsername).toLowerCase() === normalizeWorkflowText(user.username).toLowerCase()
+    && processor.status === 'completed'
+  ));
+}
+
 function isWorkflowClosed(record) {
-  return [STATUS_APPROVED, STATUS_REJECTED].includes(record?.status);
+  return [STATUS_APPROVED, STATUS_COMPLETED, STATUS_REJECTED].includes(record?.status);
 }
 
 function hasUserCcAccess(user, record) {
@@ -2945,6 +3062,8 @@ function canUserSeeRecord(user, record) {
     || record.approver === user.name
     || canUserApproveRecord(user, record)
     || hasUserHandledWorkflowRecord(user, record)
+    || canUserProcessRecord(user, record)
+    || hasUserProcessedRecord(user, record)
     || hasUserCcAccess(user, record)
   );
 }
@@ -2971,6 +3090,34 @@ function appendCcLog(record, user) {
   const recipientNames = getCcRecipientNames(record);
   if (!recipientNames) return;
   appendApprovalLog(record, '抄送', user, `流程结束，已同步给：${recipientNames}`);
+}
+
+function getProcessorNames(record) {
+  return (record.processors || [])
+    .map((processor) => processor.name)
+    .filter(Boolean)
+    .join('、');
+}
+
+function appendProcessorLog(record, user, details) {
+  appendApprovalLog(record, '进入办理', user, details || `审批通过，等待办理人：${getProcessorNames(record) || '未配置'}`);
+}
+
+function startProcessingOrApproveRecord(record, user, now, currentStep) {
+  if (Array.isArray(record.processors) && record.processors.length > 0) {
+    record.workflowInstance.currentStepIndex = -1;
+    record.status = STATUS_PROCESSING;
+    record.approvedAt = now;
+    appendApprovalLog(record, '\u5b8c\u6210', user, 'Workflow approved', currentStep);
+    appendProcessorLog(record, user, `审批通过，等待${record.processorTaskName || '办理任务'}办理人：${getProcessorNames(record) || '未配置'}`);
+    return;
+  }
+
+  record.workflowInstance.currentStepIndex = -1;
+  record.status = STATUS_APPROVED;
+  record.approvedAt = now;
+  appendApprovalLog(record, '\u5b8c\u6210', user, 'Workflow approved', currentStep);
+  appendCcLog(record, user);
 }
 
 function getActingApprover(user, step) {
@@ -3050,12 +3197,38 @@ function advanceWorkflowRecord(record, user, status, reason) {
     record.workflowInstance.currentStepIndex = nextStepIndex;
     appendApprovalLog(record, '\u6d41\u7a0b\u63a8\u8fdb', user, `Moved to ${record.workflowInstance.steps[nextStepIndex].name}`, record.workflowInstance.steps[nextStepIndex]);
   } else {
-    record.workflowInstance.currentStepIndex = -1;
-    record.status = STATUS_APPROVED;
-    record.approvedAt = now;
-    appendApprovalLog(record, '\u5b8c\u6210', user, 'Workflow approved', currentStep);
-    appendCcLog(record, user);
+    startProcessingOrApproveRecord(record, user, now, currentStep);
   }
+
+  return record;
+}
+
+function completeProcessingRecord(record, user, comment) {
+  if (record.status !== STATUS_PROCESSING) {
+    throw createHttpError('approval record is not waiting for processing', 409);
+  }
+
+  if (!canUserProcessRecord(user, record)) {
+    throw createHttpError('current user is not a processor for this record', 403);
+  }
+
+  const now = new Date().toISOString();
+  const details = normalizeWorkflowText(comment);
+  (record.processors || []).forEach((processor) => {
+    if (normalizeWorkflowText(processor.accountUsername).toLowerCase() !== normalizeWorkflowText(user.username).toLowerCase()) return;
+    processor.status = 'completed';
+    processor.actedAt = now;
+    processor.comment = details || `${record.processorTaskName || '办理任务'}已完成`;
+  });
+
+  record.status = STATUS_COMPLETED;
+  record.updatedAt = now;
+  record.processedBy = user.name;
+  record.processedByAccountUsername = user.username;
+  record.processedAt = now;
+  if (details) record.processComment = details;
+  appendApprovalLog(record, '办理完成', user, details || `${record.processorTaskName || '办理任务'}已完成`);
+  appendCcLog(record, user);
 
   return record;
 }
@@ -3194,6 +3367,8 @@ function toPublicRecord(record, user) {
     ...record,
     currentUserCanApprove: canUserApproveRecord(user, record),
     currentUserHasApproved: hasUserHandledWorkflowRecord(user, record) || record.approver === user?.name,
+    currentUserCanProcess: canUserProcessRecord(user, record),
+    currentUserHasProcessed: hasUserProcessedRecord(user, record),
     currentUserIsCc: hasUserCcAccess(user, record),
   };
 }
@@ -4453,13 +4628,18 @@ app.post('/api/records', authenticate, requireRoles('employee', 'boss'), async (
       applicant,
       workflowInstance: workflow.instance,
       ccRecipients: workflow.ccRecipients,
+      processors: workflow.processors,
+      ...(workflow.processorTaskName ? { processorTaskName: workflow.processorTaskName } : {}),
       aiSuggestion: createGeneratingAiSuggestion(),
       createdAt: now,
       updatedAt: now,
-      ...(workflow.initialStatus === STATUS_APPROVED ? { approvedAt: now } : {}),
+      ...([STATUS_APPROVED, STATUS_PROCESSING].includes(workflow.initialStatus) ? { approvedAt: now } : {}),
       logs: [
         createLog('\u53d1\u8d77\u7533\u8bf7', applicant, '\u63d0\u4ea4\u4e86\u5ba1\u6279\u5355'),
         createLog('\u5339\u914d\u5ba1\u6279\u6d41', 'system', `Matched workflow: ${workflow.instance.workflowName} v${workflow.instance.workflowVersion}`),
+        ...(workflow.initialStatus === STATUS_PROCESSING
+          ? [createLog('进入办理', 'system', `审批通过，等待${workflow.processorTaskName || '办理任务'}办理人：${workflow.processors.map((processor) => processor.name).join('、')}`)]
+          : []),
         ...(workflow.initialStatus === STATUS_APPROVED && workflow.ccRecipients.length > 0
           ? [createLog('抄送', 'system', `流程结束，已同步给：${workflow.ccRecipients.map((recipient) => recipient.name).join('、')}`)]
           : []),
@@ -4523,6 +4703,21 @@ app.patch('/api/records/:id/status', authenticate, requireRoles('employee', 'bos
       ];
 
       return record;
+    });
+
+    res.json(toPublicRecord(updatedRecord, req.user));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/records/:id/process', authenticate, requireRoles('employee', 'boss'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { comment } = req.body || {};
+
+    const updatedRecord = await updateRecordById(id, (record) => {
+      return completeProcessingRecord(record, req.user, comment);
     });
 
     res.json(toPublicRecord(updatedRecord, req.user));

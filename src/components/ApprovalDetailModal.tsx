@@ -1,7 +1,7 @@
 import React from 'react';
 import { ApprovalAttachment, ApprovalMode, ApprovalRecord, ApprovalStatus } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle, Download, Eye, Check, Clock, Sparkles } from 'lucide-react';
+import { X, FileText, ShieldCheck, AlertCircle, CheckCircle2, XCircle, Download, Eye, Check, Clock, Sparkles, UserCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatLocalDateTime } from '../lib/time';
 import { storage } from '../storage';
@@ -12,6 +12,7 @@ interface ApprovalDetailModalProps {
   onClose: () => void;
   onApprove?: (record: ApprovalRecord) => void;
   onReject?: (record: ApprovalRecord) => void;
+  onCompleteProcess?: (record: ApprovalRecord) => void;
   showAiSuggestion?: boolean;
   showAiRawResponse?: boolean;
 }
@@ -187,13 +188,30 @@ function getCcTimelineItem(record: ApprovalRecord, finishedAt?: string) {
   if (recipients.length === 0) return null;
 
   const recipientNames = recipients.map((recipient) => recipient.name).filter(Boolean).join('、');
-  const isFinished = record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.REJECTED;
+  const isFinished = record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.COMPLETED || record.status === ApprovalStatus.REJECTED;
 
   return {
     title: '抄送',
     desc: isFinished ? `已同步给：${recipientNames}` : `流程结束后同步给：${recipientNames}`,
     time: isFinished ? finishedAt : undefined,
     state: isFinished ? 'done' : 'pending',
+  };
+}
+
+function getProcessorTimelineItem(record: ApprovalRecord) {
+  const processors = record.processors || [];
+  if (processors.length === 0) return null;
+
+  const processorNames = processors.map((processor) => processor.name).filter(Boolean).join('、');
+  const isCompleted = record.status === ApprovalStatus.COMPLETED;
+
+  return {
+    title: record.processorTaskName || '办理任务',
+    desc: isCompleted
+      ? `办理人：${record.processedBy || processorNames || '未记录'} 已完成`
+      : `待办理人处理：${processorNames || '未解析'}`,
+    time: record.processedAt,
+    state: isCompleted ? 'done' : (record.status === ApprovalStatus.PROCESSING ? 'active' : 'pending'),
   };
 }
 
@@ -210,7 +228,7 @@ function getApprovalModeDesc(mode?: ApprovalMode) {
   return mode === 'all_of' ? '通过方式：所有人都要通过' : '通过方式：任意一人通过';
 }
 
-export default function ApprovalDetailModal({ record, onClose, onApprove, onReject, showAiSuggestion = false }: ApprovalDetailModalProps) {
+export default function ApprovalDetailModal({ record, onClose, onApprove, onReject, onCompleteProcess, showAiSuggestion = false }: ApprovalDetailModalProps) {
   const [preview, setPreview] = React.useState<PreviewState | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = React.useState(false);
 
@@ -223,10 +241,31 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
   if (!record) return null;
 
   const canReview = record.status === ApprovalStatus.PENDING && record.currentUserCanApprove !== false && !!onApprove && !!onReject;
+  const canProcess = record.status === ApprovalStatus.PROCESSING && record.currentUserCanProcess !== false && !!onCompleteProcess;
   const aiSuggestion = getAiSuggestionDisplay(record);
-  const finishedAt = record.approvedAt || record.rejectedAt;
+  const finishedAt = record.processedAt || record.approvedAt || record.rejectedAt;
   const workflowSteps = record.workflowInstance?.steps;
+  const processorTimelineItem = getProcessorTimelineItem(record);
   const ccTimelineItem = getCcTimelineItem(record, finishedAt);
+  const hasResultPanel = [
+    ApprovalStatus.PROCESSING,
+    ApprovalStatus.APPROVED,
+    ApprovalStatus.COMPLETED,
+    ApprovalStatus.REJECTED,
+  ].includes(record.status);
+  const isPositiveResult = record.status !== ApprovalStatus.REJECTED;
+  const resultTitle = record.status === ApprovalStatus.PROCESSING
+    ? '审批通过，待办理'
+    : record.status === ApprovalStatus.COMPLETED
+      ? '办理完成'
+      : record.status === ApprovalStatus.APPROVED
+        ? '核准通过'
+        : '校验失败';
+  const resultSubtitle = record.status === ApprovalStatus.PROCESSING
+    ? `等待${record.processorTaskName || '办理任务'}`
+    : record.status === ApprovalStatus.COMPLETED
+      ? `${record.processorTaskName || '办理任务'}已完成`
+      : '裁定结果已存证';
   const approvalTimeline = workflowSteps?.length
     ? [
         {
@@ -246,6 +285,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
             ? 'done'
             : (step.status === 'pending' ? 'active' : (step.status === 'rejected' ? 'failed' : 'pending')),
         })),
+        ...(processorTimelineItem ? [processorTimelineItem] : []),
         ...(ccTimelineItem ? [ccTimelineItem] : []),
       ]
     : [
@@ -263,14 +303,15 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
         },
         {
           title: record.status === ApprovalStatus.REJECTED ? '审批驳回' : '审批通过',
-          desc: record.status === ApprovalStatus.APPROVED
+          desc: record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.PROCESSING || record.status === ApprovalStatus.COMPLETED
             ? '审批流程已通过'
             : (record.status === ApprovalStatus.REJECTED ? '审批流程已被拒绝' : '等待最终审批结果'),
-          time: finishedAt,
-          state: record.status === ApprovalStatus.APPROVED
+          time: record.approvedAt || record.rejectedAt,
+          state: record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.PROCESSING || record.status === ApprovalStatus.COMPLETED
             ? 'done'
             : (record.status === ApprovalStatus.REJECTED ? 'failed' : 'pending'),
         },
+        ...(processorTimelineItem ? [processorTimelineItem] : []),
         ...(ccTimelineItem ? [ccTimelineItem] : []),
       ];
 
@@ -551,31 +592,31 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
               )}
 
               {/* Approval Result if processed */}
-              {(record.status === ApprovalStatus.APPROVED || record.status === ApprovalStatus.REJECTED) && (
+              {hasResultPanel && (
                 <div className={cn(
                   "p-8 rounded-[32px] border relative overflow-hidden",
-                  record.status === ApprovalStatus.APPROVED ? "bg-black text-white border-black" : "bg-[#fff1f0]/20 border-rose-100"
+                  isPositiveResult ? "bg-black text-white border-black" : "bg-[#fff1f0]/20 border-rose-100"
                 )}>
-                  {record.status === ApprovalStatus.APPROVED && (
+                  {isPositiveResult && (
                     <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 blur-2xl" />
                   )}
                   <div className="flex items-center justify-between relative">
                     <div className="flex items-center gap-5">
                       <div className={cn(
                         "w-10 h-10 rounded-2xl flex items-center justify-center",
-                        record.status === ApprovalStatus.APPROVED ? "bg-white text-black" : "bg-rose-500 text-white"
+                        isPositiveResult ? "bg-white text-black" : "bg-rose-500 text-white"
                       )}>
-                        {record.status === ApprovalStatus.APPROVED ? <ShieldCheck size={20} strokeWidth={2.5} /> : <AlertCircle size={20} strokeWidth={2.5} />}
+                        {isPositiveResult ? <ShieldCheck size={20} strokeWidth={2.5} /> : <AlertCircle size={20} strokeWidth={2.5} />}
                       </div>
                       <div>
-                        <p className={cn("text-[16px] font-black uppercase tracking-tight", record.status === ApprovalStatus.APPROVED ? "text-white" : "text-black")}>
-                          {record.status === ApprovalStatus.APPROVED ? '核准通过' : '校验失败'}
+                        <p className={cn("text-[16px] font-black uppercase tracking-tight", isPositiveResult ? "text-white" : "text-black")}>
+                          {resultTitle}
                         </p>
-                        <p className={cn("text-[10px] font-black uppercase tracking-[0.16em]", record.status === ApprovalStatus.APPROVED ? "text-white/70" : "text-medium-gray")}>裁定结果已存证</p>
+                        <p className={cn("text-[10px] font-black uppercase tracking-[0.16em]", isPositiveResult ? "text-white/70" : "text-medium-gray")}>{resultSubtitle}</p>
                       </div>
                     </div>
-                    <span className={cn("text-[10px] font-black font-mono uppercase tracking-widest", record.status === ApprovalStatus.APPROVED ? "text-white/70" : "text-medium-gray")}>
-                      {formatLocalDateTime(record.approvedAt || record.rejectedAt, 'time-seconds')}
+                    <span className={cn("text-[10px] font-black font-mono uppercase tracking-widest", isPositiveResult ? "text-white/70" : "text-medium-gray")}>
+                      {formatLocalDateTime(record.processedAt || record.approvedAt || record.rejectedAt, 'time-seconds')}
                     </span>
                   </div>
                   {record.rejectReason && (
@@ -766,6 +807,22 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                   >
                     <XCircle size={18} strokeWidth={2.5} />
                     驳回申请
+                  </button>
+                  <button
+                    onClick={onClose}
+                    className="h-14 px-6 bg-white border border-black/[0.06] text-medium-gray text-[13px] font-black rounded-2xl hover:text-black hover:border-black/[0.12] transition-all"
+                  >
+                    关闭
+                  </button>
+                </div>
+              ) : canProcess ? (
+                <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3">
+                  <button
+                    onClick={() => onCompleteProcess?.(record)}
+                    className="h-14 bg-black text-white text-[13px] font-black rounded-2xl hover:bg-black/90 transition-all shadow-xl shadow-black/10 flex items-center justify-center gap-2"
+                  >
+                    <UserCheck size={18} strokeWidth={2.5} />
+                    完成办理
                   </button>
                   <button
                     onClick={onClose}

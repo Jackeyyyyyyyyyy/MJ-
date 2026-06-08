@@ -8,7 +8,9 @@ export function cn(...inputs: ClassValue[]) {
 export enum ApprovalStatus {
   DRAFT = '草稿',
   PENDING = '待审批',
+  PROCESSING = '待办理',
   APPROVED = '已批准',
+  COMPLETED = '已完成',
   REJECTED = '已拒绝',
 }
 
@@ -18,6 +20,7 @@ export type AdminView = 'accounts' | 'ai-assistant' | 'ai-assistant-prompt' | 'o
 
 export type ApproverRuleType =
   | 'specific_members'
+  | 'specific_positions'
   | 'submitter_manager'
   | 'specified'
   | 'direct_supervisor'
@@ -50,6 +53,7 @@ export interface OrganizationDirectory {
 export interface ApproverRule {
   type: ApproverRuleType;
   memberIds?: string[];
+  positionTitles?: string[];
   departmentIds?: string[];
   supervisorLevel?: number;
   supervisorDepth?: number;
@@ -124,6 +128,13 @@ export interface CcRule {
   departmentIds: string[];
 }
 
+export interface ProcessorRule {
+  timing: 'approval_completed';
+  taskName?: string;
+  memberIds: string[];
+  departmentIds: string[];
+}
+
 export type WorkflowStepStatus = 'not_started' | 'pending' | 'approved' | 'rejected' | 'skipped';
 
 export interface WorkflowApproverSnapshot {
@@ -139,6 +150,15 @@ export interface WorkflowCcRecipientSnapshot {
   memberId: string;
   name: string;
   accountUsername?: string;
+}
+
+export interface WorkflowProcessorSnapshot {
+  memberId: string;
+  name: string;
+  accountUsername?: string;
+  status?: 'pending' | 'completed';
+  actedAt?: string;
+  comment?: string;
 }
 
 export interface WorkflowInstanceStep {
@@ -208,6 +228,7 @@ export interface WorkflowVersion {
   submitPermission?: SubmitPermissionRule;
   branches?: WorkflowBranch[];
   ccRule?: CcRule;
+  processorRule?: ProcessorRule;
   formFields?: WorkflowFormField[];
   flowMode?: 'flexible';
   nodes: WorkflowNode[];
@@ -429,8 +450,12 @@ export interface ApprovalRecord {
   applicant: string;
   workflowInstance?: WorkflowInstance;
   ccRecipients?: WorkflowCcRecipientSnapshot[];
+  processors?: WorkflowProcessorSnapshot[];
+  processorTaskName?: string;
   currentUserCanApprove?: boolean;
   currentUserHasApproved?: boolean;
+  currentUserCanProcess?: boolean;
+  currentUserHasProcessed?: boolean;
   currentUserIsCc?: boolean;
   aiSuggestion?: AiSuggestion;
   createdAt: string;
@@ -438,6 +463,10 @@ export interface ApprovalRecord {
   approver?: string;
   approvedAt?: string;
   rejectedAt?: string;
+  processedBy?: string;
+  processedByAccountUsername?: string;
+  processedAt?: string;
+  processComment?: string;
   rejectReason?: string;
   logs: ApprovalLog[];
 }

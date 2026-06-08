@@ -25,7 +25,7 @@ type AppRoute =
   | { kind: 'module'; moduleName: string; typeName: string };
 
 const adminRouteViews: AdminView[] = ['accounts', 'ai-assistant', 'ai-assistant-prompt', 'organization', 'workflows', 'business-forms', 'ai-branch-logs'];
-const workRouteTabs: WorkTab[] = ['requests', 'approvals', 'cc', 'global'];
+const workRouteTabs: WorkTab[] = ['requests', 'approvals', 'processing', 'cc', 'global'];
 
 function decodeRoutePart(part?: string) {
   if (!part) return '';
@@ -228,6 +228,13 @@ function MainApp() {
     await loadDynamicRecords();
   };
 
+  const handleDynamicCompleteProcess = async (record: ApprovalRecord) => {
+    if (!window.confirm(`确认完成 ${record.processorTaskName || '办理任务'}？`)) return;
+
+    await storage.completeProcessing(record.id);
+    await loadDynamicRecords();
+  };
+
   useEffect(() => {
     loadDynamicRecords();
   }, [selectedModule, selectedType, activeUsername]);
@@ -357,6 +364,7 @@ function MainApp() {
             showAiRawResponse={canSeeAiSuggestion}
             onApprove={canReview && selectedOne?.currentUserCanApprove ? (record) => { setShowD(false); void handleDynamicApprove(record); } : undefined}
             onReject={canReview && selectedOne?.currentUserCanApprove ? (record) => { setShowD(false); void handleDynamicReject(record); } : undefined}
+            onCompleteProcess={selectedOne?.currentUserCanProcess ? (record) => { setShowD(false); void handleDynamicCompleteProcess(record); } : undefined}
           />
           <ApprovalProgressModal record={selectedOne} onClose={() => { setSelectedOne(null); setShowP(false); }} />
         </div>

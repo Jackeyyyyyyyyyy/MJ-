@@ -16,7 +16,8 @@ import {
   AlertCircle,
   XCircle,
   Trash2,
-  Loader2
+  Loader2,
+  UserCheck
 } from 'lucide-react';
 
 export default function BossDashboard() {
@@ -79,6 +80,14 @@ export default function BossDashboard() {
     }
   };
 
+  const handleCompleteProcess = async (record: ApprovalRecord) => {
+    if (!window.confirm(`确认完成 ${record.processorTaskName || '办理任务'}？`)) return;
+
+    await storage.completeProcessing(record.id);
+    setSelectedRecord(null);
+    await loadData();
+  };
+
   const openClearConfirm = () => {
     setClearError('');
     setIsClearConfirmOpen(true);
@@ -118,18 +127,21 @@ export default function BossDashboard() {
       (summary, record) => {
         summary.total += 1;
         if (record.status === ApprovalStatus.PENDING) summary.pending += 1;
+        if (record.status === ApprovalStatus.PROCESSING) summary.processing += 1;
         if (record.status === ApprovalStatus.APPROVED) summary.approved += 1;
+        if (record.status === ApprovalStatus.COMPLETED) summary.completed += 1;
         if (record.status === ApprovalStatus.REJECTED) summary.rejected += 1;
         return summary;
       },
-      { total: 0, pending: 0, approved: 0, rejected: 0 },
+      { total: 0, pending: 0, processing: 0, approved: 0, completed: 0, rejected: 0 },
     );
   }, [allRecords]);
 
   const summaryItems = [
     { label: '总申请', value: stats.total, icon: FileText, tone: 'text-midnight-graphite', bg: 'bg-lightest-gray-background' },
     { label: '待审批', value: stats.pending, icon: Clock, tone: 'text-medium-gray', bg: 'bg-lightest-gray-background' },
-    { label: '已通过', value: stats.approved, icon: CheckCircle2, tone: 'text-[#2e7d32]', bg: 'bg-[#e8f5e9]' },
+    { label: '待办理', value: stats.processing, icon: UserCheck, tone: 'text-[#7b5b18]', bg: 'bg-[#fff7e0]' },
+    { label: '已完成', value: stats.approved + stats.completed, icon: CheckCircle2, tone: 'text-[#2e7d32]', bg: 'bg-[#e8f5e9]' },
     { label: '被驳回', value: stats.rejected, icon: XCircle, tone: 'text-[#c62828]', bg: 'bg-[#ffebee]' },
   ];
 
@@ -163,7 +175,7 @@ export default function BossDashboard() {
             </div>
 
             <div className="flex bg-lightest-gray-background p-1 rounded-xl">
-              {(['ALL', ApprovalStatus.PENDING, ApprovalStatus.APPROVED, ApprovalStatus.REJECTED] as string[]).map((s) => (
+              {(['ALL', ApprovalStatus.PENDING, ApprovalStatus.PROCESSING, ApprovalStatus.APPROVED, ApprovalStatus.COMPLETED, ApprovalStatus.REJECTED] as string[]).map((s) => (
                 <button
                   key={s}
                   onClick={() => setFilterStatus(s === 'ALL' ? '全部状态' : s)}
@@ -172,7 +184,15 @@ export default function BossDashboard() {
                     (filterStatus === s || (filterStatus === '全部状态' && s === 'ALL')) ? "bg-white text-black shadow-sm" : "text-light-gray hover:text-black"
                   )}
                 >
-                  {s === 'ALL' ? '全部' : (s === ApprovalStatus.PENDING ? '待处理' : (s === ApprovalStatus.APPROVED ? '已通过' : '驳回'))}
+                  {s === 'ALL'
+                    ? '全部'
+                    : s === ApprovalStatus.PENDING
+                      ? '待审批'
+                      : s === ApprovalStatus.PROCESSING
+                        ? '待办理'
+                        : s === ApprovalStatus.COMPLETED
+                          ? '已完成'
+                          : (s === ApprovalStatus.APPROVED ? '已通过' : '驳回')}
                 </button>
               ))}
             </div>
@@ -210,6 +230,7 @@ export default function BossDashboard() {
           showAiRawResponse={canClearRecords}
           onApprove={selectedRecord.currentUserCanApprove ? openApproveConfirm : undefined}
           onReject={selectedRecord.currentUserCanApprove ? openRejectConfirm : undefined}
+          onCompleteProcess={selectedRecord.currentUserCanProcess ? handleCompleteProcess : undefined}
         />
       )}
 

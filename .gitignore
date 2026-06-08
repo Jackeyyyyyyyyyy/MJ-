@@ -3,9 +3,15 @@ build/
 dist/
 coverage/
 data/
+.env*
+!.env.example
+
+# Local scratch / temporary handoff files
 .codex-git-tmp/
+_疑似垃圾_已隔离/
 /7508ff027f03db621bce44250088499a.png
 .DS_Store
 *.log
-.env*
-!.env.example
+*.zip
+*.rar
+*.7z

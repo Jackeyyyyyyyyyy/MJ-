@@ -13,8 +13,10 @@ import {
   Minus,
   Plus,
   Save,
+  Search,
   Send,
   Trash2,
+  UserCheck,
   UserRound,
   Users,
 } from 'lucide-react';
@@ -26,6 +28,7 @@ import {
   ApproverRule,
   CcRule,
   OrganizationDirectory,
+  ProcessorRule,
   SubmitPermissionRule,
   WorkflowBranch,
   WorkflowBusinessType,
@@ -303,6 +306,15 @@ function defaultCcRule(): CcRule {
   };
 }
 
+function defaultProcessorRule(): ProcessorRule {
+  return {
+    timing: 'approval_completed',
+    taskName: '办理任务',
+    memberIds: [],
+    departmentIds: [],
+  };
+}
+
 function defaultCondition(field: WorkflowConditionField = 'amount'): WorkflowCondition {
   if (field === 'currency') {
     return {
@@ -369,6 +381,7 @@ function createDraft(name: string, scope: BusinessScopeOption): WorkflowVersion 
     submitPermission: defaultSubmitPermission(),
     branches: [defaultBranch()],
     ccRule: defaultCcRule(),
+    processorRule: defaultProcessorRule(),
     formFields: [],
     nodes: [],
   });
@@ -414,6 +427,8 @@ function legacyNodeToStep(node: WorkflowNode, index: number): ApprovalStep {
 
   if (legacyRule.type === 'specified') {
     approverRule = { type: 'specific_members', memberIds: legacyRule.memberIds || [] };
+  } else if (legacyRule.type === 'specific_positions') {
+    approverRule = { type: 'specific_positions', positionTitles: legacyRule.positionTitles || [] };
   } else if (String(legacyRule.type) === 'role') {
     approverRule = { type: 'specific_members', memberIds: getLegacyRoleGroupMemberIds(legacyRule.roleGroupId) };
   } else if (legacyRule.type === 'direct_supervisor') {
@@ -449,6 +464,12 @@ function stepToLegacyNode(step: ApprovalStep, index: number): WorkflowNode {
       memberIds: rule.memberIds || [],
       emptyApproverAction: step.emptyApproverAction,
     };
+  } else if (rule.type === 'specific_positions') {
+    legacyRule = {
+      type: 'specific_positions',
+      positionTitles: rule.positionTitles || [],
+      emptyApproverAction: step.emptyApproverAction,
+    };
   } else if (rule.type === 'submitter_manager') {
     legacyRule = {
       type: 'direct_supervisor',
@@ -469,6 +490,8 @@ function stepToLegacyNode(step: ApprovalStep, index: number): WorkflowNode {
     title: step.name || `审批节点 ${index + 1}`,
     subtitle: rule.type === 'multi_supervisor'
       ? `连续审批：${getSupervisorDepthLabel(rule)}`
+      : rule.type === 'specific_positions'
+        ? `指定职位：${(rule.positionTitles || []).join('、') || '未选择'}`
       : step.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
     rule: legacyRule,
   };
@@ -626,7 +649,7 @@ function normalizeStep(step: Partial<ApprovalStep> | undefined, index: number): 
   } = rule as ApproverRule & { roleGroupId?: string; roleGroupIds?: string[] };
   const type = String(rule.type) === 'department_manager' || String(rule.type) === 'submitter_manager'
     ? 'multi_supervisor'
-    : ['specific_members', 'submitter_manager', 'multi_supervisor'].includes(String(rule.type))
+    : ['specific_members', 'specific_positions', 'submitter_manager', 'multi_supervisor'].includes(String(rule.type))
       ? rule.type
       : 'specific_members';
 
@@ -641,6 +664,7 @@ function normalizeStep(step: Partial<ApprovalStep> | undefined, index: number): 
         ...(rule.supervisorLevels ? { supervisorLevels: String(rule.supervisorLevels) } : {}),
       } : {}),
       memberIds: isLegacyRoleRule ? getLegacyRoleGroupMemberIds(legacyRoleGroupId) : Array.isArray(rule.memberIds) ? rule.memberIds : [],
+      positionTitles: Array.isArray(rule.positionTitles) ? rule.positionTitles : [],
       departmentIds: Array.isArray(rule.departmentIds) ? rule.departmentIds : [],
     },
     approvalMode: step?.approvalMode === 'all_of' ? 'all_of' : 'one_of',
@@ -787,6 +811,14 @@ function normalizeDraftForEditor(draft: WorkflowVersion): WorkflowVersion {
       departmentIds: draft.ccRule?.departmentIds || [],
       timing: 'workflow_completed',
     },
+    processorRule: {
+      ...defaultProcessorRule(),
+      ...(draft.processorRule || {}),
+      taskName: draft.processorRule?.taskName || '办理任务',
+      memberIds: draft.processorRule?.memberIds || [],
+      departmentIds: draft.processorRule?.departmentIds || [],
+      timing: 'approval_completed',
+    },
     flowMode: isFlexibleFlow ? 'flexible' : undefined,
     nodes: isFlexibleFlow && Array.isArray(draft.nodes) ? draft.nodes : [],
   };
@@ -813,6 +845,7 @@ function prepareDraftForSave(draft: WorkflowVersion): WorkflowVersion {
     flowMode: 'flexible',
     branches: branchesFromFlowNodes(flowNodes),
     ccRule: collectFlowCcRule(flowNodes) || defaultCcRule(),
+    processorRule: nextDraft.processorRule || defaultProcessorRule(),
     nodes: legacyNodes,
   };
 }
@@ -915,6 +948,8 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
         addValidationError(state, 'branches', `${stepLabel} 必须配置审批人规则`, branch.id, step.id);
       } else if (rule.type === 'specific_members' && (!rule.memberIds || rule.memberIds.length === 0)) {
         addValidationError(state, 'branches', `${stepLabel} 必须选择指定成员`, branch.id, step.id);
+      } else if (rule.type === 'specific_positions' && (!rule.positionTitles || rule.positionTitles.length === 0)) {
+        addValidationError(state, 'branches', `${stepLabel} 必须选择指定职位`, branch.id, step.id);
       }
     });
   });
@@ -947,6 +982,9 @@ function formatStepRule(step: ApprovalStep, directory: OrganizationDirectory) {
   const rule = step.approverRule;
   if (rule.type === 'multi_supervisor') return getSupervisorDepthLabel(rule);
   if (rule.type === 'submitter_manager') return '发起人的上级';
+  if (rule.type === 'specific_positions') {
+    return (rule.positionTitles || []).filter(Boolean).join('、') || '指定职位';
+  }
   return (rule.memberIds || [])
     .map((memberId) => directory.members.find((member) => member.id === memberId)?.name)
     .filter(Boolean)
@@ -976,6 +1014,21 @@ function formatSubmitPermission(permission: SubmitPermissionRule, directory: Org
   return excluded ? `${scope}；排除 ${excluded}` : scope;
 }
 
+function formatProcessorRule(rule: ProcessorRule, directory: OrganizationDirectory) {
+  const memberNames = (rule.memberIds || [])
+    .map((memberId) => directory.members.find((member) => member.id === memberId)?.name)
+    .filter(Boolean);
+  const departmentNames = (rule.departmentIds || [])
+    .map((departmentId) => directory.departments.find((department) => department.id === departmentId)?.name)
+    .filter(Boolean);
+  const scope = [
+    memberNames.length ? `${memberNames.length} 个成员` : '',
+    departmentNames.length ? `${departmentNames.length} 个部门` : '',
+  ].filter(Boolean).join('、');
+
+  return scope || '无需办理';
+}
+
 function formatPreviewSubmitter(member: OrganizationDirectory['members'][number] | null, directory: OrganizationDirectory) {
   if (!member) return '暂无可预览申请人';
 
@@ -992,7 +1045,8 @@ type DesignerSelection =
   | { type: 'branch'; branchId: string }
   | { type: 'step'; branchId: string; stepId: string }
   | { type: 'flow-node'; nodeId: string }
-  | { type: 'cc' };
+  | { type: 'cc' }
+  | { type: 'processor' };
 
 const submitDesignerSelection: DesignerSelection = { type: 'submit' };
 
@@ -1011,7 +1065,12 @@ function isDesignerSelected(
 function getApproverTypeLabel(type: ApproverRule['type']) {
   if (type === 'multi_supervisor') return '发起人的多级上级';
   if (type === 'submitter_manager') return '发起人的上级';
+  if (type === 'specific_positions') return '指定职位';
   return '指定成员';
+}
+
+function supportsApprovalMode(rule: ApproverRule) {
+  return rule.type === 'specific_members' || rule.type === 'specific_positions';
 }
 
 function getSupervisorDepthLabel(rule: ApproverRule) {
@@ -1542,7 +1601,7 @@ function FlowNode({
   onClick,
   children,
 }: {
-  tone: 'submit' | 'approval' | 'condition' | 'cc' | 'end';
+  tone: 'submit' | 'approval' | 'condition' | 'cc' | 'processor' | 'end';
   kicker: string;
   title: string;
   subtitle: string;
@@ -1558,6 +1617,7 @@ function FlowNode({
     approval: 'border-[#e2b56c] bg-white',
     condition: 'border-[#79a87b] bg-[#fbfff7]',
     cc: 'border-[#6697d4] bg-[#f7fbff]',
+    processor: 'border-[#8c7a54] bg-[#fffdf7]',
     end: 'border-border-silver bg-white',
   }[tone];
 
@@ -1578,6 +1638,7 @@ function FlowNode({
         tone === 'submit' && "bg-[#7d89b0] text-white",
         tone === 'condition' && "bg-[#edf7ed] text-[#2e7d32]",
         tone === 'cc' && "bg-[#e7f1ff] text-[#2267ad]",
+        tone === 'processor' && "bg-[#fff7e0] text-[#7b5b18]",
         tone === 'end' && "bg-lightest-gray-background text-medium-gray"
       )}>
         <span>{kicker}</span>
@@ -1591,6 +1652,7 @@ function FlowNode({
             tone === 'submit' && "bg-lightest-gray-background text-midnight-graphite",
             tone === 'condition' && "bg-[#edf7ed] text-[#2e7d32]",
             tone === 'cc' && "bg-[#e7f1ff] text-[#2267ad]",
+            tone === 'processor' && "bg-[#fff7e0] text-[#7b5b18]",
             tone === 'end' && "bg-lightest-gray-background text-medium-gray"
           )}>
             {icon}
@@ -1626,14 +1688,27 @@ function getAiBranchTitle(index: number) {
 
 function getAiBranchSelectionExpression(index: number, isDefault = false) {
   const letter = getAiBranchLetter(index);
-  return isDefault ? `AI 选择 ${letter}，或 AI 失败时兜底` : `AI 选择 ${letter}`;
+  return isDefault ? `AI 可选择 ${letter}；未命中或判断失败时也进入 ${letter}` : `AI 选择 ${letter}`;
 }
 
 function getAiBranchDescription(index: number, isDefault = false) {
   const title = getAiBranchTitle(index);
   return isDefault
-    ? `未选择其他分支，或 AI 无法判断时进入 ${title}`
+    ? `可按本分支说明进入 ${title}；未选择其他分支或 AI 无法判断时，也进入 ${title}`
     : `符合 AI 判断规则时进入 ${title}`;
+}
+
+function normalizeAiBranchDescriptionText(value: string | undefined, index: number, isDefault?: boolean) {
+  const text = String(value || '').trim();
+  if (!isDefault) return text;
+
+  const title = getAiBranchTitle(index);
+  const legacyDefaults = new Set([
+    `未选择其他分支，或 AI 无法判断时进入 ${title}`,
+    `未选择其他分支，或 AI 无法判断时进入 ${getAiBranchLetter(index)} 分支`,
+  ]);
+
+  return legacyDefaults.has(text) ? getAiBranchDescription(index, true) : text;
 }
 
 function createConditionBranch(
@@ -1863,12 +1938,14 @@ function WorkflowFlowDesigner({
   directory,
   submitPermission,
   ccRule,
+  processorRule,
   branches,
   validation,
   selection,
   selectedFlowNode,
   fieldOptions,
   memberOptions,
+  positionOptions,
   departmentOptions,
   onSelect,
   onAddBranch,
@@ -1879,6 +1956,7 @@ function WorkflowFlowDesigner({
   onUpdateCondition,
   onPatchSubmitPermission,
   onPatchCcRule,
+  onPatchProcessorRule,
   onAddStep,
   onUpdateStep,
   onRemoveStep,
@@ -1897,12 +1975,14 @@ function WorkflowFlowDesigner({
   directory: OrganizationDirectory;
   submitPermission: SubmitPermissionRule;
   ccRule: CcRule;
+  processorRule: ProcessorRule;
   branches: WorkflowBranch[];
   validation: ValidationState;
   selection: DesignerSelection;
   selectedFlowNode: WorkflowNode | null;
   fieldOptions: ConditionFieldOption[];
   memberOptions: Array<{ value: string; label: string }>;
+  positionOptions: Array<{ value: string; label: string }>;
   departmentOptions: Array<{ value: string; label: string }>;
   onSelect: (selection: DesignerSelection) => void;
   onAddBranch: () => void;
@@ -1913,6 +1993,7 @@ function WorkflowFlowDesigner({
   onUpdateCondition: (branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
   onPatchSubmitPermission: (patch: Partial<SubmitPermissionRule>) => void;
   onPatchCcRule: (patch: Partial<CcRule>) => void;
+  onPatchProcessorRule: (patch: Partial<ProcessorRule>) => void;
   onAddStep: (branchId: string) => void;
   onUpdateStep: (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => void;
   onRemoveStep: (branchId: string, stepId: string) => void;
@@ -1946,6 +2027,7 @@ function WorkflowFlowDesigner({
     || (selection.type === 'step' && selectedStep)
     || selection.type === 'flow-node'
     || selection.type === 'cc'
+    || selection.type === 'processor'
   ) ? selection : submitDesignerSelection;
   const panStartRef = React.useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [isPanning, setIsPanning] = React.useState(false);
@@ -2202,6 +2284,18 @@ function WorkflowFlowDesigner({
                 onInsert={onInsertFlowNode}
                 canUseRuleConditions={fieldOptions.length > 0}
               />
+              <div className="w-[300px]">
+                <FlowNode
+                  tone="processor"
+                  kicker="办理"
+                  title={processorRule.taskName || '办理任务'}
+                  subtitle={formatProcessorRule(processorRule, directory)}
+                  icon={<UserCheck size={17} strokeWidth={2.5} />}
+                  selected={isDesignerSelected(activeSelection, 'processor')}
+                  onClick={() => onSelect({ type: 'processor' })}
+                />
+              </div>
+              <FlowConnector />
               <div className="w-[180px]">
                 <FlowNode
                   tone="end"
@@ -2224,9 +2318,11 @@ function WorkflowFlowDesigner({
             branches={branches}
             submitPermission={submitPermission}
             ccRule={ccRule}
+            processorRule={processorRule}
             directory={directory}
             validation={validation}
             memberOptions={memberOptions}
+            positionOptions={positionOptions}
             departmentOptions={departmentOptions}
             fieldOptions={fieldOptions}
             previewSubmitter={previewSubmitter}
@@ -2238,6 +2334,7 @@ function WorkflowFlowDesigner({
           onUpdateCondition={onUpdateCondition}
           onPatchSubmitPermission={onPatchSubmitPermission}
           onPatchCcRule={onPatchCcRule}
+          onPatchProcessorRule={onPatchProcessorRule}
           onAddStep={onAddStep}
           onUpdateStep={onUpdateStep}
           onRemoveStep={onRemoveStep}
@@ -2539,18 +2636,20 @@ function FlowConditionBranchEditor({
   };
 
   if (branch.isDefault) {
+    const aiDescription = normalizeAiBranchDescriptionText(branch.aiDescription, index, branch.isDefault);
+
     return (
       <div className="rounded-2xl border border-border-silver bg-white px-4 py-3">
         <p className="text-[13px] font-black text-midnight-graphite">{branch.title || '其余情况'}</p>
         <p className="mt-1 text-[11px] font-bold text-medium-gray">
-          {isAiCondition ? 'AI 未选择其他分支，或判断失败时，进入这条兜底分支。' : '其他条件都不命中时，自动进入这条分支。'}
+          {isAiCondition ? 'AI 会按这条分支说明判断是否进入；未命中其他分支或判断失败时，也会进入这里。' : '其他条件都不命中时，自动进入这条分支。'}
         </p>
         {isAiCondition && (
           <textarea
             className="input-field mt-3 min-h-[76px] resize-none text-[13px]"
-            value={branch.aiDescription || ''}
+            value={aiDescription}
             onChange={(event) => onUpdateFlowBranch(nodeId, branch.id, { aiDescription: event.target.value })}
-            placeholder={`写给 AI 看的 ${branch.title || '兜底分支'}说明`}
+            placeholder={`写给 AI 看的 ${branch.title || '这个分支'}说明，例如：不符合其他分支，但符合补充规则时选择这里`}
           />
         )}
       </div>
@@ -2623,6 +2722,7 @@ function StepEditor({
   step,
   stepIndex,
   memberOptions,
+  positionOptions,
   directory,
   previewSubmitter,
   validation,
@@ -2635,6 +2735,7 @@ function StepEditor({
   step: ApprovalStep;
   stepIndex: number;
   memberOptions: Array<{ value: string; label: string }>;
+  positionOptions: Array<{ value: string; label: string }>;
   directory: OrganizationDirectory;
   previewSubmitter: OrganizationDirectory['members'][number] | null;
   validation: ValidationState;
@@ -2669,9 +2770,10 @@ function StepEditor({
 
         <div className="space-y-2">
           <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">审批人类型</span>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             {[
               { value: 'specific_members', label: '指定成员' },
+              { value: 'specific_positions', label: '指定职位' },
               { value: 'multi_supervisor', label: '发起人上级' },
             ].map((item) => (
               <React.Fragment key={item.value}>
@@ -2681,6 +2783,7 @@ function StepEditor({
                     approverRule: {
                       type: item.value as ApproverRule['type'],
                       memberIds: [],
+                      positionTitles: [],
                       departmentIds: [],
                       ...(item.value === 'multi_supervisor' ? { supervisorDepth: 1 } : {}),
                     },
@@ -2708,6 +2811,21 @@ function StepEditor({
           </label>
         )}
 
+        {step.approverRule.type === 'specific_positions' && (
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">指定职位</span>
+            <MultiSelect
+              value={step.approverRule.positionTitles || []}
+              options={positionOptions}
+              onChange={(positionTitles) => onUpdateStep(branch.id, step.id, {
+                approverRule: { ...step.approverRule, positionTitles },
+              })}
+              emptyText="暂无职位"
+              searchPlaceholder="搜索职位"
+            />
+          </label>
+        )}
+
         {step.approverRule.type === 'multi_supervisor' && (
           <div className="space-y-2">
             <label className="block space-y-2">
@@ -2731,7 +2849,7 @@ function StepEditor({
           </div>
         )}
 
-        {step.approverRule.type === 'specific_members' && (
+        {supportsApprovalMode(step.approverRule) && (
           <label className="block space-y-2">
             <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">通过方式</span>
             <select
@@ -2760,7 +2878,7 @@ function StepEditor({
         </label>
 
         <div className="rounded-2xl bg-canvas-white px-4 py-3 text-[12px] font-bold leading-5 text-medium-gray">
-          {getSupervisorDepthLabel(step.approverRule)}{step.approverRule.type === 'specific_members' ? ` · ${getApprovalModeLabel(step.approvalMode)}` : ''} · {getEmptyApproverActionLabel(step.emptyApproverAction)}
+          {formatStepRule(step, directory)}{supportsApprovalMode(step.approverRule) ? ` · ${getApprovalModeLabel(step.approvalMode)}` : ''} · {getEmptyApproverActionLabel(step.emptyApproverAction)}
         </div>
 
         <div className="grid grid-cols-3 gap-2">
@@ -2804,9 +2922,11 @@ function DesignerInspector({
   branches,
   submitPermission,
   ccRule,
+  processorRule,
   directory,
   validation,
   memberOptions,
+  positionOptions,
   departmentOptions,
   fieldOptions,
   previewSubmitter,
@@ -2818,6 +2938,7 @@ function DesignerInspector({
   onUpdateCondition,
   onPatchSubmitPermission,
   onPatchCcRule,
+  onPatchProcessorRule,
   onAddStep,
   onUpdateStep,
   onRemoveStep,
@@ -2837,9 +2958,11 @@ function DesignerInspector({
   branches: WorkflowBranch[];
   submitPermission: SubmitPermissionRule;
   ccRule: CcRule;
+  processorRule: ProcessorRule;
   directory: OrganizationDirectory;
   validation: ValidationState;
   memberOptions: Array<{ value: string; label: string }>;
+  positionOptions: Array<{ value: string; label: string }>;
   departmentOptions: Array<{ value: string; label: string }>;
   fieldOptions: ConditionFieldOption[];
   previewSubmitter: OrganizationDirectory['members'][number] | null;
@@ -2851,6 +2974,7 @@ function DesignerInspector({
   onUpdateCondition: (branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
   onPatchSubmitPermission: (patch: Partial<SubmitPermissionRule>) => void;
   onPatchCcRule: (patch: Partial<CcRule>) => void;
+  onPatchProcessorRule: (patch: Partial<ProcessorRule>) => void;
   onAddStep: (branchId: string) => void;
   onUpdateStep: (branchId: string, stepId: string, patch: Partial<ApprovalStep>) => void;
   onRemoveStep: (branchId: string, stepId: string) => void;
@@ -3005,7 +3129,7 @@ function DesignerInspector({
               onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, { title: event.target.value })}
             />
           </label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <SegmentedButton
               isActive={rule.type === 'specific_members'}
               onClick={() => onUpdateFlowNode(selectedFlowNode.id, {
@@ -3014,6 +3138,15 @@ function DesignerInspector({
               })}
             >
               指定成员
+            </SegmentedButton>
+            <SegmentedButton
+              isActive={rule.type === 'specific_positions'}
+              onClick={() => onUpdateFlowNode(selectedFlowNode.id, {
+                rule: { type: 'specific_positions', positionTitles: [] },
+                approvalMode: selectedFlowNode.approvalMode || 'one_of',
+              })}
+            >
+              指定职位
             </SegmentedButton>
             <SegmentedButton
               isActive={rule.type === 'multi_supervisor'}
@@ -3036,7 +3169,19 @@ function DesignerInspector({
               />
             </label>
           )}
-          {rule.type === 'specific_members' && (
+          {rule.type === 'specific_positions' && (
+            <label className="block space-y-2">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">指定职位</span>
+              <MultiSelect
+                value={rule.positionTitles || []}
+                options={positionOptions}
+                onChange={(positionTitles) => onUpdateFlowNode(selectedFlowNode.id, { rule: { ...rule, positionTitles } })}
+                emptyText="暂无职位"
+                searchPlaceholder="搜索职位"
+              />
+            </label>
+          )}
+          {supportsApprovalMode(rule) && (
             <label className="block space-y-2">
               <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">通过方式</span>
               <select
@@ -3091,6 +3236,7 @@ function DesignerInspector({
           step={selectedStep}
           stepIndex={selectedBranch.approvalSteps.findIndex((step) => step.id === selectedStep.id)}
           memberOptions={memberOptions}
+          positionOptions={positionOptions}
           directory={directory}
           previewSubmitter={previewSubmitter}
           validation={validation}
@@ -3196,8 +3342,8 @@ function DesignerInspector({
                 >
                   <span className="block text-[13px] font-black text-midnight-graphite">{index + 1}. {step.name}</span>
                   <span className="mt-1 block text-[11px] font-bold text-medium-gray">
-                    {getSupervisorDepthLabel(step.approverRule)}
-                    {step.approverRule.type === 'specific_members' ? ` · ${getApprovalModeLabel(step.approvalMode)}` : ''}
+                    {formatStepRule(step, directory)}
+                    {supportsApprovalMode(step.approverRule) ? ` · ${getApprovalModeLabel(step.approvalMode)}` : ''}
                   </span>
                 </button>
               ))}
@@ -3245,6 +3391,50 @@ function DesignerInspector({
               emptyText="暂无部门"
             />
           </label>
+        </div>
+      </aside>
+    );
+  }
+
+  if (selection.type === 'processor') {
+    return (
+      <aside className={inspectorClassName}>
+        <InspectorHeader
+          label="办理"
+          title="办理人配置"
+          description="审批通过后，指定人员继续处理付款、归档或其他后续事项。"
+        />
+        <div className="space-y-5 p-5">
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">办理事项</span>
+            <input
+              className="input-field text-[13px]"
+              value={processorRule.taskName || ''}
+              onChange={(event) => onPatchProcessorRule({ taskName: event.target.value })}
+              placeholder="例如：付款办理"
+            />
+          </label>
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">办理成员</span>
+            <MultiSelect
+              value={processorRule.memberIds}
+              options={memberOptions}
+              onChange={(memberIds) => onPatchProcessorRule({ memberIds })}
+              emptyText="暂无成员"
+            />
+          </label>
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">办理部门</span>
+            <MultiSelect
+              value={processorRule.departmentIds}
+              options={departmentOptions}
+              onChange={(departmentIds) => onPatchProcessorRule({ departmentIds })}
+              emptyText="暂无部门"
+            />
+          </label>
+          <div className="rounded-2xl border border-border-silver bg-white p-4 text-[12px] font-bold leading-5 text-medium-gray">
+            留空时，审批通过后流程直接结束；选择办理人后，审批通过会进入“待办理”，由办理人点击完成。
+          </div>
         </div>
       </aside>
     );
@@ -3365,27 +3555,202 @@ function MultiSelect({
   options,
   onChange,
   emptyText,
+  searchPlaceholder = '搜索名称或账号',
 }: {
   value: string[];
   options: Array<{ value: string; label: string }>;
   onChange: (value: string[]) => void;
   emptyText: string;
+  searchPlaceholder?: string;
 }) {
+  const [keyword, setKeyword] = useState('');
+  const normalizedKeyword = keyword.trim().toLowerCase();
+  const filteredOptions = useMemo(() => {
+    if (!normalizedKeyword) return options;
+    return options.filter((option) => (
+      option.label.toLowerCase().includes(normalizedKeyword)
+      || option.value.toLowerCase().includes(normalizedKeyword)
+    ));
+  }, [normalizedKeyword, options]);
+  const visibleValues = useMemo(
+    () => new Set(filteredOptions.map((option) => option.value)),
+    [filteredOptions],
+  );
+  const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedVisibleValues = readSelectedValues(event);
+    const hiddenSelectedValues = value.filter((selectedValue) => !visibleValues.has(selectedValue));
+    onChange([...hiddenSelectedValues, ...selectedVisibleValues]);
+  };
+
   return (
-    <select
-      multiple
-      className="input-field min-h-[116px] text-[13px]"
-      value={value}
-      onChange={(event) => onChange(readSelectedValues(event))}
-    >
-      {options.length === 0 ? (
-        <option disabled>{emptyText}</option>
-      ) : (
-        options.map((option) => (
-          <option key={option.value} value={option.value}>{option.label}</option>
-        ))
+    <div className="space-y-2">
+      <div className="relative">
+        <Search
+          aria-hidden="true"
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-light-gray"
+          size={15}
+          strokeWidth={2.5}
+        />
+        <input
+          className="input-field h-10 py-2 pl-9 pr-3 text-[13px]"
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
+          placeholder={searchPlaceholder}
+        />
+      </div>
+      <select
+        multiple
+        className="input-field min-h-[116px] text-[13px]"
+        value={value}
+        onChange={handleChange}
+      >
+        {options.length === 0 ? (
+          <option disabled>{emptyText}</option>
+        ) : filteredOptions.length === 0 ? (
+          <option disabled>未找到匹配项</option>
+        ) : (
+          filteredOptions.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))
+        )}
+      </select>
+      {options.length > 0 && (
+        <p className="text-[11px] font-bold text-light-gray">
+          {normalizedKeyword ? `找到 ${filteredOptions.length} 项` : `共 ${options.length} 项`}
+          {value.length > 0 ? ` · 已选 ${value.length} 项` : ''}
+        </p>
       )}
-    </select>
+    </div>
+  );
+}
+
+function WorkflowTemplateSearchSelect({
+  templates,
+  selectedId,
+  disabled,
+  onSelect,
+}: {
+  templates: WorkflowTemplate[];
+  selectedId: string;
+  disabled: boolean;
+  onSelect: (template: WorkflowTemplate) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [keyword, setKeyword] = useState('');
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const selectedTemplate = useMemo(
+    () => templates.find((template) => template.id === selectedId) || null,
+    [templates, selectedId],
+  );
+  const normalizedKeyword = keyword.trim().toLowerCase();
+  const templateOptions = useMemo(() => templates.map((template) => {
+    const label = getTemplateOptionLabel(template);
+    return {
+      template,
+      label,
+      searchText: [
+        label,
+        template.name,
+        template.moduleName,
+        template.approvalTypeName,
+        template.draft?.basic?.moduleName,
+        template.draft?.basic?.approvalTypeName,
+      ].filter(Boolean).join(' ').toLowerCase(),
+    };
+  }), [templates]);
+  const filteredOptions = useMemo(() => {
+    if (!normalizedKeyword) return templateOptions;
+    return templateOptions.filter((option) => option.searchText.includes(normalizedKeyword));
+  }, [normalizedKeyword, templateOptions]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (disabled) setIsOpen(false);
+  }, [disabled]);
+
+  const handleSelect = (template: WorkflowTemplate) => {
+    onSelect(template);
+    setIsOpen(false);
+    setKeyword('');
+  };
+
+  return (
+    <div ref={rootRef} className="relative mr-1 min-w-[260px] max-w-full">
+      <span className="sr-only">当前流程</span>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setIsOpen((current) => !current)}
+        className="input-field h-10 py-0 text-[12px] font-bold flex items-center justify-between gap-2 disabled:opacity-50"
+        aria-expanded={isOpen}
+      >
+        <span className="min-w-0 truncate">
+          {selectedTemplate ? getTemplateOptionLabel(selectedTemplate) : '请选择审批流'}
+        </span>
+        {isOpen ? <ArrowUp size={14} strokeWidth={2.5} /> : <ArrowDown size={14} strokeWidth={2.5} />}
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 top-12 z-50 w-[min(520px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border-silver bg-white shadow-xl shadow-black/10">
+          <div className="border-b border-border-silver p-3">
+            <div className="relative">
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-light-gray"
+                size={15}
+                strokeWidth={2.5}
+              />
+              <input
+                className="input-field h-10 py-2 pl-9 pr-3 text-[13px]"
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="搜索审批流"
+                autoFocus
+              />
+            </div>
+          </div>
+          <div className="max-h-[360px] overflow-y-auto p-1.5">
+            {filteredOptions.length === 0 ? (
+              <div className="px-4 py-8 text-center text-[13px] font-bold text-medium-gray">
+                未找到匹配的审批流
+              </div>
+            ) : (
+              filteredOptions.map((option) => (
+                <button
+                  key={option.template.id}
+                  type="button"
+                  onClick={() => handleSelect(option.template)}
+                  className={cn(
+                    "flex h-10 w-full items-center justify-between gap-3 rounded-xl px-3 text-left text-[13px] font-black text-midnight-graphite hover:bg-lightest-gray-background",
+                    option.template.id === selectedId && "bg-[#e7f1ff] text-interactive-blue",
+                  )}
+                >
+                  <span className="min-w-0 truncate">{option.label}</span>
+                  {option.template.id === selectedId && <CheckCircle2 size={15} strokeWidth={3} className="shrink-0" />}
+                </button>
+              ))
+            )}
+          </div>
+          {templates.length > 0 && (
+            <div className="border-t border-border-silver px-4 py-2 text-[11px] font-bold text-light-gray">
+              {normalizedKeyword ? `找到 ${filteredOptions.length} 项` : `共 ${templates.length} 项`}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -3413,6 +3778,21 @@ export default function WorkflowAdmin() {
     })),
     [enabledMembers],
   );
+  const positionOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    enabledMembers.forEach((member) => {
+      const title = String(member.title || '').trim();
+      if (!title) return;
+      counts.set(title, (counts.get(title) || 0) + 1);
+    });
+
+    return Array.from(counts.entries())
+      .sort(([left], [right]) => left.localeCompare(right, 'zh-Hans-CN'))
+      .map(([title, count]) => ({
+        value: title,
+        label: `${title}（${count}人）`,
+      }));
+  }, [enabledMembers]);
   const departmentOptions = useMemo(
     () => directory.departments.map((department) => ({ value: department.id, label: department.name })),
     [directory.departments],
@@ -3462,8 +3842,9 @@ export default function WorkflowAdmin() {
         storage.getOrganizationDirectory(),
       ]);
       replaceApprovalSchema(nextSchema, { notify: false });
+      const syncedTemplates = await ensureDefaultWorkflowTemplates(fetchedTemplates);
       const normalizedTemplates = sortWorkflowTemplatesByBusinessScope(
-        filterWorkflowTemplatesByBusinessScope(fetchedTemplates).map(normalizeTemplateForEditor),
+        filterWorkflowTemplatesByBusinessScope(syncedTemplates).map(normalizeTemplateForEditor),
       );
       setTemplates(normalizedTemplates);
       setDirectory(nextDirectory);
@@ -3525,6 +3906,18 @@ export default function WorkflowAdmin() {
         ...(current.ccRule || {}),
         ...patch,
         timing: 'workflow_completed',
+      },
+    }));
+  };
+
+  const patchProcessorRule = (patch: Partial<ProcessorRule>) => {
+    patchDraft((current) => ({
+      ...current,
+      processorRule: {
+        ...defaultProcessorRule(),
+        ...(current.processorRule || {}),
+        ...patch,
+        timing: 'approval_completed',
       },
     }));
   };
@@ -4054,6 +4447,7 @@ export default function WorkflowAdmin() {
 
   const submitPermission = draft?.submitPermission || defaultSubmitPermission();
   const ccRule = draft?.ccRule || defaultCcRule();
+  const processorRule = draft?.processorRule || defaultProcessorRule();
   const branches = draft?.branches || [];
   const flowNodes = draft ? flowNodesFromDraft(draft) : [];
   const selectedFlowNode = designerSelection.type === 'flow-node'
@@ -4106,24 +4500,12 @@ export default function WorkflowAdmin() {
                   </h2>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <label className="mr-1 min-w-[220px]">
-                    <span className="sr-only">当前流程</span>
-                    <select
-                      className="input-field h-10 py-0 text-[12px] font-bold"
-                      value={selectedId}
-                      onChange={(event) => {
-                        const template = templates.find((item) => item.id === event.target.value);
-                        if (template) selectTemplate(template);
-                      }}
-                      disabled={templates.length === 0 || isSaving}
-                    >
-                      {templates.map((template) => (
-                        <option key={template.id} value={template.id}>
-                          {getTemplateOptionLabel(template)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <WorkflowTemplateSearchSelect
+                    templates={templates}
+                    selectedId={selectedId}
+                    disabled={templates.length === 0 || isSaving}
+                    onSelect={selectTemplate}
+                  />
                   <button
                     type="button"
                     onClick={handleSave}
@@ -4175,12 +4557,14 @@ export default function WorkflowAdmin() {
               directory={directory}
               submitPermission={submitPermission}
               ccRule={ccRule}
+              processorRule={processorRule}
               branches={branches}
               validation={validation}
               selection={designerSelection}
               selectedFlowNode={selectedFlowNode}
               fieldOptions={conditionFieldOptionsForDraft}
               memberOptions={memberOptions}
+              positionOptions={positionOptions}
               departmentOptions={departmentOptions}
               onSelect={setDesignerSelection}
               onAddBranch={addBranch}
@@ -4191,6 +4575,7 @@ export default function WorkflowAdmin() {
               onUpdateCondition={updateCondition}
               onPatchSubmitPermission={patchSubmitPermission}
               onPatchCcRule={patchCcRule}
+              onPatchProcessorRule={patchProcessorRule}
               onAddStep={addStep}
               onUpdateStep={updateStep}
               onRemoveStep={removeStep}
@@ -4482,6 +4867,7 @@ export default function WorkflowAdmin() {
                                   approverRule: {
                                     type,
                                     memberIds: [],
+                                    positionTitles: [],
                                     departmentIds: [],
                                     ...(type === 'multi_supervisor' ? { supervisorDepth: 1 } : {}),
                                   },
@@ -4490,9 +4876,10 @@ export default function WorkflowAdmin() {
                               }}
                             >
                               <option value="specific_members">指定成员</option>
+                              <option value="specific_positions">指定职位</option>
                               <option value="multi_supervisor">发起人的上级</option>
                             </select>
-                            {step.approverRule.type === 'specific_members' ? (
+                            {supportsApprovalMode(step.approverRule) ? (
                               <select
                                 className="input-field text-[13px]"
                                 value={step.approvalMode}
@@ -4522,6 +4909,18 @@ export default function WorkflowAdmin() {
                                 approverRule: { ...step.approverRule, memberIds },
                               })}
                               emptyText="暂无成员"
+                            />
+                          )}
+
+                          {step.approverRule.type === 'specific_positions' && (
+                            <MultiSelect
+                              value={step.approverRule.positionTitles || []}
+                              options={positionOptions}
+                              onChange={(positionTitles) => updateStep(branch.id, step.id, {
+                                approverRule: { ...step.approverRule, positionTitles },
+                              })}
+                              emptyText="暂无职位"
+                              searchPlaceholder="搜索职位"
                             />
                           )}
 

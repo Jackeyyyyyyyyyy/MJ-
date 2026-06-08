@@ -19,6 +19,7 @@ export default function ApprovalTable({
 }: ApprovalTableProps) {
   
   const renderRow = (record: ApprovalRecord) => {
+    const processorNames = (record.processors || []).map((processor) => processor.name).filter(Boolean).join('、');
     const handleRowKeyDown = (event: React.KeyboardEvent<HTMLTableRowElement>) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
@@ -73,10 +74,18 @@ export default function ApprovalTable({
           <span className={cn(
             "status-tag",
             record.status === ApprovalStatus.PENDING && "status-pending",
+            record.status === ApprovalStatus.PROCESSING && "status-processing",
             record.status === ApprovalStatus.APPROVED && "status-approved",
+            record.status === ApprovalStatus.COMPLETED && "status-completed",
             record.status === ApprovalStatus.REJECTED && "status-rejected"
           )}>
             {record.status}
+          </span>
+        </td>
+
+        <td className="px-8 py-6 whitespace-nowrap">
+          <span className="text-[14px] font-semibold text-midnight-graphite">
+            {processorNames || '-'}
           </span>
         </td>
 
@@ -103,7 +112,7 @@ export default function ApprovalTable({
   return (
     <div className="w-full bg-pure-white">
       <div className="overflow-x-auto no-scrollbar">
-        <div className="min-w-[1000px] lg:min-w-0">
+        <div className="min-w-[1120px] lg:min-w-0">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-canvas-white border-b border-border-silver">
@@ -112,6 +121,7 @@ export default function ApprovalTable({
                 <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">业务摘要</th>
                 <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">发起人</th>
                 <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">状态</th>
+                <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">办理人</th>
                 <th className="px-8 py-4 text-[12px] font-bold text-light-gray uppercase tracking-widest">时间戳</th>
               </tr>
             </thead>
