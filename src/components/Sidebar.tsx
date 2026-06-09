@@ -14,7 +14,6 @@ import {
   Layers,
   LayoutDashboard,
   MessageSquareText,
-  Settings2,
   ShieldCheck,
   Workflow,
   X,
@@ -29,7 +28,6 @@ interface SidebarProps {
   activeAdminView?: AdminView | null;
   onOpenAccountAdmin?: () => void;
   onOpenAiAssistant?: () => void;
-  onOpenAiAssistantPrompt?: () => void;
   onOpenOrganizationAdmin?: () => void;
   onOpenWorkflowAdmin?: () => void;
   onOpenBusinessFormAdmin?: () => void;
@@ -48,7 +46,6 @@ export default function Sidebar({
   activeAdminView,
   onOpenAccountAdmin,
   onOpenAiAssistant,
-  onOpenAiAssistantPrompt,
   onOpenOrganizationAdmin,
   onOpenWorkflowAdmin,
   onOpenBusinessFormAdmin,
@@ -59,7 +56,7 @@ export default function Sidebar({
 }: SidebarProps) {
   const isSuperAdminPerspective = Boolean(isSuperAdmin && currentPerspective === 'developer');
   const canUseAiAssistant = currentPerspective === 'boss' || isSuperAdminPerspective;
-  const isAiAssistantActive = activeAdminView === 'ai-assistant' || activeAdminView === 'ai-assistant-prompt' || activeAdminView === 'ai-branch-logs';
+  const isAiAssistantActive = activeAdminView === 'ai-assistant' || activeAdminView === 'ai-branch-logs';
   const [isAiAssistantExpanded, setIsAiAssistantExpanded] = useState(true);
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({
     [approvalSchema.modules[0].name]: true,
@@ -112,13 +109,6 @@ export default function Sidebar({
       icon: MessageSquareText,
       onClick: onOpenAiAssistant,
       visible: canUseAiAssistant,
-    },
-    {
-      id: 'ai-assistant-prompt' as AdminView,
-      label: '提示词设置',
-      icon: Settings2,
-      onClick: onOpenAiAssistantPrompt,
-      visible: isSuperAdminPerspective,
     },
     {
       id: 'ai-branch-logs' as AdminView,
