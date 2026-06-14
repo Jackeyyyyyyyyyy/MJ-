@@ -185,6 +185,15 @@ function countReportingNodes(nodes: ReportingChartNode[]): number {
   return nodes.reduce((total, node) => total + node.memberCount + countReportingNodes(node.children), 0);
 }
 
+function collectReportingDescendantDepartmentIds(node: ReportingChartNode, ids = new Set<string>()) {
+  node.children.forEach((child) => {
+    ids.add(child.department.id);
+    collectReportingDescendantDepartmentIds(child, ids);
+  });
+
+  return ids;
+}
+
 function hasDepartmentCycle(directory: OrganizationDirectory, departmentId: string) {
   const departmentsById = new Map(directory.departments.map((department) => [department.id, department]));
   const seen = new Set<string>();
@@ -520,8 +529,21 @@ function ReportingMemberTree({ node, directory }: { node: ReportingMemberNode; d
   );
 }
 
-function ReportingChartCard({ node, directory }: { node: ReportingChartNode; directory: OrganizationDirectory; key?: React.Key }) {
+function ReportingChartCard({
+  node,
+  directory,
+  expandedDepartmentIds,
+  onToggleDepartment,
+}: {
+  node: ReportingChartNode;
+  directory: OrganizationDirectory;
+  expandedDepartmentIds: Set<string>;
+  onToggleDepartment: (node: ReportingChartNode) => void;
+  key?: React.Key;
+}) {
   const warning = node.hasMissingParent || node.hasCycle;
+  const hasChildren = node.children.length > 0;
+  const isExpanded = expandedDepartmentIds.has(node.department.id);
 
   return (
     <div className="flex flex-col items-center shrink-0">
@@ -533,9 +555,28 @@ function ReportingChartCard({ node, directory }: { node: ReportingChartNode; dir
           <div className="w-9 h-9 rounded-xl bg-black text-white flex items-center justify-center shrink-0">
             <Building2 size={16} strokeWidth={2.5} />
           </div>
-          <span className="px-2 py-1 rounded-full bg-lightest-gray-background text-[10px] font-black text-medium-gray whitespace-nowrap">
-            {node.memberCount} 人
-          </span>
+          <div className="flex flex-col items-end gap-1">
+            <span className="px-2 py-1 rounded-full bg-lightest-gray-background text-[10px] font-black text-medium-gray whitespace-nowrap">
+              {node.memberCount} 人
+            </span>
+            {hasChildren && (
+              <button
+                type="button"
+                onClick={() => onToggleDepartment(node)}
+                className={cn(
+                  "h-7 rounded-full px-2.5 text-[10px] font-black flex items-center gap-1 transition-colors",
+                  isExpanded
+                    ? "bg-black text-white hover:bg-midnight-graphite"
+                    : "bg-lightest-gray-background text-medium-gray hover:bg-border-silver"
+                )}
+                aria-label={isExpanded ? '收起下级部门' : '展开下级部门'}
+                title={isExpanded ? '收起下级部门' : '展开下级部门'}
+              >
+                {isExpanded ? <Minus size={12} strokeWidth={3} /> : <Plus size={12} strokeWidth={3} />}
+                {node.children.length}
+              </button>
+            )}
+          </div>
         </div>
         <div className="space-y-2">
           <p className="text-[16px] font-black text-midnight-graphite truncate">{node.department.name}</p>
@@ -559,7 +600,7 @@ function ReportingChartCard({ node, directory }: { node: ReportingChartNode; dir
         )}
       </div>
 
-      {node.children.length > 0 && (
+      {hasChildren && isExpanded && (
         <div className="flex flex-col items-center">
           <div className="h-8 w-[3px] bg-slate-300 rounded-full" />
           <div className="relative flex items-start gap-8 pt-8">
@@ -569,7 +610,12 @@ function ReportingChartCard({ node, directory }: { node: ReportingChartNode; dir
             {node.children.map((child) => (
               <div key={`${node.department.id}-${child.department.id}`} className="relative flex flex-col items-center shrink-0">
                 <div className="absolute left-1/2 top-[-32px] h-8 w-[3px] -translate-x-1/2 bg-slate-300 rounded-full" />
-                <ReportingChartCard node={child} directory={directory} />
+                <ReportingChartCard
+                  node={child}
+                  directory={directory}
+                  expandedDepartmentIds={expandedDepartmentIds}
+                  onToggleDepartment={onToggleDepartment}
+                />
               </div>
             ))}
           </div>
@@ -632,6 +678,7 @@ export default function OrganizationAdmin() {
   const [directory, setDirectory] = useState<OrganizationDirectory>(emptyDirectory);
   const [accounts, setAccounts] = useState<SystemAccount[]>([]);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
+  const [expandedReportingDepartmentIds, setExpandedReportingDepartmentIds] = useState<Set<string>>(() => new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -642,6 +689,7 @@ export default function OrganizationAdmin() {
   );
   const departmentChartRoots = useMemo(() => buildDepartmentChart(directory), [directory]);
   const reportingChartRoots = useMemo(() => buildReportingChart(directory), [directory]);
+  const departmentIdSet = useMemo(() => new Set(directory.departments.map((department) => department.id)), [directory.departments]);
   const selectedDepartment = directory.departments.find((department) => department.id === selectedDepartmentId) || null;
   const selectedDepartmentMembers = useMemo(
     () => directory.members.filter((member) => member.departmentId === selectedDepartmentId),
@@ -683,6 +731,28 @@ export default function OrganizationAdmin() {
     }
   }, [directory.departments, selectedDepartmentId]);
 
+  useEffect(() => {
+    setExpandedReportingDepartmentIds((current) => {
+      const next = new Set([...current].filter((id) => departmentIdSet.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [departmentIdSet]);
+
+  const toggleReportingDepartment = (node: ReportingChartNode) => {
+    setExpandedReportingDepartmentIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(node.department.id)) {
+        next.delete(node.department.id);
+        collectReportingDescendantDepartmentIds(node).forEach((id) => next.delete(id));
+        return next;
+      }
+
+      next.add(node.department.id);
+      return next;
+    });
+  };
+
   const updateDepartment = (id: string, patch: Partial<OrganizationDepartment>) => {
     setDirectory((current) => ({
       ...current,
@@ -703,6 +773,13 @@ export default function OrganizationAdmin() {
 
   const addDepartment = (parentId?: string) => {
     const id = createId('dept');
+    if (parentId) {
+      setExpandedReportingDepartmentIds((current) => {
+        const next = new Set(current);
+        next.add(parentId);
+        return next;
+      });
+    }
     setDirectory((current) => ({
       ...current,
       departments: [
@@ -837,7 +914,13 @@ export default function OrganizationAdmin() {
         ) : (
           <ChartViewport>
             {reportingChartRoots.map((node) => (
-              <ReportingChartCard key={node.department.id} node={node} directory={directory} />
+              <ReportingChartCard
+                key={node.department.id}
+                node={node}
+                directory={directory}
+                expandedDepartmentIds={expandedReportingDepartmentIds}
+                onToggleDepartment={toggleReportingDepartment}
+              />
             ))}
           </ChartViewport>
         )}
