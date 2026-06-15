@@ -32,6 +32,14 @@ function isPlainDisplayObject(value: unknown): value is Record<string, unknown> 
   return !!value && typeof value === 'object' && !Array.isArray(value) && !isAttachmentList(value);
 }
 
+function isFileFieldDisplayValue(value: unknown): value is { text?: unknown; attachments: ApprovalAttachment[] } {
+  return !!value
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && 'text' in value
+    && isAttachmentList((value as { attachments?: unknown }).attachments);
+}
+
 function isMoneyDisplayObject(value: unknown): value is { currency?: unknown; amount?: unknown } {
   return !!value
     && typeof value === 'object'
@@ -421,6 +429,23 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
     );
   };
 
+  const renderFileFieldDisplay = (value: { text?: unknown; attachments: ApprovalAttachment[] }) => {
+    return (
+      <div className="min-w-0 flex-1 space-y-3">
+        <div className="rounded-2xl border border-border-silver bg-white p-4">
+          <p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-medium-gray">填写内容</p>
+          <p className="text-[15px] font-black text-black break-all">
+            {String(value.text || '').trim() || '-'}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-border-silver bg-white p-4">
+          <p className="mb-3 text-[10px] font-black uppercase tracking-[0.16em] text-medium-gray">附件</p>
+          {renderAttachmentList(value.attachments)}
+        </div>
+      </div>
+    );
+  };
+
   const renderCustomerTable = (
     rows: Array<Record<string, unknown>>,
     columns: Array<{ key: string; label: string }>,
@@ -668,7 +693,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                       key={key}
                       className={cn(
                         "gap-6 p-7 bg-[#fbfbfd] rounded-[24px] group border border-transparent hover:border-black/[0.02] hover:bg-white transition-all",
-                        isCustomerInfoChangeValue(value) || isSupplierInfoChangeValue(value) || isSupplierQuotationInfoValue(value) || getStructuredDetailColumns(value).length > 0
+                        isCustomerInfoChangeValue(value) || isSupplierInfoChangeValue(value) || isSupplierQuotationInfoValue(value) || isFileFieldDisplayValue(value) || getStructuredDetailColumns(value).length > 0
                           ? "flex flex-col items-stretch"
                           : "flex items-center justify-between",
                       )}
@@ -680,6 +705,8 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                         renderSupplierInfoChange(value)
                       ) : isSupplierQuotationInfoValue(value) ? (
                         renderSupplierQuotationInfo(value)
+                      ) : isFileFieldDisplayValue(value) ? (
+                        renderFileFieldDisplay(value)
                       ) : getStructuredDetailColumns(value).length > 0 ? (
                         <div className="overflow-x-auto no-scrollbar">
                           <div className="min-w-[840px] overflow-hidden rounded-2xl border border-border-silver bg-white">

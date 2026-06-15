@@ -909,9 +909,17 @@ function normalizeStringList(items) {
   )];
 }
 
-function normalizeAmountFields(amountFields, businessFields) {
+function normalizeConfiguredBusinessFields(configuredFields, businessFields) {
   const businessFieldSet = new Set(normalizeStringList(businessFields));
-  return normalizeStringList(amountFields).filter((field) => businessFieldSet.has(field));
+  return normalizeStringList(configuredFields).filter((field) => businessFieldSet.has(field));
+}
+
+function normalizeAmountFields(amountFields, businessFields) {
+  return normalizeConfiguredBusinessFields(amountFields, businessFields);
+}
+
+function normalizeFileFields(fileFields, businessFields) {
+  return normalizeConfiguredBusinessFields(fileFields, businessFields);
 }
 
 function normalizeApprovalSchema(schema) {
@@ -928,6 +936,7 @@ function normalizeApprovalSchema(schema) {
             name: String(approvalType?.name || '').trim(),
             businessFields: normalizeStringList(approvalType?.businessFields),
             amountFields: normalizeAmountFields(approvalType?.amountFields, approvalType?.businessFields),
+            fileFields: normalizeFileFields(approvalType?.fileFields, approvalType?.businessFields),
             commonFields: normalizeStringList(approvalType?.commonFields),
             ...(String(approvalType?.notes || '').trim() ? { notes: String(approvalType.notes).trim() } : {}),
           }))
@@ -953,12 +962,13 @@ async function writeApprovalSchema(schema) {
   return normalized;
 }
 
-async function createBusinessForm({ moduleName, approvalTypeName, businessFields, amountFields }) {
+async function createBusinessForm({ moduleName, approvalTypeName, businessFields, amountFields, fileFields }) {
   const schema = await readApprovalSchema();
   const nextModuleName = String(moduleName || '').trim();
   const nextApprovalTypeName = String(approvalTypeName || '').trim();
   const nextBusinessFields = normalizeStringList(businessFields);
   const nextAmountFields = normalizeAmountFields(amountFields, nextBusinessFields);
+  const nextFileFields = normalizeFileFields(fileFields, nextBusinessFields);
 
   if (!nextModuleName || !nextApprovalTypeName || nextBusinessFields.length === 0) {
     throw createHttpError('missing business form fields', 400);
@@ -982,13 +992,14 @@ async function createBusinessForm({ moduleName, approvalTypeName, businessFields
     name: nextApprovalTypeName,
     businessFields: nextBusinessFields,
     amountFields: nextAmountFields,
+    fileFields: nextFileFields,
     commonFields,
   });
 
   return writeApprovalSchema(schema);
 }
 
-async function updateBusinessForm(oldModuleName, oldApprovalTypeName, { moduleName, approvalTypeName, businessFields, amountFields }) {
+async function updateBusinessForm(oldModuleName, oldApprovalTypeName, { moduleName, approvalTypeName, businessFields, amountFields, fileFields }) {
   const schema = await readApprovalSchema();
   const currentModuleName = String(oldModuleName || '').trim();
   const currentApprovalTypeName = String(oldApprovalTypeName || '').trim();
@@ -996,6 +1007,7 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, { moduleNa
   const nextApprovalTypeName = String(approvalTypeName || '').trim();
   const nextBusinessFields = normalizeStringList(businessFields);
   const nextAmountFields = normalizeAmountFields(amountFields, nextBusinessFields);
+  const nextFileFields = normalizeFileFields(fileFields, nextBusinessFields);
 
   if (!currentModuleName || !currentApprovalTypeName) {
     throw createHttpError('missing business form target', 400);
@@ -1040,6 +1052,7 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, { moduleNa
     name: nextApprovalTypeName,
     businessFields: nextBusinessFields,
     amountFields: nextAmountFields,
+    fileFields: nextFileFields,
     commonFields: existingType.commonFields?.length ? existingType.commonFields : schema.commonFields,
   });
 
@@ -4222,6 +4235,7 @@ app.post('/api/business-forms', authenticate, requireRoles('developer'), async (
       approvalTypeName: req.body?.approvalTypeName,
       businessFields: req.body?.businessFields,
       amountFields: req.body?.amountFields,
+      fileFields: req.body?.fileFields,
     });
 
     res.status(201).json(schema);
@@ -4240,6 +4254,7 @@ app.patch('/api/business-forms/:moduleName/:approvalTypeName', authenticate, req
         approvalTypeName: req.body?.approvalTypeName,
         businessFields: req.body?.businessFields,
         amountFields: req.body?.amountFields,
+        fileFields: req.body?.fileFields,
       },
     );
 

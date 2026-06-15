@@ -1,5 +1,5 @@
 import React from 'react';
-import { DollarSign, Edit3, Loader2, Lock, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
+import { DollarSign, Edit3, Loader2, Lock, Paperclip, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
 import { approvalSchema, replaceApprovalSchema } from '../approvalSchema';
 import { storage } from '../storage';
 import { ApprovalType, Module } from '../types';
@@ -47,6 +47,12 @@ function getInitialAmountFields(type: ApprovalType) {
   return sourceFields.filter((field) => businessFieldSet.has(field));
 }
 
+function getInitialFileFields(type: ApprovalType) {
+  const configuredFields = Array.isArray(type.fileFields) ? type.fileFields : [];
+  const businessFieldSet = new Set(type.businessFields);
+  return configuredFields.filter((field) => businessFieldSet.has(field));
+}
+
 function isAmountCurrencyField(field: string) {
   return /金额|价格|利润|总额/.test(field);
 }
@@ -66,6 +72,7 @@ export default function BusinessFormAdmin() {
   const [approvalTypeName, setApprovalTypeName] = React.useState('');
   const [fieldText, setFieldText] = React.useState('');
   const [amountFields, setAmountFields] = React.useState<string[]>([]);
+  const [fileFields, setFileFields] = React.useState<string[]>([]);
   const [editingTarget, setEditingTarget] = React.useState<EditingTarget | null>(null);
   const [message, setMessage] = React.useState('');
   const [error, setError] = React.useState('');
@@ -75,6 +82,10 @@ export default function BusinessFormAdmin() {
   const selectedAmountFields = React.useMemo(
     () => amountFields.filter((field) => businessFields.includes(field)),
     [amountFields, businessFields],
+  );
+  const selectedFileFields = React.useMemo(
+    () => fileFields.filter((field) => businessFields.includes(field)),
+    [fileFields, businessFields],
   );
   const hasAmountCurrencyField = selectedAmountFields.length > 0;
   const hasCurrencyOnlyField = businessFields.some(isCurrencyOnlyField);
@@ -91,6 +102,16 @@ export default function BusinessFormAdmin() {
         ? current.filter((item) => item !== field)
         : [...current, field]
     ));
+    setFileFields((current) => current.filter((item) => item !== field));
+  };
+
+  const toggleFileField = (field: string) => {
+    setFileFields((current) => (
+      current.includes(field)
+        ? current.filter((item) => item !== field)
+        : [...current, field]
+    ));
+    setAmountFields((current) => current.filter((item) => item !== field));
   };
 
   const resetForm = () => {
@@ -98,6 +119,7 @@ export default function BusinessFormAdmin() {
     setApprovalTypeName('');
     setFieldText('');
     setAmountFields([]);
+    setFileFields([]);
     setEditingTarget(null);
     setError('');
   };
@@ -112,6 +134,7 @@ export default function BusinessFormAdmin() {
     setApprovalTypeName(type.name);
     setFieldText(getFieldText(type));
     setAmountFields(getInitialAmountFields(type));
+    setFileFields(getInitialFileFields(type));
     setEditingTarget({
       moduleName: module.name,
       approvalTypeName: type.name,
@@ -170,12 +193,14 @@ export default function BusinessFormAdmin() {
             approvalTypeName: nextApprovalTypeName,
             businessFields,
             amountFields: selectedAmountFields,
+            fileFields: selectedFileFields,
           })
         : await storage.createBusinessForm({
             moduleName: nextModuleName,
             approvalTypeName: nextApprovalTypeName,
             businessFields,
             amountFields: selectedAmountFields,
+            fileFields: selectedFileFields,
           });
 
       replaceApprovalSchema(nextSchema);
@@ -312,13 +337,61 @@ export default function BusinessFormAdmin() {
             )}
           </div>
 
+          <div className="rounded-2xl border border-[#cfeadc] bg-[#f8fdfb] p-4">
+            <div className="space-y-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
+                  <Paperclip size={15} strokeWidth={2.8} />
+                  文件字段
+                </div>
+                <p className="mt-1 text-[12px] font-semibold text-medium-gray">
+                  从上面的业务字段里选择哪些需要“填空 + 附件”。被选中的字段会在发起申请时同时要求填写内容和上传附件。
+                </p>
+              </div>
+              {businessFields.length > 0 ? (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {businessFields.map((field) => {
+                    const checked = selectedFileFields.includes(field);
+
+                    return (
+                      <label
+                        key={field}
+                        className={cn(
+                          'flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border bg-white px-3 py-2 text-[12px] font-black transition-colors',
+                          checked
+                            ? 'border-emerald-500 text-emerald-700 shadow-sm'
+                            : 'border-border-silver text-midnight-graphite hover:border-emerald-200',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleFileField(field)}
+                          className="h-4 w-4 accent-emerald-600"
+                        />
+                        <span className="min-w-0 truncate">{field}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
+                  先填写业务字段，再选择哪些字段需要填空和附件。
+                </div>
+              )}
+            </div>
+          </div>
+
           {businessFields.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {businessFields.map((field) => {
                 const isSelectedAmountField = selectedAmountFields.includes(field);
+                const isSelectedFileField = selectedFileFields.includes(field);
                 const fieldKindLabel = isSelectedAmountField
                   ? '金额+币种'
-                  : isCurrencyOnlyField(field)
+                  : isSelectedFileField
+                    ? '填空+附件'
+                    : isCurrencyOnlyField(field)
                     ? getFieldKindLabel(field)
                     : '';
 
@@ -329,7 +402,9 @@ export default function BusinessFormAdmin() {
                       "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-bold",
                       isSelectedAmountField
                         ? "bg-[#e7f1ff] text-interactive-blue"
-                        : isCurrencyOnlyField(field)
+                        : isSelectedFileField
+                          ? "bg-emerald-50 text-emerald-700"
+                          : isCurrencyOnlyField(field)
                           ? "bg-amber-50 text-amber-700"
                           : "bg-lightest-gray-background text-midnight-graphite",
                     )}

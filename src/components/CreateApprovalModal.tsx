@@ -94,6 +94,11 @@ interface MoneyInputValue {
   amount: string;
 }
 
+interface FileFieldValue {
+  text: string;
+  attachments: ApprovalAttachment[];
+}
+
 interface CreateApprovalModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -279,6 +284,10 @@ function isConfiguredNumericField(type: ApprovalType | null, field: string) {
   return isConfiguredMoneyField(type, field) || field.includes('汇率');
 }
 
+function isConfiguredFileField(type: ApprovalType | null, field: string) {
+  return Array.isArray(type?.fileFields) && type.fileFields.includes(field);
+}
+
 function isMoneyInputValue(value: unknown): value is MoneyInputValue {
   return !!value
     && typeof value === 'object'
@@ -304,6 +313,45 @@ function toMoneyInputValue(value: unknown): MoneyInputValue {
   }
 
   return { currency: 'CNY', amount: '' };
+}
+
+function isFileFieldValue(value: unknown): value is FileFieldValue {
+  return !!value
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && 'text' in value
+    && Array.isArray((value as FileFieldValue).attachments);
+}
+
+function toFileFieldValue(value: unknown): FileFieldValue {
+  if (isFileFieldValue(value)) {
+    return {
+      text: String(value.text || ''),
+      attachments: value.attachments,
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return {
+      text: '',
+      attachments: value.filter((item): item is ApprovalAttachment => (
+        !!item && typeof item === 'object' && 'name' in item && 'url' in item
+      )),
+    };
+  }
+
+  if (typeof value === 'string') {
+    return {
+      text: value,
+      attachments: [],
+    };
+  }
+
+  return { text: '', attachments: [] };
+}
+
+function createEmptyFileFieldValue(): FileFieldValue {
+  return { text: '', attachments: [] };
 }
 
 export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: CreateApprovalModalProps) {
@@ -337,6 +385,8 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         initialData[field] = createEmptyProjectCargoChange();
       } else if (selectedModule?.name === '供应商' && type.name === '报价' && field === '报价信息') {
         initialData[field] = createEmptySupplierQuotationInfo();
+      } else if (isConfiguredFileField(type, field)) {
+        initialData[field] = createEmptyFileFieldValue();
       } else {
         initialData[field] = '';
       }
@@ -377,6 +427,37 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       }));
     } finally {
       setUploadingFields(prev => ({ ...prev, [field]: false }));
+    }
+  };
+
+  const handleFileFieldUpload = async (field: string, fileList: FileList | null) => {
+    const files = fileList ? Array.from<File>(fileList) : [];
+    if (files.length === 0) return;
+
+    const uploadKey = `${field}.attachments`;
+    setUploadingFields(prev => ({ ...prev, [uploadKey]: true }));
+    try {
+      const payload = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          type: file.type || 'application/octet-stream',
+          size: file.size,
+          data: await readFileAsDataUrl(file),
+        })),
+      );
+      const uploads = await storage.uploadFiles(payload);
+      const currentValue = toFileFieldValue(formData[field]);
+      handleInputChange(field, {
+        ...currentValue,
+        attachments: uploads,
+      });
+    } catch (error) {
+      setErrors(prev => ({
+        ...prev,
+        [field]: error instanceof Error ? error.message : '文件上传失败',
+      }));
+    } finally {
+      setUploadingFields(prev => ({ ...prev, [uploadKey]: false }));
     }
   };
 
@@ -455,6 +536,14 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     const newErrors: Record<string, string> = {};
     selectedType.businessFields.forEach(field => {
       const value = formData[field];
+      if (isConfiguredFileField(selectedType, field)) {
+        const fileValue = toFileFieldValue(value);
+        if (!fileValue.text.trim() || fileValue.attachments.length === 0) {
+          newErrors[field] = '请填写内容并上传附件';
+        }
+        return;
+      }
+
       if (Array.isArray(value)) {
         const columns = getStructuredDetailColumns(field);
         const hasEmptyCell = columns.length > 0
@@ -1198,6 +1287,55 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     const isMoney = isConfiguredMoneyField(selectedType, field);
     const isNumeric = isConfiguredNumericField(selectedType, field);
     const isFile = field.includes('附件');
+
+    if (isConfiguredFileField(selectedType, field)) {
+      const fileValue = toFileFieldValue(formData[field]);
+      const attachmentNames = fileValue.attachments.map(file => file.name).join('、');
+      const uploadKey = `${field}.attachments`;
+      const isUploading = !!uploadingFields[uploadKey];
+
+      return (
+        <div className="space-y-3">
+          <input
+            type="text"
+            className={cn(
+              "input-field border-b border-border-silver focus:border-interactive-blue transition-colors",
+              errors[field] && "border-rose-500"
+            )}
+            placeholder={`输入${field}`}
+            value={fileValue.text}
+            onChange={(event) => handleInputChange(field, {
+              ...fileValue,
+              text: event.target.value,
+            })}
+          />
+          <div className={cn(
+            "flex flex-col gap-3 rounded-xl border border-border-silver bg-canvas-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between",
+            errors[field] && "border-rose-500",
+          )}>
+            <span className="min-w-0 truncate text-[13px] text-light-gray font-sf-pro-text">
+              {attachmentNames || '未选择文件'}
+            </span>
+            <label className={cn(
+              "btn-secondary h-[36px] shrink-0 px-4 py-0 text-[13px] cursor-pointer",
+              isUploading && "pointer-events-none opacity-60",
+            )}>
+              <Upload size={14} /> {isUploading ? '上传中' : '选择文件'}
+              <input
+                type="file"
+                className="sr-only"
+                multiple
+                onChange={(event) => {
+                  const fileList = event.currentTarget.files;
+                  void handleFileFieldUpload(field, fileList);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </label>
+          </div>
+        </div>
+      );
+    }
 
     if (isFile) {
       const attachments = Array.isArray(formData[field])

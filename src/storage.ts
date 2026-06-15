@@ -21,6 +21,13 @@ type NewApprovalRecord = Omit<ApprovalRecord, 'id' | 'createdAt' | 'updatedAt' |
 type UploadInput = Pick<ApprovalAttachment, 'name' | 'type' | 'size'> & {
   data: string;
 };
+type BusinessFormInput = {
+  moduleName: string;
+  approvalTypeName: string;
+  businessFields: string[];
+  amountFields?: string[];
+  fileFields?: string[];
+};
 
 interface RequestOptions {
   skipImpersonation?: boolean;
@@ -100,7 +107,7 @@ export const storage = {
     return request<Schema>('/approval-schema');
   },
 
-  createBusinessForm(input: { moduleName: string; approvalTypeName: string; businessFields: string[]; amountFields?: string[] }): Promise<Schema> {
+  createBusinessForm(input: BusinessFormInput): Promise<Schema> {
     return request<Schema>('/business-forms', {
       method: 'POST',
       body: JSON.stringify(input),
@@ -110,7 +117,7 @@ export const storage = {
   updateBusinessForm(
     moduleName: string,
     approvalTypeName: string,
-    input: { moduleName: string; approvalTypeName: string; businessFields: string[]; amountFields?: string[] },
+    input: BusinessFormInput,
   ): Promise<Schema> {
     return request<Schema>(
       `/business-forms/${encodeURIComponent(moduleName)}/${encodeURIComponent(approvalTypeName)}`,
