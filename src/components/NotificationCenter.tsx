@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   Bell,
@@ -10,6 +11,7 @@ import {
   Loader2,
   Send,
   UserCheck,
+  X,
   XCircle,
 } from 'lucide-react';
 import { auth } from '../auth';
@@ -61,6 +63,7 @@ export default function NotificationCenter({ activeUsername }: NotificationCente
   const [error, setError] = React.useState('');
   const [selectedRecord, setSelectedRecord] = React.useState<ApprovalRecord | null>(null);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const mobilePanelRef = React.useRef<HTMLDivElement | null>(null);
 
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
   const badgeText = unreadCount > 99 ? '99+' : String(unreadCount);
@@ -100,7 +103,8 @@ export default function NotificationCenter({ activeUsername }: NotificationCente
     if (!isOpen) return;
 
     const handleClick = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target) && !mobilePanelRef.current?.contains(target)) {
         setIsOpen(false);
       }
     };
@@ -203,7 +207,7 @@ export default function NotificationCenter({ activeUsername }: NotificationCente
   };
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className={cn('relative', isOpen && 'z-[80]')}>
       <button
         type="button"
         onClick={() => setIsOpen((current) => !current)}
@@ -221,27 +225,44 @@ export default function NotificationCenter({ activeUsername }: NotificationCente
 
       <AnimatePresence>
         {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: 8, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.98 }}
-            transition={{ duration: 0.18 }}
-            className="absolute right-0 top-[calc(100%+10px)] z-50 w-[380px] max-w-[calc(100vw-24px)] overflow-hidden rounded-2xl border border-border-silver bg-white shadow-apple-xl"
-          >
-            <div className="flex items-center justify-between gap-3 border-b border-border-silver px-4 py-3">
-              <div className="min-w-0">
-                <p className="text-[15px] font-black text-midnight-graphite">通知</p>
-                <p className="text-[11px] font-bold text-medium-gray">{unreadCount > 0 ? `${unreadCount} 条未读` : '全部已读'}</p>
+          <React.Fragment key="notification-panel">
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.98 }}
+              transition={{ duration: 0.22, ease: [0.23, 1, 0.32, 1] }}
+              className="hidden sm:absolute sm:right-0 sm:top-[calc(100%+10px)] sm:z-50 sm:flex sm:w-[380px] sm:max-w-[calc(100vw-24px)] sm:flex-col sm:overflow-hidden sm:rounded-2xl sm:border sm:border-border-silver sm:bg-white sm:pb-0 sm:shadow-apple-xl"
+            >
+              <div className="flex justify-center py-2 sm:hidden">
+                <span className="h-1 w-10 rounded-full bg-border-silver" />
               </div>
-              <button
-                type="button"
-                onClick={() => void handleMarkAllRead()}
-                disabled={unreadCount === 0 || isUpdating}
-                className="flex h-9 w-9 items-center justify-center rounded-full text-medium-gray transition-colors hover:bg-lightest-gray-background hover:text-midnight-graphite disabled:opacity-35"
-                title="全部已读"
-              >
-                {isUpdating ? <Loader2 size={15} strokeWidth={2.5} className="animate-spin" /> : <CheckCheck size={16} strokeWidth={2.5} />}
-              </button>
+
+            <div className="flex items-center justify-between gap-3 border-b border-border-silver px-5 pb-4 pt-2 sm:px-4 sm:py-3">
+              <div className="min-w-0">
+                <p className="text-[18px] font-black text-midnight-graphite sm:text-[15px]">通知</p>
+                <p className="mt-0.5 text-[12px] font-bold text-medium-gray sm:mt-0 sm:text-[11px]">{unreadCount > 0 ? `${unreadCount} 条未读` : '全部已读'}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleMarkAllRead()}
+                  disabled={unreadCount === 0 || isUpdating}
+                  className="flex h-9 items-center justify-center gap-1.5 rounded-full bg-lightest-gray-background px-3 text-[12px] font-black text-medium-gray transition-colors hover:bg-canvas-white hover:text-midnight-graphite disabled:opacity-35 sm:w-9 sm:bg-transparent sm:px-0"
+                  title="全部已读"
+                >
+                  {isUpdating ? <Loader2 size={15} strokeWidth={2.5} className="animate-spin" /> : <CheckCheck size={16} strokeWidth={2.5} />}
+                  <span className="sm:hidden">全部已读</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-lightest-gray-background text-medium-gray transition-colors hover:bg-canvas-white hover:text-midnight-graphite sm:hidden"
+                  aria-label="关闭通知"
+                  title="关闭"
+                >
+                  <X size={16} strokeWidth={2.6} />
+                </button>
+              </div>
             </div>
 
             {error && (
@@ -250,16 +271,16 @@ export default function NotificationCenter({ activeUsername }: NotificationCente
               </div>
             )}
 
-            <div className="max-h-[420px] overflow-y-auto p-2">
+            <div className="flex-1 overflow-y-auto p-3 pb-5 sm:max-h-[420px] sm:flex-none sm:p-2">
               {isLoading && notifications.length === 0 && (
-                <div className="flex h-[160px] items-center justify-center gap-2 text-[13px] font-bold text-medium-gray">
+                <div className="flex min-h-[220px] items-center justify-center gap-2 text-[13px] font-bold text-medium-gray sm:min-h-0 sm:h-[160px]">
                   <Loader2 size={16} strokeWidth={2.5} className="animate-spin" />
                   加载通知
                 </div>
               )}
 
               {!isLoading && notifications.length === 0 && (
-                <div className="flex h-[180px] flex-col items-center justify-center gap-3 text-center">
+                <div className="flex min-h-[260px] flex-col items-center justify-center gap-3 text-center sm:h-[180px] sm:min-h-0">
                   <div className="flex h-11 w-11 items-center justify-center rounded-full bg-lightest-gray-background text-medium-gray">
                     <Inbox size={19} strokeWidth={2.4} />
                   </div>
@@ -277,22 +298,22 @@ export default function NotificationCenter({ activeUsername }: NotificationCente
                     type="button"
                     onClick={() => void openNotificationRecord(notification)}
                     className={cn(
-                      'group flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-all',
+                      'group flex w-full items-start gap-3 rounded-2xl px-4 py-4 text-left transition-all sm:rounded-xl sm:px-3 sm:py-3',
                       isUnread ? 'bg-[#fbfbfd] hover:bg-lightest-gray-background' : 'hover:bg-lightest-gray-background',
                     )}
                   >
-                    <span className={cn('mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full', getNotificationTone(notification.type))}>
-                      <Icon size={16} strokeWidth={2.5} />
+                    <span className={cn('mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full sm:h-9 sm:w-9', getNotificationTone(notification.type))}>
+                      <Icon size={17} strokeWidth={2.5} />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2">
-                        <span className="truncate text-[13px] font-black text-midnight-graphite">{notification.title}</span>
+                        <span className="min-w-0 text-[14px] font-black text-midnight-graphite sm:truncate sm:text-[13px]">{notification.title}</span>
                         {isUnread && <Circle size={7} className="shrink-0 fill-interactive-blue text-interactive-blue" />}
                       </span>
-                      <span className="mt-1 block text-[12px] font-semibold leading-5 text-deep-gray">
+                      <span className="mt-1.5 block text-[13px] font-semibold leading-5 text-deep-gray sm:mt-1 sm:text-[12px]">
                         {notification.message}
                       </span>
-                      <span className="mt-2 block text-[10px] font-black uppercase tracking-wider text-light-gray">
+                      <span className="mt-3 block text-[10px] font-black uppercase tracking-wider text-light-gray sm:mt-2">
                         {formatLocalDateTime(notification.createdAt, 'date-time')}
                       </span>
                     </span>
@@ -300,7 +321,121 @@ export default function NotificationCenter({ activeUsername }: NotificationCente
                 );
               })}
             </div>
-          </motion.div>
+            </motion.div>
+            {typeof document !== 'undefined' && createPortal(
+              <React.Fragment key="mobile-notification-panel">
+                <motion.button
+                  type="button"
+                  aria-label="关闭通知"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.16 }}
+                  onClick={() => setIsOpen(false)}
+                  className="fixed inset-0 z-[90] bg-black/25 backdrop-blur-[2px] sm:hidden"
+                />
+
+                <motion.div
+                  ref={mobilePanelRef}
+                  initial={{ opacity: 0, y: 28, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 24, scale: 0.98 }}
+                  transition={{ duration: 0.22, ease: [0.23, 1, 0.32, 1] }}
+                  className="fixed inset-x-0 bottom-0 z-[100] mx-auto flex max-h-[82dvh] w-full flex-col overflow-hidden rounded-t-[28px] border border-border-silver bg-white pb-[env(safe-area-inset-bottom)] shadow-apple-xl sm:hidden"
+                >
+                  <div className="flex justify-center py-2">
+                    <span className="h-1 w-10 rounded-full bg-border-silver" />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 border-b border-border-silver px-5 pb-4 pt-2">
+                    <div className="min-w-0">
+                      <p className="text-[18px] font-black text-midnight-graphite">通知</p>
+                      <p className="mt-0.5 text-[12px] font-bold text-medium-gray">{unreadCount > 0 ? `${unreadCount} 条未读` : '全部已读'}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleMarkAllRead()}
+                        disabled={unreadCount === 0 || isUpdating}
+                        className="flex h-9 items-center justify-center gap-1.5 rounded-full bg-lightest-gray-background px-3 text-[12px] font-black text-medium-gray transition-colors hover:bg-canvas-white hover:text-midnight-graphite disabled:opacity-35"
+                        title="全部已读"
+                      >
+                        {isUpdating ? <Loader2 size={15} strokeWidth={2.5} className="animate-spin" /> : <CheckCheck size={16} strokeWidth={2.5} />}
+                        <span>全部已读</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsOpen(false)}
+                        className="flex h-9 w-9 items-center justify-center rounded-full bg-lightest-gray-background text-medium-gray transition-colors hover:bg-canvas-white hover:text-midnight-graphite"
+                        aria-label="关闭通知"
+                        title="关闭"
+                      >
+                        <X size={16} strokeWidth={2.6} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {error && (
+                    <div className="border-b border-[#ffd6d6] bg-[#fff1f0] px-4 py-3 text-[12px] font-bold text-[#c62828]">
+                      {error}
+                    </div>
+                  )}
+
+                  <div className="flex-1 overflow-y-auto p-3 pb-5">
+                    {isLoading && notifications.length === 0 && (
+                      <div className="flex min-h-[220px] items-center justify-center gap-2 text-[13px] font-bold text-medium-gray">
+                        <Loader2 size={16} strokeWidth={2.5} className="animate-spin" />
+                        加载通知
+                      </div>
+                    )}
+
+                    {!isLoading && notifications.length === 0 && (
+                      <div className="flex min-h-[260px] flex-col items-center justify-center gap-3 text-center">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-lightest-gray-background text-medium-gray">
+                          <Inbox size={19} strokeWidth={2.4} />
+                        </div>
+                        <p className="text-[13px] font-bold text-medium-gray">暂无通知</p>
+                      </div>
+                    )}
+
+                    {notifications.map((notification) => {
+                      const Icon = getNotificationIcon(notification.type);
+                      const isUnread = !notification.readAt;
+
+                      return (
+                        <button
+                          key={notification.id}
+                          type="button"
+                          onClick={() => void openNotificationRecord(notification)}
+                          className={cn(
+                            'group flex w-full items-start gap-3 rounded-2xl px-4 py-4 text-left transition-all',
+                            isUnread ? 'bg-[#fbfbfd] hover:bg-lightest-gray-background' : 'hover:bg-lightest-gray-background',
+                          )}
+                        >
+                          <span className={cn('mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full', getNotificationTone(notification.type))}>
+                            <Icon size={17} strokeWidth={2.5} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-2">
+                              <span className="min-w-0 text-[14px] font-black text-midnight-graphite">{notification.title}</span>
+                              {isUnread && <Circle size={7} className="shrink-0 fill-interactive-blue text-interactive-blue" />}
+                            </span>
+                            <span className="mt-1.5 block text-[13px] font-semibold leading-5 text-deep-gray">
+                              {notification.message}
+                            </span>
+                            <span className="mt-3 block text-[10px] font-black uppercase tracking-wider text-light-gray">
+                              {formatLocalDateTime(notification.createdAt, 'date-time')}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              </React.Fragment>,
+              document.body,
+            )}
+          </React.Fragment>
         )}
       </AnimatePresence>
 
