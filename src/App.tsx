@@ -17,6 +17,7 @@ import { auth } from './auth';
 import { storage } from './storage';
 import { AdminView, Role, ApprovalNotification, ApprovalRecord, ApprovalStatus } from './types';
 import { approvalSchema, replaceApprovalSchema } from './approvalSchema';
+import { setApprovalAppBadge } from './lib/pushNotifications';
 
 type AppRoute =
   | { kind: 'work'; tab: WorkTab }
@@ -171,6 +172,7 @@ function MainApp() {
 
   const handleLogout = () => {
     auth.logout();
+    void setApprovalAppBadge(0);
     window.history.pushState(null, '', '/');
     setIsAuthenticated(false);
     setPerspective(null);

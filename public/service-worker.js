@@ -11,6 +11,27 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+function getBadgeCount(value) {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+async function setAppBadgeCount(count) {
+  if (!navigator.setAppBadge) return;
+
+  try {
+    if (count > 0) {
+      await navigator.setAppBadge(count);
+    } else if (navigator.clearAppBadge) {
+      await navigator.clearAppBadge();
+    } else {
+      await navigator.setAppBadge(0);
+    }
+  } catch {
+    // Some platforms expose Badging API but still gate it behind permissions.
+  }
+}
+
 self.addEventListener('push', (event) => {
   let data = {};
 
@@ -35,7 +56,10 @@ self.addEventListener('push', (event) => {
     },
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(Promise.all([
+    setAppBadgeCount(getBadgeCount(data.badgeCount)),
+    self.registration.showNotification(title, options),
+  ]));
 });
 
 self.addEventListener('notificationclick', (event) => {

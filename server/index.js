@@ -1376,7 +1376,7 @@ function updateAccounts(mutator) {
 }
 
 async function readNotifications() {
-  return readJsonArrayFile(notificationsFile, 'approval notifications');
+  return readJsonArrayFile(notificationsFile, 'approval notifications', { optional: true });
 }
 
 async function writeNotifications(notifications) {
@@ -1403,7 +1403,7 @@ function clearNotifications() {
 }
 
 async function readPushSubscriptions() {
-  return readJsonArrayFile(pushSubscriptionsFile, 'push subscriptions');
+  return readJsonArrayFile(pushSubscriptionsFile, 'push subscriptions', { optional: true });
 }
 
 async function writePushSubscriptions(subscriptions) {
@@ -1464,7 +1464,20 @@ function getNotificationUrl(notification) {
   return search ? `${path}?${search}` : path;
 }
 
-function createPushPayload(notification) {
+function getUnreadNotificationCounts(notifications) {
+  const counts = new Map();
+
+  notifications.forEach((notification) => {
+    if (notification.readAt) return;
+
+    const username = normalizeWorkflowText(notification.recipientUsername).toLowerCase();
+    counts.set(username, (counts.get(username) || 0) + 1);
+  });
+
+  return counts;
+}
+
+function createPushPayload(notification, badgeCount = 0) {
   return JSON.stringify({
     title: notification.title,
     body: notification.message,
@@ -1473,6 +1486,7 @@ function createPushPayload(notification) {
     type: notification.type,
     url: getNotificationUrl(notification),
     tag: `approval-${notification.id}`,
+    badgeCount,
   });
 }
 
@@ -1497,6 +1511,7 @@ async function sendPushNotifications(notifications) {
   const recipientUsernames = new Set(
     notifications.map((notification) => normalizeWorkflowText(notification.recipientUsername).toLowerCase()),
   );
+  const unreadCountsByUsername = getUnreadNotificationCounts(await readNotifications());
   const subscriptions = (await readPushSubscriptions())
     .filter((subscription) => recipientUsernames.has(normalizeWorkflowText(subscription.username).toLowerCase()));
 
@@ -1518,7 +1533,11 @@ async function sendPushNotifications(notifications) {
 
     return userNotifications.map(async (notification) => {
       try {
-        await webPush.sendNotification(savedSubscription.subscription, createPushPayload(notification), {
+        const username = normalizeWorkflowText(savedSubscription.username).toLowerCase();
+        await webPush.sendNotification(savedSubscription.subscription, createPushPayload(
+          notification,
+          unreadCountsByUsername.get(username) || 0,
+        ), {
           TTL: 60 * 60,
           urgency: 'high',
         });

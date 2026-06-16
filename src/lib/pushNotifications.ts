@@ -19,6 +19,11 @@ interface NavigatorWithStandalone extends Navigator {
   standalone?: boolean;
 }
 
+type NavigatorWithBadging = Navigator & {
+  setAppBadge?: (contents?: number) => Promise<void>;
+  clearAppBadge?: () => Promise<void>;
+};
+
 function isIosLikeDevice() {
   const navigatorWithTouch = navigator as Navigator & { maxTouchPoints?: number };
   return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
@@ -69,6 +74,25 @@ function urlBase64ToUint8Array(base64String: string) {
   }
 
   return outputArray;
+}
+
+export async function setApprovalAppBadge(unreadCount: number) {
+  const navigatorWithBadging = navigator as NavigatorWithBadging;
+  if (!navigatorWithBadging.setAppBadge) return;
+
+  const badgeCount = Math.max(0, Math.floor(unreadCount));
+
+  try {
+    if (badgeCount > 0) {
+      await navigatorWithBadging.setAppBadge(badgeCount);
+    } else if (navigatorWithBadging.clearAppBadge) {
+      await navigatorWithBadging.clearAppBadge();
+    } else {
+      await navigatorWithBadging.setAppBadge(0);
+    }
+  } catch {
+    // Badging is platform-controlled; unsupported or denied devices can ignore it.
+  }
 }
 
 async function getPushConfigState() {

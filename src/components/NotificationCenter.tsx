@@ -25,6 +25,7 @@ import {
   disableApprovalPushNotifications,
   enableApprovalPushNotifications,
   readApprovalPushState,
+  setApprovalAppBadge,
 } from '../lib/pushNotifications';
 import ApprovalDetailModal from './ApprovalDetailModal';
 
@@ -81,6 +82,7 @@ export default function NotificationCenter({ activeUsername, onOpenRecord }: Not
   const loadNotifications = React.useCallback(async () => {
     if (!activeUsername) {
       setNotifications([]);
+      void setApprovalAppBadge(0);
       return;
     }
 
@@ -90,6 +92,7 @@ export default function NotificationCenter({ activeUsername, onOpenRecord }: Not
     try {
       const nextNotifications = await storage.getNotifications();
       setNotifications(nextNotifications);
+      void setApprovalAppBadge(nextNotifications.filter((notification) => !notification.readAt).length);
     } catch (err) {
       setError(err instanceof Error ? err.message : '通知加载失败');
     } finally {
@@ -149,6 +152,7 @@ export default function NotificationCenter({ activeUsername, onOpenRecord }: Not
     setNotifications((current) => current.map((notification) => (
       notification.readAt ? notification : { ...notification, readAt: new Date().toISOString() }
     )));
+    void setApprovalAppBadge(0);
 
     try {
       await storage.markAllNotificationsRead();
@@ -167,6 +171,7 @@ export default function NotificationCenter({ activeUsername, onOpenRecord }: Not
     setIsPushUpdating(true);
     const nextState = await enableApprovalPushNotifications();
     setPushState(nextState);
+    void setApprovalAppBadge(unreadCount);
     setIsPushUpdating(false);
   };
 
@@ -176,6 +181,7 @@ export default function NotificationCenter({ activeUsername, onOpenRecord }: Not
     setIsPushUpdating(true);
     const nextState = await disableApprovalPushNotifications();
     setPushState(nextState);
+    void setApprovalAppBadge(0);
     setIsPushUpdating(false);
   };
 
