@@ -58,6 +58,7 @@ const aiBranchLogsFile = path.join(dataDir, 'ai-branch-decision-logs.json');
 const workflowTemplatesFile = path.join(dataDir, 'workflow-templates.json');
 const organizationFile = path.join(dataDir, 'organization-directory.json');
 const organizationSeedStateFile = path.join(dataDir, 'organization-seed-state.json');
+const notificationsFile = path.join(dataDir, 'approval-notifications.json');
 const bundledOrganizationDirectoryFile = path.resolve(__dirname, 'default-organization-directory.json');
 const approvalSchemaFile = path.join(dataDir, 'approval-schema.json');
 const shouldSyncBundledOrganization = process.env.ORGANIZATION_SEED_SYNC !== 'false';
@@ -847,7 +848,7 @@ async function readJsonArrayFile(file, label, options = {}) {
     await ensureJsonArrayFile(file);
   }
 
-  const content = await fs.readFile(file, 'utf8');
+  const content = (await fs.readFile(file, 'utf8')).replace(/^\uFEFF/, '');
   if (!content.trim()) return [];
 
   const items = JSON.parse(content);
@@ -1252,6 +1253,7 @@ let assistantConfigWriteQueue = Promise.resolve();
 let workflowWriteQueue = Promise.resolve();
 let aiBranchLogWriteQueue = Promise.resolve();
 let organizationWriteQueue = Promise.resolve();
+let notificationWriteQueue = Promise.resolve();
 
 function createBusinessRecord(record) {
   const operation = writeQueue.catch(() => undefined).then(async () => {
@@ -1323,6 +1325,33 @@ function updateAccounts(mutator) {
 
   accountWriteQueue = operation.catch(() => undefined);
   return operation;
+}
+
+async function readNotifications() {
+  return readJsonArrayFile(notificationsFile, 'approval notifications');
+}
+
+async function writeNotifications(notifications) {
+  await writeJsonArrayFile(notificationsFile, notifications);
+}
+
+function updateNotifications(mutator) {
+  const operation = notificationWriteQueue.catch(() => undefined).then(async () => {
+    const notifications = await readNotifications();
+    const result = await mutator(notifications);
+    await writeNotifications(notifications);
+    return result;
+  });
+
+  notificationWriteQueue = operation.catch(() => undefined);
+  return operation;
+}
+
+function clearNotifications() {
+  return updateNotifications((notifications) => {
+    notifications.splice(0);
+    return null;
+  });
 }
 
 async function readPromptConfigs() {
@@ -3174,6 +3203,276 @@ function canUserSeeRecord(user, record) {
   );
 }
 
+function clonePlainObject(value) {
+  return JSON.parse(JSON.stringify(value || null));
+}
+
+function toRecipientFromSnapshot(snapshot) {
+  const username = normalizeWorkflowText(snapshot?.accountUsername);
+  if (!username) return null;
+
+  return {
+    username,
+    name: normalizeWorkflowText(snapshot?.name) || username,
+  };
+}
+
+function getCurrentApprovalRecipients(record) {
+  if (record?.status !== STATUS_PENDING) return [];
+
+  const currentStep = getCurrentWorkflowStep(record);
+  if (!currentStep || isProcessorWorkflowStep(currentStep)) return [];
+
+  return (currentStep.approvers || [])
+    .filter((approver) => approver?.status !== 'approved' && approver?.status !== 'rejected' && approver?.status !== 'closed')
+    .map(toRecipientFromSnapshot)
+    .filter(Boolean);
+}
+
+function getCurrentProcessorRecipients(record) {
+  if (record?.status !== STATUS_PROCESSING) return [];
+
+  return (record.processors || [])
+    .filter((processor) => processor?.status !== 'completed')
+    .map(toRecipientFromSnapshot)
+    .filter(Boolean);
+}
+
+function getCcRecipients(record) {
+  if (!isWorkflowClosed(record)) return [];
+
+  return (record.ccRecipients || [])
+    .map(toRecipientFromSnapshot)
+    .filter(Boolean);
+}
+
+async function findApplicantRecipient(record) {
+  const applicantUsername = normalizeWorkflowText(record?.applicantUsername);
+  if (applicantUsername) {
+    return {
+      username: applicantUsername,
+      name: normalizeWorkflowText(record?.applicant) || applicantUsername,
+    };
+  }
+
+  const applicantName = normalizeWorkflowText(record?.applicant);
+  if (!applicantName) return null;
+
+  if (applicantName === normalizeWorkflowText(superAdmin.name)) {
+    return { username: superAdmin.username, name: superAdmin.name };
+  }
+
+  const accounts = await readAccounts();
+  const directory = await readOrganizationDirectory();
+  const account = accounts
+    .map((item) => applyDirectoryAccountName(item, directory))
+    .find((item) => normalizeWorkflowText(item.name) === applicantName);
+
+  return account ? { username: account.username, name: account.name } : null;
+}
+
+function getApprovalActionKey(record) {
+  if (record?.status !== STATUS_PENDING) return '';
+
+  const currentStep = getCurrentWorkflowStep(record);
+  if (!currentStep) return 'legacy-pending';
+
+  return [
+    currentStep.stepId,
+    currentStep.order,
+    currentStep.name,
+  ].join('|');
+}
+
+function getProcessorActionKey(record) {
+  if (record?.status !== STATUS_PROCESSING) return '';
+
+  return [
+    record.processorTaskName || '',
+    getCurrentProcessorRecipients(record).map((recipient) => recipient.username.toLowerCase()).sort().join(','),
+  ].join('|');
+}
+
+function createNotificationDraft({ recipient, type, title, message, record, actorName }) {
+  if (!recipient?.username || !record?.id) return null;
+
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    recipientUsername: recipient.username,
+    recipientName: recipient.name || recipient.username,
+    type,
+    title,
+    message,
+    recordId: record.id,
+    moduleName: record.moduleName,
+    approvalTypeName: record.approvalTypeName,
+    actorName,
+    createdAt: now,
+  };
+}
+
+function pushNotificationDraft(drafts, draft) {
+  if (!draft) return;
+
+  const key = [
+    draft.recipientUsername.toLowerCase(),
+    draft.type,
+    draft.recordId,
+    draft.message,
+  ].join('|');
+  if (drafts.some((item) => [
+    item.recipientUsername.toLowerCase(),
+    item.type,
+    item.recordId,
+    item.message,
+  ].join('|') === key)) return;
+
+  drafts.push(draft);
+}
+
+function pushActionRequiredNotifications(drafts, record, actorName) {
+  getCurrentApprovalRecipients(record).forEach((recipient) => {
+    pushNotificationDraft(drafts, createNotificationDraft({
+      recipient,
+      type: 'approval_pending',
+      title: '新的审批待处理',
+      message: `${record.approvalTypeName} 需要你审批，单号 ${record.id}`,
+      record,
+      actorName,
+    }));
+  });
+}
+
+function pushProcessingNotifications(drafts, record, actorName) {
+  getCurrentProcessorRecipients(record).forEach((recipient) => {
+    pushNotificationDraft(drafts, createNotificationDraft({
+      recipient,
+      type: 'approval_processing',
+      title: '新的办理任务',
+      message: `${record.processorTaskName || record.approvalTypeName} 需要你办理，单号 ${record.id}`,
+      record,
+      actorName,
+    }));
+  });
+}
+
+async function pushApplicantResultNotification(drafts, record, actorName, type, title, message) {
+  const recipient = await findApplicantRecipient(record);
+  pushNotificationDraft(drafts, createNotificationDraft({
+    recipient,
+    type,
+    title,
+    message,
+    record,
+    actorName,
+  }));
+}
+
+function pushCcNotifications(drafts, record, actorName) {
+  getCcRecipients(record).forEach((recipient) => {
+    pushNotificationDraft(drafts, createNotificationDraft({
+      recipient,
+      type: 'approval_cc',
+      title: '审批结果抄送',
+      message: `${record.approvalTypeName} 已结束并抄送给你，单号 ${record.id}`,
+      record,
+      actorName,
+    }));
+  });
+}
+
+async function appendNotifications(drafts) {
+  const validDrafts = drafts.filter(Boolean);
+  if (validDrafts.length === 0) return [];
+
+  return updateNotifications((notifications) => {
+    notifications.unshift(...validDrafts);
+    notifications.splice(1000);
+    return validDrafts;
+  });
+}
+
+async function createNotificationsForCreatedRecord(record, actor) {
+  const drafts = [];
+  const actorName = actor?.name || record.applicant || 'system';
+
+  if (record.status === STATUS_PENDING) {
+    pushActionRequiredNotifications(drafts, record, actorName);
+  } else if (record.status === STATUS_PROCESSING) {
+    pushProcessingNotifications(drafts, record, actorName);
+  } else if (isWorkflowClosed(record)) {
+    pushCcNotifications(drafts, record, actorName);
+  }
+
+  await appendNotifications(drafts);
+}
+
+async function createNotificationsForRecordTransition(beforeRecord, afterRecord, actor) {
+  const drafts = [];
+  const actorName = actor?.name || 'system';
+  const wasApprovalAction = getApprovalActionKey(beforeRecord);
+  const nextApprovalAction = getApprovalActionKey(afterRecord);
+  const wasProcessorAction = getProcessorActionKey(beforeRecord);
+  const nextProcessorAction = getProcessorActionKey(afterRecord);
+
+  if (afterRecord.status === STATUS_PENDING && nextApprovalAction && nextApprovalAction !== wasApprovalAction) {
+    pushActionRequiredNotifications(drafts, afterRecord, actorName);
+  }
+
+  if (afterRecord.status === STATUS_PROCESSING && nextProcessorAction && nextProcessorAction !== wasProcessorAction) {
+    pushProcessingNotifications(drafts, afterRecord, actorName);
+    if (beforeRecord.status !== STATUS_PROCESSING) {
+      await pushApplicantResultNotification(
+        drafts,
+        afterRecord,
+        actorName,
+        'approval_progress',
+        '审批已通过，等待办理',
+        `${afterRecord.approvalTypeName} 已通过审批，正在等待后续办理，单号 ${afterRecord.id}`,
+      );
+    }
+  }
+
+  if (afterRecord.status === STATUS_APPROVED && beforeRecord.status !== STATUS_APPROVED) {
+    await pushApplicantResultNotification(
+      drafts,
+      afterRecord,
+      actorName,
+      'approval_approved',
+      '审批已通过',
+      `${afterRecord.approvalTypeName} 已审批通过，单号 ${afterRecord.id}`,
+    );
+    pushCcNotifications(drafts, afterRecord, actorName);
+  }
+
+  if (afterRecord.status === STATUS_COMPLETED && beforeRecord.status !== STATUS_COMPLETED) {
+    await pushApplicantResultNotification(
+      drafts,
+      afterRecord,
+      actorName,
+      'approval_completed',
+      '审批已完成',
+      `${afterRecord.approvalTypeName} 已完成，单号 ${afterRecord.id}`,
+    );
+    pushCcNotifications(drafts, afterRecord, actorName);
+  }
+
+  if (afterRecord.status === STATUS_REJECTED && beforeRecord.status !== STATUS_REJECTED) {
+    await pushApplicantResultNotification(
+      drafts,
+      afterRecord,
+      actorName,
+      'approval_rejected',
+      '审批被驳回',
+      `${afterRecord.approvalTypeName} 已被驳回，单号 ${afterRecord.id}`,
+    );
+    pushCcNotifications(drafts, afterRecord, actorName);
+  }
+
+  await appendNotifications(drafts);
+}
+
 function appendApprovalLog(record, action, user, details, step) {
   record.logs = [
     ...(record.logs || []),
@@ -4737,6 +5036,71 @@ app.get('/api/uploads/:id', authenticate, async (req, res, next) => {
   }
 });
 
+app.get('/api/notifications', authenticate, async (req, res, next) => {
+  try {
+    const username = normalizeWorkflowText(req.user.username).toLowerCase();
+    const notifications = await readNotifications();
+    const userNotifications = notifications
+      .filter((notification) => normalizeWorkflowText(notification.recipientUsername).toLowerCase() === username)
+      .slice(0, 120);
+
+    res.json(userNotifications);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/notifications/read-all', authenticate, async (req, res, next) => {
+  try {
+    const username = normalizeWorkflowText(req.user.username).toLowerCase();
+    const now = new Date().toISOString();
+    let updated = 0;
+
+    await updateNotifications((notifications) => {
+      notifications.forEach((notification) => {
+        if (
+          normalizeWorkflowText(notification.recipientUsername).toLowerCase() === username &&
+          !notification.readAt
+        ) {
+          notification.readAt = now;
+          updated += 1;
+        }
+      });
+
+      return null;
+    });
+
+    res.json({ updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/notifications/:id/read', authenticate, async (req, res, next) => {
+  try {
+    const username = normalizeWorkflowText(req.user.username).toLowerCase();
+    const now = new Date().toISOString();
+    let updatedNotification = null;
+
+    await updateNotifications((notifications) => {
+      const notification = notifications.find((item) => item.id === req.params.id);
+      if (!notification || normalizeWorkflowText(notification.recipientUsername).toLowerCase() !== username) {
+        throw createHttpError('notification not found', 404);
+      }
+
+      if (!notification.readAt) {
+        notification.readAt = now;
+      }
+      updatedNotification = notification;
+      return notification;
+    });
+
+    res.json(updatedNotification);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/records', authenticate, async (req, res, next) => {
   try {
     const records = await readRecords();
@@ -4776,6 +5140,7 @@ app.post('/api/records', authenticate, requireRoles('employee', 'boss'), async (
       businessData,
       status: workflow.initialStatus,
       applicant,
+      applicantUsername: req.user.username,
       workflowInstance: workflow.instance,
       ccRecipients: workflow.ccRecipients,
       processors: workflow.processors,
@@ -4795,6 +5160,8 @@ app.post('/api/records', authenticate, requireRoles('employee', 'boss'), async (
           : []),
       ],
     });
+
+    await createNotificationsForCreatedRecord(record, req.user);
 
     res.status(201).json(toPublicRecord(record, req.user));
     scheduleAiSuggestionGeneration(record);
@@ -4820,7 +5187,9 @@ app.patch('/api/records/:id/status', authenticate, requireRoles('employee', 'bos
       return res.status(400).json({ error: 'reject reason is required' });
     }
 
+    let previousRecord = null;
     const updatedRecord = await updateRecordById(id, (record) => {
+      previousRecord = clonePlainObject(record);
       if (record.status !== STATUS_PENDING) {
         const error = new Error('approval record has already been processed');
         error.statusCode = 409;
@@ -4855,6 +5224,10 @@ app.patch('/api/records/:id/status', authenticate, requireRoles('employee', 'bos
       return record;
     });
 
+    if (previousRecord) {
+      await createNotificationsForRecordTransition(previousRecord, updatedRecord, req.user);
+    }
+
     res.json(toPublicRecord(updatedRecord, req.user));
   } catch (error) {
     next(error);
@@ -4866,9 +5239,15 @@ app.patch('/api/records/:id/process', authenticate, requireRoles('employee', 'bo
     const { id } = req.params;
     const { comment } = req.body || {};
 
+    let previousRecord = null;
     const updatedRecord = await updateRecordById(id, (record) => {
+      previousRecord = clonePlainObject(record);
       return completeProcessingRecord(record, req.user, comment);
     });
+
+    if (previousRecord) {
+      await createNotificationsForRecordTransition(previousRecord, updatedRecord, req.user);
+    }
 
     res.json(toPublicRecord(updatedRecord, req.user));
   } catch (error) {
@@ -4879,6 +5258,7 @@ app.patch('/api/records/:id/process', authenticate, requireRoles('employee', 'bo
 app.delete('/api/records', authenticate, requireRoles('developer'), async (_req, res, next) => {
   try {
     await clearRecordFiles();
+    await clearNotifications();
 
     res.status(204).end();
   } catch (error) {

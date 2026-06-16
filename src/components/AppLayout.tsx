@@ -6,6 +6,7 @@ import { ChevronDown, LogOut, PanelLeftClose, PanelLeftOpen, Search, ShieldCheck
 import { AdminView, Role, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
+import NotificationCenter from './NotificationCenter';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -366,6 +367,8 @@ export default function AppLayout({
             </div>
 
             <div className="flex items-center gap-4 lg:gap-8">
+              <NotificationCenter activeUsername={currentUsername} />
+
               <div className="flex items-center gap-3 lg:gap-4 group cursor-pointer">
                 <div className="hidden sm:flex flex-col items-end">
                   <p className="text-[14px] font-semibold text-midnight-graphite tracking-tight leading-none">{displayName}</p>

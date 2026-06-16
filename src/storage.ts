@@ -6,6 +6,7 @@ import {
   AiBranchDecisionLog,
   AiPromptConfig,
   ApprovalAttachment,
+  ApprovalNotification,
   ApprovalRecord,
   ApprovalStatus,
   OrganizationDirectory,
@@ -102,6 +103,10 @@ async function download(url: string): Promise<Blob> {
   return response.blob();
 }
 
+function emitNotificationsUpdated() {
+  window.dispatchEvent(new Event('approval-notifications-updated'));
+}
+
 export const storage = {
   getApprovalSchema(): Promise<Schema> {
     return request<Schema>('/approval-schema');
@@ -139,6 +144,22 @@ export const storage = {
 
   getRecords(): Promise<ApprovalRecord[]> {
     return request<ApprovalRecord[]>('/records');
+  },
+
+  getNotifications(): Promise<ApprovalNotification[]> {
+    return request<ApprovalNotification[]>('/notifications');
+  },
+
+  markNotificationRead(id: string): Promise<ApprovalNotification> {
+    return request<ApprovalNotification>(`/notifications/${encodeURIComponent(id)}/read`, {
+      method: 'PATCH',
+    });
+  },
+
+  markAllNotificationsRead(): Promise<{ updated: number }> {
+    return request<{ updated: number }>('/notifications/read-all', {
+      method: 'PATCH',
+    });
   },
 
   getAccounts(): Promise<SystemAccount[]> {
@@ -265,6 +286,9 @@ export const storage = {
     return request<ApprovalRecord>('/records', {
       method: 'POST',
       body: JSON.stringify(record),
+    }).then((createdRecord) => {
+      emitNotificationsUpdated();
+      return createdRecord;
     });
   },
 
@@ -277,6 +301,9 @@ export const storage = {
     return request<ApprovalRecord>(`/records/${encodeURIComponent(id)}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status, approver, reason }),
+    }).then((updatedRecord) => {
+      emitNotificationsUpdated();
+      return updatedRecord;
     });
   },
 
@@ -287,13 +314,19 @@ export const storage = {
     return request<ApprovalRecord>(`/records/${encodeURIComponent(id)}/process`, {
       method: 'PATCH',
       body: JSON.stringify({ comment }),
+    }).then((updatedRecord) => {
+      emitNotificationsUpdated();
+      return updatedRecord;
     });
   },
 
   clearAll(): Promise<void> {
     return request<void>('/records', {
       method: 'DELETE',
-    }, { skipImpersonation: true });
+    }, { skipImpersonation: true }).then((result) => {
+      emitNotificationsUpdated();
+      return result;
+    });
   },
 
   uploadFiles(files: UploadInput[]): Promise<ApprovalAttachment[]> {

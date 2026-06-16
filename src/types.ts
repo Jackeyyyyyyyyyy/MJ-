@@ -335,6 +335,30 @@ export interface ApprovalLog {
   details?: string;
 }
 
+export type ApprovalNotificationType =
+  | 'approval_pending'
+  | 'approval_progress'
+  | 'approval_approved'
+  | 'approval_rejected'
+  | 'approval_processing'
+  | 'approval_completed'
+  | 'approval_cc';
+
+export interface ApprovalNotification {
+  id: string;
+  recipientUsername: string;
+  recipientName?: string;
+  type: ApprovalNotificationType;
+  title: string;
+  message: string;
+  recordId: string;
+  moduleName: string;
+  approvalTypeName: string;
+  actorName?: string;
+  createdAt: string;
+  readAt?: string;
+}
+
 export interface ApprovalAttachment {
   id: string;
   name: string;
@@ -453,6 +477,7 @@ export interface ApprovalRecord {
   businessData: Record<string, any>;
   status: ApprovalStatus;
   applicant: string;
+  applicantUsername?: string;
   workflowInstance?: WorkflowInstance;
   ccRecipients?: WorkflowCcRecipientSnapshot[];
   processors?: WorkflowProcessorSnapshot[];
