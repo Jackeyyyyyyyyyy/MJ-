@@ -3,7 +3,7 @@ import { auth } from '../auth';
 import { storage } from '../storage';
 import Sidebar from './Sidebar';
 import { ChevronDown, LogOut, PanelLeftClose, PanelLeftOpen, Search, ShieldCheck, UserRound } from 'lucide-react';
-import { AdminView, Role, SystemAccount } from '../types';
+import { AdminView, ApprovalNotification, ApprovalRecord, Role, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import NotificationCenter from './NotificationCenter';
@@ -20,6 +20,7 @@ interface AppLayoutProps {
   onOpenWorkflowAdmin: () => void;
   onOpenBusinessFormAdmin: () => void;
   onOpenAiBranchLogs: () => void;
+  onOpenNotificationRecord?: (notification: ApprovalNotification, record: ApprovalRecord) => void;
   selectedModule?: string;
   selectedType?: string;
   onSelectType: (module: string, type: string) => void;
@@ -230,6 +231,7 @@ export default function AppLayout({
   onOpenWorkflowAdmin,
   onOpenBusinessFormAdmin,
   onOpenAiBranchLogs,
+  onOpenNotificationRecord,
   selectedModule,
   selectedType,
   onSelectType
@@ -367,7 +369,10 @@ export default function AppLayout({
             </div>
 
             <div className="flex items-center gap-4 lg:gap-8">
-              <NotificationCenter activeUsername={currentUsername} />
+              <NotificationCenter
+                activeUsername={currentUsername}
+                onOpenRecord={onOpenNotificationRecord}
+              />
 
               <div className="flex items-center gap-3 lg:gap-4 group cursor-pointer">
                 <div className="hidden sm:flex flex-col items-end">

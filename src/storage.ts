@@ -15,6 +15,8 @@ import {
   WorkflowTemplateInput,
   WorkflowVersion,
   Schema,
+  WebPushConfig,
+  WebPushSubscriptionResult,
 } from './types';
 import { auth } from './auth';
 
@@ -159,6 +161,24 @@ export const storage = {
   markAllNotificationsRead(): Promise<{ updated: number }> {
     return request<{ updated: number }>('/notifications/read-all', {
       method: 'PATCH',
+    });
+  },
+
+  getPushConfig(): Promise<WebPushConfig> {
+    return request<WebPushConfig>('/push/config');
+  },
+
+  savePushSubscription(subscription: PushSubscriptionJSON): Promise<WebPushSubscriptionResult> {
+    return request<WebPushSubscriptionResult>('/push/subscriptions', {
+      method: 'POST',
+      body: JSON.stringify({ subscription }),
+    });
+  },
+
+  deletePushSubscription(endpoint: string): Promise<WebPushSubscriptionResult> {
+    return request<WebPushSubscriptionResult>('/push/subscriptions', {
+      method: 'DELETE',
+      body: JSON.stringify({ endpoint }),
     });
   },
 

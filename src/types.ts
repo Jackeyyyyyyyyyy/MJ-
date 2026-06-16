@@ -359,6 +359,17 @@ export interface ApprovalNotification {
   readAt?: string;
 }
 
+export interface WebPushConfig {
+  configured: boolean;
+  publicKey: string;
+}
+
+export interface WebPushSubscriptionResult {
+  subscribed: boolean;
+  updatedAt?: string;
+  removed?: number;
+}
+
 export interface ApprovalAttachment {
   id: string;
   name: string;

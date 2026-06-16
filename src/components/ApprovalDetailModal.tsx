@@ -275,12 +275,17 @@ function getApprovalModeDesc(mode?: ApprovalMode) {
 export default function ApprovalDetailModal({ record, onClose, onApprove, onReject, onCompleteProcess, showAiSuggestion = false }: ApprovalDetailModalProps) {
   const [preview, setPreview] = React.useState<PreviewState | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = React.useState(false);
+  const contentRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     return () => {
       if (preview?.url) URL.revokeObjectURL(preview.url);
     };
   }, [preview?.url]);
+
+  React.useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 });
+  }, [record?.id]);
 
   if (!record) return null;
 
@@ -567,7 +572,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto p-3 sm:items-center sm:p-4">
         <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -579,7 +584,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
             initial={{ opacity: 0, scale: 0.95, y: 30 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 30 }}
-            className="bg-white rounded-[40px] w-full max-w-2xl relative shadow-2xl overflow-hidden border border-black/[0.03] flex flex-col max-h-[90vh]"
+            className="bg-white rounded-[28px] sm:rounded-[40px] w-full max-w-2xl relative shadow-2xl overflow-hidden border border-black/[0.03] flex flex-col max-h-[calc(100dvh-24px)] sm:max-h-[90dvh]"
           >
             {/* Header */}
             <div className="px-10 py-8 border-b border-black/[0.02] flex items-center justify-between bg-[#fbfbfd] shrink-0">
@@ -597,7 +602,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto no-scrollbar p-12 space-y-16">
+            <div ref={contentRef} className="flex-1 overflow-y-auto no-scrollbar p-6 sm:p-12 space-y-10 sm:space-y-16">
               {/* Context Grid */}
               <div className="grid grid-cols-2 gap-x-16 gap-y-10">
                 <div className="flex flex-col gap-2">

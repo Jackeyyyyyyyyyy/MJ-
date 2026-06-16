@@ -15,7 +15,7 @@ import AiAssistantHome from './components/AiAssistantHome';
 import BackupPage from './components/BackupPage';
 import { auth } from './auth';
 import { storage } from './storage';
-import { AdminView, Role, ApprovalRecord, ApprovalStatus } from './types';
+import { AdminView, Role, ApprovalNotification, ApprovalRecord, ApprovalStatus } from './types';
 import { approvalSchema, replaceApprovalSchema } from './approvalSchema';
 
 type AppRoute =
@@ -72,18 +72,72 @@ function routeToPath(route: AppRoute) {
   return `/work/${route.tab}`;
 }
 
-function pushRoute(route: AppRoute) {
-  const nextPath = routeToPath(route);
-  if (window.location.pathname !== nextPath) {
-    window.history.pushState(null, '', nextPath);
+function normalizeRouteSearch(search = '') {
+  if (!search) return '';
+  return search.startsWith('?') ? search : `?${search}`;
+}
+
+function routeToUrl(route: AppRoute, search = '') {
+  return `${routeToPath(route)}${normalizeRouteSearch(search)}`;
+}
+
+function pushRoute(route: AppRoute, search = '') {
+  const nextUrl = routeToUrl(route, search);
+  if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
+    window.history.pushState(null, '', nextUrl);
   }
 }
 
-function replaceRoute(route: AppRoute) {
-  const nextPath = routeToPath(route);
-  if (window.location.pathname !== nextPath) {
-    window.history.replaceState(null, '', nextPath);
+function replaceRoute(route: AppRoute, search = '') {
+  const nextUrl = routeToUrl(route, search);
+  if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
+    window.history.replaceState(null, '', nextUrl);
   }
+}
+
+const notificationTypes: ApprovalNotification['type'][] = [
+  'approval_pending',
+  'approval_progress',
+  'approval_approved',
+  'approval_rejected',
+  'approval_processing',
+  'approval_completed',
+  'approval_cc',
+];
+
+function parseNotificationType(value: string | null) {
+  return notificationTypes.includes(value as ApprovalNotification['type'])
+    ? value as ApprovalNotification['type']
+    : null;
+}
+
+function getNotificationSearch(notificationId?: string, recordId?: string, type?: ApprovalNotification['type'] | null) {
+  const params = new URLSearchParams();
+  if (notificationId) params.set('notificationId', notificationId);
+  if (recordId) params.set('recordId', recordId);
+  if (type) params.set('type', type);
+  const search = params.toString();
+  return search ? `?${search}` : '';
+}
+
+function getNotificationWorkTab(type?: ApprovalNotification['type'] | null, record?: ApprovalRecord | null): WorkTab {
+  if (type === 'approval_pending') return 'approvals';
+  if (type === 'approval_processing') return 'processing';
+  if (type === 'approval_cc') return 'cc';
+
+  if (record?.currentUserCanApprove || record?.currentUserHasApproved) return 'approvals';
+  if (record?.currentUserCanProcess || record?.currentUserHasProcessed) return 'processing';
+  if (record?.currentUserIsCc) return 'cc';
+  return 'requests';
+}
+
+function getNotificationLaunchParams(search = window.location.search) {
+  const params = new URLSearchParams(search);
+  return {
+    notificationId: params.get('notificationId') || '',
+    recordId: params.get('recordId') || '',
+    type: parseNotificationType(params.get('type')),
+  };
 }
 
 function MainApp() {
@@ -100,16 +154,19 @@ function MainApp() {
   // Dynamic list state
   const [dynamicRecords, setDynamicRecords] = useState<ApprovalRecord[]>([]);
   const [selectedOne, setSelectedOne] = useState<ApprovalRecord | null>(null);
+  const [notificationRecord, setNotificationRecord] = useState<ApprovalRecord | null>(null);
   const [showD, setShowD] = useState(false);
   const [showP, setShowP] = useState(false);
+  const handledNotificationLaunchRef = React.useRef('');
 
   const handleLogin = () => {
     const route = parseRoute();
+    const notificationSearch = getNotificationLaunchParams().recordId ? window.location.search : '';
     setIsAuthenticated(true);
     setPerspective(auth.getPerspective());
     setActiveUsername(auth.getCurrentUser()?.username || '');
     applyRoute(route);
-    replaceRoute(route);
+    replaceRoute(route, notificationSearch);
   };
 
   const handleLogout = () => {
@@ -175,6 +232,19 @@ function MainApp() {
     pushRoute({ kind: 'work', tab });
   };
 
+  const handleOpenNotificationRecord = (notification: ApprovalNotification, record: ApprovalRecord) => {
+    const tab = getNotificationWorkTab(notification.type, record);
+    const route: AppRoute = { kind: 'work', tab };
+    const search = getNotificationSearch(notification.id, notification.recordId, notification.type);
+
+    setSelectedOne(null);
+    setShowD(false);
+    setShowP(false);
+    applyRoute(route);
+    pushRoute(route, search);
+    setNotificationRecord(record);
+  };
+
   function applyRoute(route: AppRoute) {
     if (route.kind === 'admin') {
       setSelectedModule('');
@@ -229,9 +299,79 @@ function MainApp() {
     await loadDynamicRecords();
   };
 
+  const handleNotificationApprove = async (record: ApprovalRecord) => {
+    const user = auth.getCurrentUser();
+    if (!user || !window.confirm(`确认通过审批单 ${record.id}？`)) return;
+
+    const updatedRecord = await storage.updateStatus(record.id, ApprovalStatus.APPROVED, user.name);
+    setNotificationRecord(updatedRecord);
+  };
+
+  const handleNotificationReject = async (record: ApprovalRecord) => {
+    const user = auth.getCurrentUser();
+    if (!user) return;
+
+    const reason = window.prompt(`请输入审批单 ${record.id} 的驳回原因`);
+    if (!reason?.trim()) return;
+
+    const updatedRecord = await storage.updateStatus(record.id, ApprovalStatus.REJECTED, user.name, reason.trim());
+    setNotificationRecord(updatedRecord);
+  };
+
+  const handleNotificationCompleteProcess = async (record: ApprovalRecord) => {
+    const comment = window.prompt(`填写 ${record.processorTaskName || '办理任务'} 的办理备注，可留空`, '');
+    if (comment === null) return;
+
+    const updatedRecord = await storage.completeProcessing(record.id, comment.trim());
+    setNotificationRecord(updatedRecord);
+  };
+
   useEffect(() => {
     loadDynamicRecords();
   }, [selectedModule, selectedType, activeUsername]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const params = getNotificationLaunchParams();
+    if (!params.recordId) return;
+
+    const launchKey = `${activeUsername}:${params.notificationId}:${params.recordId}:${params.type || ''}`;
+    if (handledNotificationLaunchRef.current === launchKey) return;
+    handledNotificationLaunchRef.current = launchKey;
+
+    let isMounted = true;
+
+    void (async () => {
+      try {
+        if (params.notificationId) {
+          await storage.markNotificationRead(params.notificationId).catch(() => undefined);
+        }
+
+        const records = await storage.getRecords();
+        const record = records.find((item) => item.id === params.recordId) || null;
+        if (!isMounted || !record) return;
+
+        const tab = getNotificationWorkTab(params.type, record);
+        const route: AppRoute = { kind: 'work', tab };
+        const search = getNotificationSearch(params.notificationId, params.recordId, params.type);
+
+        setSelectedOne(null);
+        setShowD(false);
+        setShowP(false);
+        applyRoute(route);
+        replaceRoute(route, search);
+        setNotificationRecord(record);
+        window.dispatchEvent(new Event('approval-notifications-updated'));
+      } catch {
+        // Notification deep links should not block the main app if the record is gone.
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthenticated, activeUsername]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -261,8 +401,9 @@ function MainApp() {
     const handlePopState = () => applyRoute(parseRoute());
     window.addEventListener('popstate', handlePopState);
     const route = parseRoute();
+    const notificationSearch = getNotificationLaunchParams().recordId ? window.location.search : '';
     applyRoute(route);
-    if (isAuthenticated) replaceRoute(route);
+    if (isAuthenticated) replaceRoute(route, notificationSearch);
 
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
@@ -384,11 +525,21 @@ function MainApp() {
       onOpenWorkflowAdmin={handleOpenWorkflowAdmin}
       onOpenBusinessFormAdmin={handleOpenBusinessFormAdmin}
       onOpenAiBranchLogs={handleOpenAiBranchLogs}
+      onOpenNotificationRecord={handleOpenNotificationRecord}
       selectedModule={selectedModule}
       selectedType={selectedType}
       onSelectType={handleSelectType}
     >
       <React.Fragment key={schemaVersion}>{renderContent()}</React.Fragment>
+      <ApprovalDetailModal
+        record={notificationRecord}
+        onClose={() => setNotificationRecord(null)}
+        showAiSuggestion
+        showAiRawResponse
+        onApprove={notificationRecord?.currentUserCanApprove ? (record) => void handleNotificationApprove(record) : undefined}
+        onReject={notificationRecord?.currentUserCanApprove ? (record) => void handleNotificationReject(record) : undefined}
+        onCompleteProcess={notificationRecord?.currentUserCanProcess ? (record) => void handleNotificationCompleteProcess(record) : undefined}
+      />
     </AppLayout>
   );
 }

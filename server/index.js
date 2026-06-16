@@ -1,4 +1,5 @@
 import express from 'express';
+import webPush from 'web-push';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -59,9 +60,32 @@ const workflowTemplatesFile = path.join(dataDir, 'workflow-templates.json');
 const organizationFile = path.join(dataDir, 'organization-directory.json');
 const organizationSeedStateFile = path.join(dataDir, 'organization-seed-state.json');
 const notificationsFile = path.join(dataDir, 'approval-notifications.json');
+const pushSubscriptionsFile = path.join(dataDir, 'push-subscriptions.json');
+const webPushKeysFile = path.join(dataDir, 'web-push-vapid-keys.json');
 const bundledOrganizationDirectoryFile = path.resolve(__dirname, 'default-organization-directory.json');
 const approvalSchemaFile = path.join(dataDir, 'approval-schema.json');
 const shouldSyncBundledOrganization = process.env.ORGANIZATION_SEED_SYNC !== 'false';
+let webPushVapidPublicKey = process.env.WEB_PUSH_VAPID_PUBLIC_KEY?.trim() || '';
+let webPushVapidPrivateKey = process.env.WEB_PUSH_VAPID_PRIVATE_KEY?.trim() || '';
+const webPushSubject = process.env.WEB_PUSH_SUBJECT?.trim() || 'mailto:admin@example.com';
+let isWebPushConfigured = false;
+
+function applyWebPushVapidDetails(publicKey, privateKey) {
+  if (!publicKey || !privateKey) return false;
+
+  try {
+    webPush.setVapidDetails(webPushSubject, publicKey, privateKey);
+    isWebPushConfigured = true;
+    webPushVapidPublicKey = publicKey;
+    webPushVapidPrivateKey = privateKey;
+    return true;
+  } catch (error) {
+    console.warn('Web Push VAPID configuration is invalid. Push notifications are disabled.', error);
+    return false;
+  }
+}
+
+applyWebPushVapidDetails(webPushVapidPublicKey, webPushVapidPrivateKey);
 const STATUS_DRAFT = '\u8349\u7a3f';
 const STATUS_PENDING = '\u5f85\u5ba1\u6279';
 const STATUS_PROCESSING = '\u5f85\u529e\u7406';
@@ -890,6 +914,29 @@ async function writeJsonObjectFile(file, data) {
   await fs.rename(tempFile, file);
 }
 
+async function configureWebPush() {
+  if (isWebPushConfigured) return;
+  if (process.env.WEB_PUSH_AUTO_GENERATE === 'false') return;
+
+  let savedKeys = await readJsonObjectFile(webPushKeysFile, {});
+  let publicKey = String(savedKeys.publicKey || '').trim();
+  let privateKey = String(savedKeys.privateKey || '').trim();
+
+  if (!publicKey || !privateKey) {
+    const generatedKeys = webPush.generateVAPIDKeys();
+    publicKey = generatedKeys.publicKey;
+    privateKey = generatedKeys.privateKey;
+    savedKeys = {
+      publicKey,
+      privateKey,
+      createdAt: new Date().toISOString(),
+    };
+    await writeJsonObjectFile(webPushKeysFile, savedKeys);
+  }
+
+  applyWebPushVapidDetails(publicKey, privateKey);
+}
+
 async function readBundledApprovalSchema() {
   const schemaSourceFile = path.resolve(__dirname, '..', 'src', 'approvalSchema.ts');
   const content = await fs.readFile(schemaSourceFile, 'utf8');
@@ -1254,6 +1301,7 @@ let workflowWriteQueue = Promise.resolve();
 let aiBranchLogWriteQueue = Promise.resolve();
 let organizationWriteQueue = Promise.resolve();
 let notificationWriteQueue = Promise.resolve();
+let pushSubscriptionWriteQueue = Promise.resolve();
 
 function createBusinessRecord(record) {
   const operation = writeQueue.catch(() => undefined).then(async () => {
@@ -1352,6 +1400,144 @@ function clearNotifications() {
     notifications.splice(0);
     return null;
   });
+}
+
+async function readPushSubscriptions() {
+  return readJsonArrayFile(pushSubscriptionsFile, 'push subscriptions');
+}
+
+async function writePushSubscriptions(subscriptions) {
+  await writeJsonArrayFile(pushSubscriptionsFile, subscriptions);
+}
+
+function updatePushSubscriptions(mutator) {
+  const operation = pushSubscriptionWriteQueue.catch(() => undefined).then(async () => {
+    const subscriptions = await readPushSubscriptions();
+    const result = await mutator(subscriptions);
+    await writePushSubscriptions(subscriptions);
+    return result;
+  });
+
+  pushSubscriptionWriteQueue = operation.catch(() => undefined);
+  return operation;
+}
+
+function getPushEndpointHash(endpoint) {
+  return crypto.createHash('sha256').update(String(endpoint || '')).digest('hex');
+}
+
+function normalizePushSubscriptionInput(subscription) {
+  if (!subscription || typeof subscription !== 'object') {
+    throw createHttpError('push subscription is required', 400);
+  }
+
+  const endpoint = String(subscription.endpoint || '').trim();
+  const p256dh = String(subscription.keys?.p256dh || '').trim();
+  const authKey = String(subscription.keys?.auth || '').trim();
+
+  if (!endpoint || !p256dh || !authKey) {
+    throw createHttpError('push subscription is incomplete', 400);
+  }
+
+  return {
+    endpoint,
+    expirationTime: subscription.expirationTime || null,
+    keys: {
+      p256dh,
+      auth: authKey,
+    },
+  };
+}
+
+function getNotificationUrl(notification) {
+  let path = '/work/requests';
+  if (notification.type === 'approval_pending') path = '/work/approvals';
+  if (notification.type === 'approval_processing') path = '/work/processing';
+  if (notification.type === 'approval_cc') path = '/work/cc';
+
+  const params = new URLSearchParams();
+  if (notification.id) params.set('notificationId', notification.id);
+  if (notification.recordId) params.set('recordId', notification.recordId);
+  if (notification.type) params.set('type', notification.type);
+
+  const search = params.toString();
+  return search ? `${path}?${search}` : path;
+}
+
+function createPushPayload(notification) {
+  return JSON.stringify({
+    title: notification.title,
+    body: notification.message,
+    notificationId: notification.id,
+    recordId: notification.recordId,
+    type: notification.type,
+    url: getNotificationUrl(notification),
+    tag: `approval-${notification.id}`,
+  });
+}
+
+async function prunePushSubscriptionsByEndpoint(endpoints) {
+  if (!endpoints?.size) return;
+
+  await updatePushSubscriptions((subscriptions) => {
+    const originalLength = subscriptions.length;
+    for (let index = subscriptions.length - 1; index >= 0; index -= 1) {
+      if (endpoints.has(subscriptions[index]?.endpoint)) {
+        subscriptions.splice(index, 1);
+      }
+    }
+
+    return { removed: originalLength - subscriptions.length };
+  });
+}
+
+async function sendPushNotifications(notifications) {
+  if (!isWebPushConfigured || !notifications.length) return;
+
+  const recipientUsernames = new Set(
+    notifications.map((notification) => normalizeWorkflowText(notification.recipientUsername).toLowerCase()),
+  );
+  const subscriptions = (await readPushSubscriptions())
+    .filter((subscription) => recipientUsernames.has(normalizeWorkflowText(subscription.username).toLowerCase()));
+
+  if (!subscriptions.length) return;
+
+  const notificationsByUsername = new Map();
+  notifications.forEach((notification) => {
+    const username = normalizeWorkflowText(notification.recipientUsername).toLowerCase();
+    const userNotifications = notificationsByUsername.get(username) || [];
+    userNotifications.push(notification);
+    notificationsByUsername.set(username, userNotifications);
+  });
+
+  const staleEndpoints = new Set();
+  await Promise.all(subscriptions.flatMap((savedSubscription) => {
+    const userNotifications = notificationsByUsername.get(
+      normalizeWorkflowText(savedSubscription.username).toLowerCase(),
+    ) || [];
+
+    return userNotifications.map(async (notification) => {
+      try {
+        await webPush.sendNotification(savedSubscription.subscription, createPushPayload(notification), {
+          TTL: 60 * 60,
+          urgency: 'high',
+        });
+      } catch (error) {
+        if (error?.statusCode === 404 || error?.statusCode === 410) {
+          staleEndpoints.add(savedSubscription.endpoint);
+          return;
+        }
+
+        console.warn('Failed to send Web Push notification.', {
+          username: savedSubscription.username,
+          statusCode: error?.statusCode,
+          message: error?.message,
+        });
+      }
+    });
+  }));
+
+  await prunePushSubscriptionsByEndpoint(staleEndpoints);
 }
 
 async function readPromptConfigs() {
@@ -3386,11 +3572,17 @@ async function appendNotifications(drafts) {
   const validDrafts = drafts.filter(Boolean);
   if (validDrafts.length === 0) return [];
 
-  return updateNotifications((notifications) => {
+  const savedNotifications = await updateNotifications((notifications) => {
     notifications.unshift(...validDrafts);
     notifications.splice(1000);
     return validDrafts;
   });
+
+  void sendPushNotifications(savedNotifications).catch((error) => {
+    console.warn('Failed to dispatch Web Push notifications.', error);
+  });
+
+  return savedNotifications;
 }
 
 async function createNotificationsForCreatedRecord(record, actor) {
@@ -5036,6 +5228,89 @@ app.get('/api/uploads/:id', authenticate, async (req, res, next) => {
   }
 });
 
+app.get('/api/push/config', authenticate, (_req, res) => {
+  res.json({
+    configured: isWebPushConfigured,
+    publicKey: isWebPushConfigured ? webPushVapidPublicKey : '',
+  });
+});
+
+app.post('/api/push/subscriptions', authenticate, async (req, res, next) => {
+  try {
+    if (!isWebPushConfigured) {
+      throw createHttpError('web push is not configured', 503);
+    }
+
+    const subscription = normalizePushSubscriptionInput(req.body?.subscription);
+    const now = new Date().toISOString();
+    const endpointHash = getPushEndpointHash(subscription.endpoint);
+    let savedSubscription = null;
+
+    await updatePushSubscriptions((subscriptions) => {
+      const existing = subscriptions.find((item) => item.id === endpointHash || item.endpoint === subscription.endpoint);
+      const nextSubscription = {
+        id: endpointHash,
+        username: req.user.username,
+        userName: req.user.name,
+        endpoint: subscription.endpoint,
+        subscription,
+        userAgent: String(req.get('user-agent') || ''),
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+      };
+
+      if (existing) {
+        Object.assign(existing, nextSubscription);
+        savedSubscription = existing;
+      } else {
+        subscriptions.unshift(nextSubscription);
+        savedSubscription = nextSubscription;
+      }
+
+      subscriptions.splice(2000);
+      return savedSubscription;
+    });
+
+    res.status(201).json({
+      subscribed: true,
+      updatedAt: savedSubscription?.updatedAt || now,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/push/subscriptions', authenticate, async (req, res, next) => {
+  try {
+    const endpoint = String(req.body?.endpoint || '').trim();
+    if (!endpoint) {
+      throw createHttpError('push endpoint is required', 400);
+    }
+
+    const username = normalizeWorkflowText(req.user.username).toLowerCase();
+    let removed = 0;
+
+    await updatePushSubscriptions((subscriptions) => {
+      for (let index = subscriptions.length - 1; index >= 0; index -= 1) {
+        const subscription = subscriptions[index];
+        if (
+          subscription?.endpoint === endpoint &&
+          normalizeWorkflowText(subscription.username).toLowerCase() === username
+        ) {
+          subscriptions.splice(index, 1);
+          removed += 1;
+        }
+      }
+
+      return { removed };
+    });
+
+    res.json({ subscribed: false, removed });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/notifications', authenticate, async (req, res, next) => {
   try {
     const username = normalizeWorkflowText(req.user.username).toLowerCase();
@@ -5284,6 +5559,7 @@ app.use((error, _req, res, _next) => {
   });
 });
 
+await configureWebPush();
 await syncBundledOrganizationDirectory();
 
 app.listen(port, () => {
