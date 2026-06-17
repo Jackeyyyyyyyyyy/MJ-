@@ -313,6 +313,7 @@ export interface ApprovalType {
   businessFields: string[];
   amountFields?: string[];
   fileFields?: string[];
+  dateFields?: string[];
   commonFields: string[];
   notes?: string;
 }

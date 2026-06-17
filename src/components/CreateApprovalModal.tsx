@@ -268,6 +268,10 @@ function isMoneyField(field: string) {
   return /金额|价格|利润|总额/.test(field);
 }
 
+function isDateField(field: string) {
+  return field.includes('日期') || field.includes('时间');
+}
+
 function isConfiguredMoneyField(type: ApprovalType | null, field: string) {
   if (!type) return isMoneyField(field);
   if (Array.isArray(type.amountFields) && type.amountFields.length > 0) {
@@ -286,6 +290,14 @@ function isConfiguredNumericField(type: ApprovalType | null, field: string) {
 
 function isConfiguredFileField(type: ApprovalType | null, field: string) {
   return Array.isArray(type?.fileFields) && type.fileFields.includes(field);
+}
+
+function isConfiguredDateField(type: ApprovalType | null, field: string) {
+  if (!type) return isDateField(field);
+  if (Array.isArray(type.dateFields)) {
+    return type.dateFields.includes(field);
+  }
+  return isDateField(field);
 }
 
 function isMoneyInputValue(value: unknown): value is MoneyInputValue {
@@ -1283,7 +1295,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       return renderStructuredDetailInput(field);
     }
 
-    const isDate = field.includes('日期') || field.includes('时间');
+    const isDate = isConfiguredDateField(selectedType, field);
     const isMoney = isConfiguredMoneyField(selectedType, field);
     const isNumeric = isConfiguredNumericField(selectedType, field);
     const isFile = field.includes('附件');

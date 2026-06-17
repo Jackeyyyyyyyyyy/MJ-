@@ -30,6 +30,7 @@ type BusinessFormInput = {
   businessFields: string[];
   amountFields?: string[];
   fileFields?: string[];
+  dateFields?: string[];
 };
 
 interface RequestOptions {
