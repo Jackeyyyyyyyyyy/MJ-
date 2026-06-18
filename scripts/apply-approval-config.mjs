@@ -305,9 +305,9 @@ async function main() {
 
   const configFile = path.resolve(process.cwd(), getArgValue('--config') || 'approval-import.json');
   const dataDir = path.resolve(
+    getArgValue('--data-dir') ||
     process.env.RAILWAY_VOLUME_MOUNT_PATH ||
     process.env.DATA_DIR ||
-    getArgValue('--data-dir') ||
     path.resolve(process.cwd(), 'data'),
   );
   const schemaFile = path.join(dataDir, 'approval-schema.json');

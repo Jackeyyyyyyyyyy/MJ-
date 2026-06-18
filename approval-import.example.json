@@ -1,0 +1,135 @@
+{
+  "forms": [
+    {
+      "moduleName": "资金",
+      "approvalTypeName": "付款申请示例",
+      "businessFields": [
+        "申请部门",
+        "付款对象",
+        "付款金额",
+        "付款明细",
+        "付款原因",
+        "附件"
+      ],
+      "amountFields": [
+        "付款金额"
+      ],
+      "fileFields": [
+        "附件"
+      ],
+      "dateFields": [],
+      "optionalFields": [
+        "附件"
+      ],
+      "multilineFields": [
+        "付款原因"
+      ],
+      "memberFields": [],
+      "departmentFields": [
+        "申请部门"
+      ],
+      "selectFields": [
+        {
+          "field": "付款对象",
+          "options": [
+            "客户",
+            "供应商",
+            "员工"
+          ]
+        }
+      ],
+      "detailFields": [
+        {
+          "field": "付款明细",
+          "columns": [
+            "费用项目",
+            "金额",
+            "备注"
+          ]
+        }
+      ],
+      "visibleToUsers": false,
+      "notes": "示例配置：导入真实5个表单时删除或替换本条。"
+    }
+  ],
+  "workflows": [
+    {
+      "moduleName": "资金",
+      "approvalTypeName": "付款申请示例",
+      "name": "付款申请示例审批流",
+      "status": "draft",
+      "businessType": "purchase",
+      "submitPermission": {
+        "type": "all_members",
+        "memberIds": [],
+        "departmentIds": [],
+        "excludedMemberIds": []
+      },
+      "branches": [
+        {
+          "id": "branch-finance",
+          "name": "财务部门提交",
+          "isDefault": false,
+          "conditionMode": "rules",
+          "conditions": [
+            {
+              "id": "cond-submit-dept",
+              "field": "submitter.department",
+              "operator": "eq",
+              "value": "财务"
+            }
+          ],
+          "approvalSteps": [
+            {
+              "id": "step-finance-manager",
+              "name": "部门负责人审批",
+              "approverRule": {
+                "type": "multi_supervisor",
+                "supervisorDepth": 1,
+                "memberIds": [],
+                "positionTitles": [],
+                "departmentIds": []
+              },
+              "approvalMode": "one_of",
+              "emptyApproverAction": "block_submit"
+            }
+          ]
+        },
+        {
+          "id": "branch-default",
+          "name": "默认分支",
+          "isDefault": true,
+          "conditionMode": "rules",
+          "conditions": [],
+          "approvalSteps": [
+            {
+              "id": "step-default-manager",
+              "name": "直属上级审批",
+              "approverRule": {
+                "type": "multi_supervisor",
+                "supervisorDepth": 1,
+                "memberIds": [],
+                "positionTitles": [],
+                "departmentIds": []
+              },
+              "approvalMode": "one_of",
+              "emptyApproverAction": "block_submit"
+            }
+          ]
+        }
+      ],
+      "ccRule": {
+        "timing": "workflow_completed",
+        "memberIds": [],
+        "departmentIds": []
+      },
+      "processorRule": {
+        "timing": "approval_completed",
+        "enabled": false,
+        "taskName": "办理任务",
+        "memberIds": [],
+        "departmentIds": []
+      }
+    }
+  ]
+}
