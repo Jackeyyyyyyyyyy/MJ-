@@ -43,6 +43,7 @@ await loadLocalEnvFile();
 
 const app = express();
 const port = process.env.PORT || 8080;
+const host = process.env.API_HOST?.trim();
 const maxBackupUploadBytes = Number(process.env.BACKUP_UPLOAD_LIMIT_BYTES || 300 * 1024 * 1024);
 const dataDir =
   process.env.RAILWAY_VOLUME_MOUNT_PATH ||
@@ -5929,7 +5930,7 @@ app.use((error, _req, res, _next) => {
 await configureWebPush();
 await syncBundledOrganizationDirectory();
 
-app.listen(port, () => {
-  console.log(`MJ approval server listening on ${port}`);
+app.listen(...(host ? [port, host] : [port]), () => {
+  console.log(`MJ approval server listening on ${host ? `${host}:` : ''}${port}`);
   console.log(`Persistent data path: ${recordsFile}`);
 });

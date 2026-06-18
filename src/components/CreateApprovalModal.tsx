@@ -506,7 +506,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const [organizationOptions, setOrganizationOptions] = useState<OrganizationSelectOptions>(emptyOrganizationOptions);
 
   const user = auth.getCurrentUser();
-  const visibleModules = React.useMemo(() => getVisibleApprovalModules(), []);
+  const visibleModules = getVisibleApprovalModules();
 
   React.useEffect(() => {
     if (!isOpen) return undefined;
