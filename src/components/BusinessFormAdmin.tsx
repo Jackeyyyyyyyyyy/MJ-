@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlignLeft, Asterisk, Building2, Calendar, DollarSign, Edit3, Eye, EyeOff, ListChecks, Loader2, Lock, Paperclip, Plus, RotateCcw, Save, Search, Table2, Trash2, UserRound, X } from 'lucide-react';
+import { AlignLeft, Asterisk, Building2, Calculator, Calendar, Clock3, DollarSign, Edit3, Eye, EyeOff, ListChecks, Loader2, Lock, Paperclip, Plus, RotateCcw, Save, Search, Table2, Trash2, Upload, UserRound, X } from 'lucide-react';
 import { approvalSchema, replaceApprovalSchema } from '../approvalSchema';
 import { storage } from '../storage';
 import { ApprovalType, Module } from '../types';
@@ -9,6 +9,8 @@ interface EditingTarget {
   moduleName: string;
   approvalTypeName: string;
 }
+
+type DetailColumnType = 'text' | 'number' | 'date' | 'datetime' | 'select' | 'member' | 'department';
 
 const protectedBusinessForms = new Set([
   '资金|||批量修改',
@@ -64,6 +66,12 @@ function getInitialFileFields(type: ApprovalType) {
   return configuredFields.filter((field) => businessFieldSet.has(field));
 }
 
+function getInitialAttachmentFields(type: ApprovalType) {
+  const configuredFields = Array.isArray(type.attachmentFields) ? type.attachmentFields : [];
+  const businessFieldSet = new Set(type.businessFields);
+  return configuredFields.filter((field) => businessFieldSet.has(field));
+}
+
 function getInitialDateFields(type: ApprovalType) {
   const configuredFields = Array.isArray(type.dateFields) ? type.dateFields : [];
   const sourceFields = Array.isArray(type.dateFields)
@@ -71,6 +79,12 @@ function getInitialDateFields(type: ApprovalType) {
     : type.businessFields.filter(isDateField);
   const businessFieldSet = new Set(type.businessFields);
   return sourceFields.filter((field) => businessFieldSet.has(field));
+}
+
+function getInitialDateTimeFields(type: ApprovalType) {
+  const configuredFields = Array.isArray(type.dateTimeFields) ? type.dateTimeFields : [];
+  const businessFieldSet = new Set(type.businessFields);
+  return configuredFields.filter((field) => businessFieldSet.has(field));
 }
 
 function getInitialOptionalFields(type: ApprovalType) {
@@ -120,13 +134,64 @@ function getInitialDetailFieldColumns(type: ApprovalType) {
     if (!field || !businessFieldSet.has(field)) return columnsByField;
 
     const columns = (Array.isArray(item.columns) ? item.columns : [])
-      .map((column) => String(column || '').trim())
+      .map(formatDetailColumn)
       .filter(Boolean);
     if (columns.length > 0) {
       columnsByField[field] = columns.join('\n');
     }
     return columnsByField;
   }, {});
+}
+
+function formatDetailColumn(column: ApprovalType['detailFields'][number]['columns'][number]) {
+  if (typeof column === 'string') return column.trim();
+  const name = String(column?.name || '').trim();
+  if (!name) return '';
+  const pieces = [name, column.type || 'text'];
+  if (Array.isArray(column.options) && column.options.length > 0) pieces.push(column.options.join(','));
+  if (column.unit) pieces.push(column.unit);
+  return pieces.join('|');
+}
+
+function parseDetailColumn(line: string) {
+  const [rawName, rawType, rawOptions, rawUnit] = line.split('|').map((item) => item.trim());
+  if (!rawName) return null;
+  const type = ['text', 'number', 'date', 'datetime', 'select', 'member', 'department'].includes(rawType)
+    ? rawType as DetailColumnType
+    : undefined;
+  const options = normalizeFields(rawOptions || '');
+  const unit = rawUnit === 'days' ? 'days' : rawUnit === 'hours' ? 'hours' : undefined;
+  return {
+    name: rawName,
+    ...(type ? { type } : {}),
+    ...(options.length > 0 ? { options } : {}),
+    ...(unit ? { unit } : {}),
+  };
+}
+
+function formatDurationRules(type: ApprovalType) {
+  return (Array.isArray(type.durationFields) ? type.durationFields : [])
+    .map((item) => `${item.field}=${item.startField}>${item.endField}|${item.unit || 'hours'}`)
+    .join('\n');
+}
+
+function parseDurationRules(text: string, businessFields: string[]) {
+  const businessFieldSet = new Set(businessFields);
+  return normalizeFields(text)
+    .map((line) => {
+      const [left, unitText] = line.split('|').map((item) => item.trim());
+      const [field, range] = left.split('=').map((item) => item.trim());
+      const [startField, endField] = String(range || '').split('>').map((item) => item.trim());
+      if (!field || !startField || !endField) return null;
+      if (!businessFieldSet.has(field) || !businessFieldSet.has(startField) || !businessFieldSet.has(endField)) return null;
+      return {
+        field,
+        startField,
+        endField,
+        unit: unitText === 'days' ? 'days' : 'hours',
+      };
+    })
+    .filter(Boolean);
 }
 
 function isAmountCurrencyField(field: string) {
@@ -153,13 +218,16 @@ export default function BusinessFormAdmin() {
   const [fieldText, setFieldText] = React.useState('');
   const [amountFields, setAmountFields] = React.useState<string[]>([]);
   const [fileFields, setFileFields] = React.useState<string[]>([]);
+  const [attachmentFields, setAttachmentFields] = React.useState<string[]>([]);
   const [dateFields, setDateFields] = React.useState<string[]>([]);
+  const [dateTimeFields, setDateTimeFields] = React.useState<string[]>([]);
   const [optionalFields, setOptionalFields] = React.useState<string[]>([]);
   const [multilineFields, setMultilineFields] = React.useState<string[]>([]);
   const [memberFields, setMemberFields] = React.useState<string[]>([]);
   const [departmentFields, setDepartmentFields] = React.useState<string[]>([]);
   const [selectFieldOptions, setSelectFieldOptions] = React.useState<Record<string, string>>({});
   const [detailFieldColumns, setDetailFieldColumns] = React.useState<Record<string, string>>({});
+  const [durationRuleText, setDurationRuleText] = React.useState('');
   const [editingTarget, setEditingTarget] = React.useState<EditingTarget | null>(null);
   const [visibilityMap, setVisibilityMap] = React.useState<Record<string, boolean>>(() => getInitialVisibilityMap());
   const [visibilityQuery, setVisibilityQuery] = React.useState('');
@@ -177,9 +245,17 @@ export default function BusinessFormAdmin() {
     () => fileFields.filter((field) => businessFields.includes(field)),
     [fileFields, businessFields],
   );
+  const selectedAttachmentFields = React.useMemo(
+    () => attachmentFields.filter((field) => businessFields.includes(field)),
+    [attachmentFields, businessFields],
+  );
   const selectedDateFields = React.useMemo(
     () => dateFields.filter((field) => businessFields.includes(field)),
     [dateFields, businessFields],
+  );
+  const selectedDateTimeFields = React.useMemo(
+    () => dateTimeFields.filter((field) => businessFields.includes(field)),
+    [dateTimeFields, businessFields],
   );
   const selectedOptionalFields = React.useMemo(
     () => optionalFields.filter((field) => businessFields.includes(field)),
@@ -210,10 +286,16 @@ export default function BusinessFormAdmin() {
     () => businessFields
       .map((field) => ({
         field,
-        columns: normalizeFields(detailFieldColumns[field] || ''),
+        columns: normalizeFields(detailFieldColumns[field] || '')
+          .map(parseDetailColumn)
+          .filter(Boolean),
       }))
       .filter((item) => item.columns.length > 0),
     [businessFields, detailFieldColumns],
+  );
+  const selectedDurationFields = React.useMemo(
+    () => parseDurationRules(durationRuleText, businessFields),
+    [durationRuleText, businessFields],
   );
   const hasAmountCurrencyField = selectedAmountFields.length > 0;
   const hasCurrencyOnlyField = businessFields.some(isCurrencyOnlyField);
@@ -250,7 +332,9 @@ export default function BusinessFormAdmin() {
         : [...current, field]
     ));
     setFileFields((current) => current.filter((item) => item !== field));
+    setAttachmentFields((current) => current.filter((item) => item !== field));
     setDateFields((current) => current.filter((item) => item !== field));
+    setDateTimeFields((current) => current.filter((item) => item !== field));
     setMultilineFields((current) => current.filter((item) => item !== field));
     setMemberFields((current) => current.filter((item) => item !== field));
     setDepartmentFields((current) => current.filter((item) => item !== field));
@@ -273,7 +357,34 @@ export default function BusinessFormAdmin() {
         : [...current, field]
     ));
     setAmountFields((current) => current.filter((item) => item !== field));
+    setAttachmentFields((current) => current.filter((item) => item !== field));
     setDateFields((current) => current.filter((item) => item !== field));
+    setDateTimeFields((current) => current.filter((item) => item !== field));
+    setMultilineFields((current) => current.filter((item) => item !== field));
+    setMemberFields((current) => current.filter((item) => item !== field));
+    setDepartmentFields((current) => current.filter((item) => item !== field));
+    setSelectFieldOptions((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+    setDetailFieldColumns((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const toggleAttachmentField = (field: string) => {
+    setAttachmentFields((current) => (
+      current.includes(field)
+        ? current.filter((item) => item !== field)
+        : [...current, field]
+    ));
+    setAmountFields((current) => current.filter((item) => item !== field));
+    setFileFields((current) => current.filter((item) => item !== field));
+    setDateFields((current) => current.filter((item) => item !== field));
+    setDateTimeFields((current) => current.filter((item) => item !== field));
     setMultilineFields((current) => current.filter((item) => item !== field));
     setMemberFields((current) => current.filter((item) => item !== field));
     setDepartmentFields((current) => current.filter((item) => item !== field));
@@ -297,6 +408,33 @@ export default function BusinessFormAdmin() {
     ));
     setAmountFields((current) => current.filter((item) => item !== field));
     setFileFields((current) => current.filter((item) => item !== field));
+    setAttachmentFields((current) => current.filter((item) => item !== field));
+    setDateTimeFields((current) => current.filter((item) => item !== field));
+    setMultilineFields((current) => current.filter((item) => item !== field));
+    setMemberFields((current) => current.filter((item) => item !== field));
+    setDepartmentFields((current) => current.filter((item) => item !== field));
+    setSelectFieldOptions((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+    setDetailFieldColumns((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const toggleDateTimeField = (field: string) => {
+    setDateTimeFields((current) => (
+      current.includes(field)
+        ? current.filter((item) => item !== field)
+        : [...current, field]
+    ));
+    setAmountFields((current) => current.filter((item) => item !== field));
+    setFileFields((current) => current.filter((item) => item !== field));
+    setAttachmentFields((current) => current.filter((item) => item !== field));
+    setDateFields((current) => current.filter((item) => item !== field));
     setMultilineFields((current) => current.filter((item) => item !== field));
     setMemberFields((current) => current.filter((item) => item !== field));
     setDepartmentFields((current) => current.filter((item) => item !== field));
@@ -340,7 +478,9 @@ export default function BusinessFormAdmin() {
     ));
     setAmountFields((current) => current.filter((item) => item !== field));
     setFileFields((current) => current.filter((item) => item !== field));
+    setAttachmentFields((current) => current.filter((item) => item !== field));
     setDateFields((current) => current.filter((item) => item !== field));
+    setDateTimeFields((current) => current.filter((item) => item !== field));
     setMemberFields((current) => current.filter((item) => item !== field));
     setDepartmentFields((current) => current.filter((item) => item !== field));
     setSelectFieldOptions((current) => {
@@ -363,7 +503,9 @@ export default function BusinessFormAdmin() {
     ));
     setAmountFields((current) => current.filter((item) => item !== field));
     setFileFields((current) => current.filter((item) => item !== field));
+    setAttachmentFields((current) => current.filter((item) => item !== field));
     setDateFields((current) => current.filter((item) => item !== field));
+    setDateTimeFields((current) => current.filter((item) => item !== field));
     setMultilineFields((current) => current.filter((item) => item !== field));
     setDepartmentFields((current) => current.filter((item) => item !== field));
     setSelectFieldOptions((current) => {
@@ -386,7 +528,9 @@ export default function BusinessFormAdmin() {
     ));
     setAmountFields((current) => current.filter((item) => item !== field));
     setFileFields((current) => current.filter((item) => item !== field));
+    setAttachmentFields((current) => current.filter((item) => item !== field));
     setDateFields((current) => current.filter((item) => item !== field));
+    setDateTimeFields((current) => current.filter((item) => item !== field));
     setMultilineFields((current) => current.filter((item) => item !== field));
     setMemberFields((current) => current.filter((item) => item !== field));
     setSelectFieldOptions((current) => {
@@ -409,7 +553,9 @@ export default function BusinessFormAdmin() {
     if (value.trim()) {
       setAmountFields((current) => current.filter((item) => item !== field));
       setFileFields((current) => current.filter((item) => item !== field));
+      setAttachmentFields((current) => current.filter((item) => item !== field));
       setDateFields((current) => current.filter((item) => item !== field));
+      setDateTimeFields((current) => current.filter((item) => item !== field));
       setMultilineFields((current) => current.filter((item) => item !== field));
       setMemberFields((current) => current.filter((item) => item !== field));
       setDepartmentFields((current) => current.filter((item) => item !== field));
@@ -429,7 +575,9 @@ export default function BusinessFormAdmin() {
     if (value.trim()) {
       setAmountFields((current) => current.filter((item) => item !== field));
       setFileFields((current) => current.filter((item) => item !== field));
+      setAttachmentFields((current) => current.filter((item) => item !== field));
       setDateFields((current) => current.filter((item) => item !== field));
+      setDateTimeFields((current) => current.filter((item) => item !== field));
       setMultilineFields((current) => current.filter((item) => item !== field));
       setMemberFields((current) => current.filter((item) => item !== field));
       setDepartmentFields((current) => current.filter((item) => item !== field));
@@ -447,13 +595,16 @@ export default function BusinessFormAdmin() {
     setFieldText('');
     setAmountFields([]);
     setFileFields([]);
+    setAttachmentFields([]);
     setDateFields([]);
+    setDateTimeFields([]);
     setOptionalFields([]);
     setMultilineFields([]);
     setMemberFields([]);
     setDepartmentFields([]);
     setSelectFieldOptions({});
     setDetailFieldColumns({});
+    setDurationRuleText('');
     setEditingTarget(null);
     setError('');
   };
@@ -469,13 +620,16 @@ export default function BusinessFormAdmin() {
     setFieldText(getFieldText(type));
     setAmountFields(getInitialAmountFields(type));
     setFileFields(getInitialFileFields(type));
+    setAttachmentFields(getInitialAttachmentFields(type));
     setDateFields(getInitialDateFields(type));
+    setDateTimeFields(getInitialDateTimeFields(type));
     setOptionalFields(getInitialOptionalFields(type));
     setMultilineFields(getInitialMultilineFields(type));
     setMemberFields(getInitialMemberFields(type));
     setDepartmentFields(getInitialDepartmentFields(type));
     setSelectFieldOptions(getInitialSelectFieldOptions(type));
     setDetailFieldColumns(getInitialDetailFieldColumns(type));
+    setDurationRuleText(formatDurationRules(type));
     setEditingTarget({
       moduleName: module.name,
       approvalTypeName: type.name,
@@ -535,13 +689,16 @@ export default function BusinessFormAdmin() {
             businessFields,
             amountFields: selectedAmountFields,
             fileFields: selectedFileFields,
+            attachmentFields: selectedAttachmentFields,
             dateFields: selectedDateFields,
+            dateTimeFields: selectedDateTimeFields,
             optionalFields: selectedOptionalFields,
             multilineFields: selectedMultilineFields,
             memberFields: selectedMemberFields,
             departmentFields: selectedDepartmentFields,
             selectFields: selectedSelectFields,
             detailFields: selectedDetailFields,
+            durationFields: selectedDurationFields,
           })
         : await storage.createBusinessForm({
             moduleName: nextModuleName,
@@ -549,13 +706,16 @@ export default function BusinessFormAdmin() {
             businessFields,
             amountFields: selectedAmountFields,
             fileFields: selectedFileFields,
+            attachmentFields: selectedAttachmentFields,
             dateFields: selectedDateFields,
+            dateTimeFields: selectedDateTimeFields,
             optionalFields: selectedOptionalFields,
             multilineFields: selectedMultilineFields,
             memberFields: selectedMemberFields,
             departmentFields: selectedDepartmentFields,
             selectFields: selectedSelectFields,
             detailFields: selectedDetailFields,
+            durationFields: selectedDurationFields,
           });
 
       replaceApprovalSchema(nextSchema);
@@ -1038,6 +1198,116 @@ export default function BusinessFormAdmin() {
             </div>
           </div>
 
+          <div className="rounded-2xl border border-[#d7e2ff] bg-[#f6f9ff] p-4">
+            <div className="space-y-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
+                  <Clock3 size={15} strokeWidth={2.8} />
+                  日期时间字段
+                </div>
+                <p className="mt-1 text-[12px] font-semibold text-medium-gray">
+                  适合开始时间、结束时间、补卡时间这类需要精确到小时/分钟的字段。被选中后，用户发起申请时会看到日期时间选择器。
+                </p>
+              </div>
+              {businessFields.length > 0 ? (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {businessFields.map((field) => {
+                    const checked = selectedDateTimeFields.includes(field);
+
+                    return (
+                      <label
+                        key={field}
+                        className={cn(
+                          'flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border bg-white px-3 py-2 text-[12px] font-black transition-colors',
+                          checked
+                            ? 'border-blue-500 text-blue-700 shadow-sm'
+                            : 'border-border-silver text-midnight-graphite hover:border-blue-200',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleDateTimeField(field)}
+                          className="h-4 w-4 accent-blue-600"
+                        />
+                        <span className="min-w-0 truncate">{field}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
+                  先填写业务字段，再选择哪些字段是日期时间字段。
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[#d8ead2] bg-[#f8fdf6] p-4">
+            <div className="space-y-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
+                  <Calculator size={15} strokeWidth={2.8} />
+                  自动时长字段
+                </div>
+                <p className="mt-1 text-[12px] font-semibold text-medium-gray">
+                  每行一条规则，格式：时长字段=开始字段&gt;结束字段|hours。适合请假、外出、加班这类按开始/结束自动算小时数的表单。
+                </p>
+              </div>
+              <textarea
+                value={durationRuleText}
+                onChange={(event) => setDurationRuleText(event.target.value)}
+                placeholder={'时长=开始时间>结束时间|hours\n加班时长=开始时间>结束时间|hours'}
+                className="min-h-[96px] w-full resize-y rounded-xl border border-border-silver bg-white px-3 py-2 text-[12px] font-semibold text-midnight-graphite outline-none transition-colors focus:border-emerald-400"
+              />
+              {durationRuleText.trim() && selectedDurationFields.length === 0 && (
+                <div className="rounded-xl bg-amber-50 px-3 py-2 text-[12px] font-bold text-amber-700">
+                  当前规则没有命中业务字段，请确认等号左侧、开始字段、结束字段都已经写在业务字段列表里。
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[#d8e7f8] bg-[#f7fbff] p-4">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
+                <Upload size={15} strokeWidth={2.8} />
+                上传字段
+              </div>
+              {businessFields.length > 0 ? (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {businessFields.map((field) => {
+                    const checked = selectedAttachmentFields.includes(field);
+
+                    return (
+                      <label
+                        key={field}
+                        className={cn(
+                          'flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border bg-white px-3 py-2 text-[12px] font-black transition-colors',
+                          checked
+                            ? 'border-sky-500 text-sky-700 shadow-sm'
+                            : 'border-border-silver text-midnight-graphite hover:border-sky-200',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleAttachmentField(field)}
+                          className="h-4 w-4 accent-sky-600"
+                        />
+                        <span className="min-w-0 truncate">{field}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
+                  先填写业务字段，再选择上传字段。
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="rounded-2xl border border-[#cfeadc] bg-[#f8fdfb] p-4">
             <div className="space-y-3">
               <div className="min-w-0">
@@ -1088,14 +1358,23 @@ export default function BusinessFormAdmin() {
               {businessFields.map((field) => {
                 const isSelectedAmountField = selectedAmountFields.includes(field);
                 const isSelectedFileField = selectedFileFields.includes(field);
+                const isSelectedAttachmentField = selectedAttachmentFields.includes(field);
                 const isSelectedDateField = selectedDateFields.includes(field);
+                const isSelectedDateTimeField = selectedDateTimeFields.includes(field);
                 const isSelectedOptionalField = selectedOptionalFields.includes(field);
+                const isSelectedDurationField = selectedDurationFields.some((item) => item.field === field);
                 const fieldKindLabel = isSelectedAmountField
                   ? '金额+币种'
                   : isSelectedFileField
                     ? '填空+附件'
+                    : isSelectedAttachmentField
+                    ? '上传'
                     : isSelectedDateField
                     ? '日期/时间'
+                    : isSelectedDateTimeField
+                    ? '日期时间'
+                    : isSelectedDurationField
+                    ? '自动时长'
                     : isCurrencyOnlyField(field)
                     ? getFieldKindLabel(field)
                     : '';
@@ -1109,8 +1388,14 @@ export default function BusinessFormAdmin() {
                         ? "bg-[#e7f1ff] text-interactive-blue"
                         : isSelectedFileField
                           ? "bg-emerald-50 text-emerald-700"
+                        : isSelectedAttachmentField
+                          ? "bg-sky-50 text-sky-700"
                           : isSelectedDateField
                           ? "bg-violet-50 text-violet-700"
+                          : isSelectedDateTimeField
+                          ? "bg-blue-50 text-blue-700"
+                          : isSelectedDurationField
+                          ? "bg-lime-50 text-lime-700"
                           : isCurrencyOnlyField(field)
                           ? "bg-amber-50 text-amber-700"
                           : "bg-lightest-gray-background text-midnight-graphite",

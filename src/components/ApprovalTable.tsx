@@ -15,6 +15,12 @@ interface ApprovalTableProps {
 
 function formatBusinessValuePreview(value: unknown) {
   if (Array.isArray(value)) {
+    const isAttachmentList = value.every((item) => {
+      return !!item && typeof item === 'object' && 'name' in item && 'url' in item;
+    });
+    if (isAttachmentList) {
+      return value.length > 0 ? `${value.length} 个附件` : '未上传附件';
+    }
     return value.length > 0 ? `${value.length} 条明细` : '暂无明细';
   }
 

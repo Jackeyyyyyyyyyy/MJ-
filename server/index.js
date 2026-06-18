@@ -104,7 +104,7 @@ const WORKFLOW_CONDITION_FIELDS = new Set(['amount', 'currency', 'category', 'pr
 const WORKFLOW_CONDITION_OPERATORS = new Set(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq', 'contains', 'not_contains']);
 const NUMERIC_WORKFLOW_CONDITION_OPERATORS = new Set(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq']);
 const TEXT_WORKFLOW_CONDITION_OPERATORS = new Set(['eq', 'neq', 'contains', 'not_contains']);
-const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'specific_positions', 'submitter_manager', 'multi_supervisor']);
+const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'specific_positions', 'form_member_field', 'submitter_manager', 'multi_supervisor']);
 const WORKFLOW_APPROVAL_MODES = new Set(['one_of', 'all_of']);
 const LEGACY_ROLE_GROUP_MEMBERS = {
   'role-board': ['qin-an-tang'],
@@ -970,6 +970,14 @@ function normalizeFileFields(fileFields, businessFields) {
   return normalizeConfiguredBusinessFields(fileFields, businessFields);
 }
 
+function normalizeAttachmentFields(attachmentFields, businessFields) {
+  return normalizeConfiguredBusinessFields(attachmentFields, businessFields);
+}
+
+function normalizeDateTimeFields(dateTimeFields, businessFields) {
+  return normalizeConfiguredBusinessFields(dateTimeFields, businessFields);
+}
+
 function normalizeOptionalFields(optionalFields, businessFields) {
   return normalizeConfiguredBusinessFields(optionalFields, businessFields);
 }
@@ -1003,6 +1011,31 @@ function normalizeSelectFields(selectFields, businessFields) {
   return Array.from(selected.values());
 }
 
+function normalizeDetailColumn(column) {
+  if (typeof column === 'string') {
+    const name = String(column || '').trim();
+    return name ? { name } : null;
+  }
+
+  if (!column || typeof column !== 'object') return null;
+
+  const name = String(column.name || column.label || column.field || '').trim();
+  if (!name) return null;
+
+  const type = ['text', 'number', 'date', 'datetime', 'select', 'member', 'department'].includes(column.type)
+    ? column.type
+    : undefined;
+  const options = normalizeStringList(column.options);
+  const unit = column.unit === 'days' ? 'days' : column.unit === 'hours' ? 'hours' : undefined;
+
+  return {
+    name,
+    ...(type ? { type } : {}),
+    ...(options.length > 0 ? { options } : {}),
+    ...(unit ? { unit } : {}),
+  };
+}
+
 function normalizeDetailFields(detailFields, businessFields) {
   const businessFieldSet = new Set(normalizeStringList(businessFields));
   const fields = Array.isArray(detailFields) ? detailFields : [];
@@ -1012,9 +1045,33 @@ function normalizeDetailFields(detailFields, businessFields) {
     const field = String(item?.field || '').trim();
     if (!field || !businessFieldSet.has(field)) return;
 
-    const columns = normalizeStringList(item?.columns);
+    const columns = (Array.isArray(item?.columns) ? item.columns : [])
+      .map(normalizeDetailColumn)
+      .filter(Boolean);
     if (columns.length === 0) return;
     selected.set(field, { field, columns });
+  });
+
+  return Array.from(selected.values());
+}
+
+function normalizeDurationFields(durationFields, businessFields) {
+  const businessFieldSet = new Set(normalizeStringList(businessFields));
+  const selected = new Map();
+
+  (Array.isArray(durationFields) ? durationFields : []).forEach((item) => {
+    const field = String(item?.field || '').trim();
+    const startField = String(item?.startField || '').trim();
+    const endField = String(item?.endField || '').trim();
+    if (!field || !startField || !endField) return;
+    if (!businessFieldSet.has(field) || !businessFieldSet.has(startField) || !businessFieldSet.has(endField)) return;
+
+    selected.set(field, {
+      field,
+      startField,
+      endField,
+      unit: item?.unit === 'days' ? 'days' : 'hours',
+    });
   });
 
   return Array.from(selected.values());
@@ -1057,13 +1114,16 @@ function normalizeApprovalSchema(schema) {
               businessFields,
               amountFields: normalizeAmountFields(approvalType?.amountFields, businessFields),
               fileFields: normalizeFileFields(approvalType?.fileFields, businessFields),
+              attachmentFields: normalizeAttachmentFields(approvalType?.attachmentFields, businessFields),
               dateFields: normalizeDateFields(approvalType?.dateFields, businessFields),
+              dateTimeFields: normalizeDateTimeFields(approvalType?.dateTimeFields, businessFields),
               optionalFields: normalizeOptionalFields(approvalType?.optionalFields, businessFields),
               multilineFields: normalizeMultilineFields(approvalType?.multilineFields, businessFields),
               memberFields: normalizeMemberFields(approvalType?.memberFields, businessFields),
               departmentFields: normalizeDepartmentFields(approvalType?.departmentFields, businessFields),
               selectFields: normalizeSelectFields(approvalType?.selectFields, businessFields),
               detailFields: normalizeDetailFields(approvalType?.detailFields, businessFields),
+              durationFields: normalizeDurationFields(approvalType?.durationFields, businessFields),
               visibleToUsers: normalizeVisibleToUsers(approvalType?.visibleToUsers),
               commonFields: normalizeStringList(approvalType?.commonFields),
               ...(String(approvalType?.notes || '').trim() ? { notes: String(approvalType.notes).trim() } : {}),
@@ -1097,13 +1157,16 @@ async function createBusinessForm({
   businessFields,
   amountFields,
   fileFields,
+  attachmentFields,
   dateFields,
+  dateTimeFields,
   optionalFields,
   multilineFields,
   memberFields,
   departmentFields,
   selectFields,
   detailFields,
+  durationFields,
   visibleToUsers,
 }) {
   const schema = await readApprovalSchema();
@@ -1112,13 +1175,16 @@ async function createBusinessForm({
   const nextBusinessFields = normalizeStringList(businessFields);
   const nextAmountFields = normalizeAmountFields(amountFields, nextBusinessFields);
   const nextFileFields = normalizeFileFields(fileFields, nextBusinessFields);
+  const nextAttachmentFields = normalizeAttachmentFields(attachmentFields, nextBusinessFields);
   const nextDateFields = normalizeDateFields(dateFields, nextBusinessFields);
+  const nextDateTimeFields = normalizeDateTimeFields(dateTimeFields, nextBusinessFields);
   const nextOptionalFields = normalizeOptionalFields(optionalFields, nextBusinessFields);
   const nextMultilineFields = normalizeMultilineFields(multilineFields, nextBusinessFields);
   const nextMemberFields = normalizeMemberFields(memberFields, nextBusinessFields);
   const nextDepartmentFields = normalizeDepartmentFields(departmentFields, nextBusinessFields);
   const nextSelectFields = normalizeSelectFields(selectFields, nextBusinessFields);
   const nextDetailFields = normalizeDetailFields(detailFields, nextBusinessFields);
+  const nextDurationFields = normalizeDurationFields(durationFields, nextBusinessFields);
   const nextVisibleToUsers = normalizeVisibleToUsers(visibleToUsers);
 
   if (!nextModuleName || !nextApprovalTypeName || nextBusinessFields.length === 0) {
@@ -1144,13 +1210,16 @@ async function createBusinessForm({
     businessFields: nextBusinessFields,
     amountFields: nextAmountFields,
     fileFields: nextFileFields,
+    attachmentFields: nextAttachmentFields,
     dateFields: nextDateFields,
+    dateTimeFields: nextDateTimeFields,
     optionalFields: nextOptionalFields,
     multilineFields: nextMultilineFields,
     memberFields: nextMemberFields,
     departmentFields: nextDepartmentFields,
     selectFields: nextSelectFields,
     detailFields: nextDetailFields,
+    durationFields: nextDurationFields,
     visibleToUsers: nextVisibleToUsers,
     commonFields,
   });
@@ -1164,13 +1233,16 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, {
   businessFields,
   amountFields,
   fileFields,
+  attachmentFields,
   dateFields,
+  dateTimeFields,
   optionalFields,
   multilineFields,
   memberFields,
   departmentFields,
   selectFields,
   detailFields,
+  durationFields,
   visibleToUsers,
 }) {
   const schema = await readApprovalSchema();
@@ -1181,13 +1253,16 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, {
   const nextBusinessFields = normalizeStringList(businessFields);
   const nextAmountFields = normalizeAmountFields(amountFields, nextBusinessFields);
   const nextFileFields = normalizeFileFields(fileFields, nextBusinessFields);
+  const nextAttachmentFields = normalizeAttachmentFields(attachmentFields, nextBusinessFields);
   const nextDateFields = normalizeDateFields(dateFields, nextBusinessFields);
+  const nextDateTimeFields = normalizeDateTimeFields(dateTimeFields, nextBusinessFields);
   const nextOptionalFields = normalizeOptionalFields(optionalFields, nextBusinessFields);
   const nextMultilineFields = normalizeMultilineFields(multilineFields, nextBusinessFields);
   const nextMemberFields = normalizeMemberFields(memberFields, nextBusinessFields);
   const nextDepartmentFields = normalizeDepartmentFields(departmentFields, nextBusinessFields);
   const nextSelectFields = normalizeSelectFields(selectFields, nextBusinessFields);
   const nextDetailFields = normalizeDetailFields(detailFields, nextBusinessFields);
+  const nextDurationFields = normalizeDurationFields(durationFields, nextBusinessFields);
 
   if (!currentModuleName || !currentApprovalTypeName) {
     throw createHttpError('missing business form target', 400);
@@ -1233,13 +1308,16 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, {
     businessFields: nextBusinessFields,
     amountFields: nextAmountFields,
     fileFields: nextFileFields,
+    attachmentFields: nextAttachmentFields,
     dateFields: nextDateFields,
+    dateTimeFields: nextDateTimeFields,
     optionalFields: nextOptionalFields,
     multilineFields: nextMultilineFields,
     memberFields: nextMemberFields,
     departmentFields: nextDepartmentFields,
     selectFields: nextSelectFields,
     detailFields: nextDetailFields,
+    durationFields: nextDurationFields,
     visibleToUsers: normalizeVisibleToUsers(visibleToUsers, existingType.visibleToUsers !== false),
     commonFields: existingType.commonFields?.length ? existingType.commonFields : schema.commonFields,
   });
@@ -1880,6 +1958,8 @@ function legacyRuleToApprovalStep(node, index = 0) {
     approverRule = { type: 'specific_members', memberIds: Array.isArray(rule.memberIds) ? rule.memberIds : [] };
   } else if (rule.type === 'specific_positions') {
     approverRule = { type: 'specific_positions', positionTitles: Array.isArray(rule.positionTitles) ? rule.positionTitles : [] };
+  } else if (rule.type === 'form_member_field') {
+    approverRule = { type: 'form_member_field', fieldName: normalizeWorkflowText(rule.fieldName) };
   } else if (rule.type === 'role') {
     approverRule = { type: 'specific_members', memberIds: getLegacyRoleGroupMemberIds(rule.roleGroupId) };
   } else if (rule.type === 'direct_supervisor') {
@@ -1917,6 +1997,12 @@ function approvalStepToLegacyNode(step, index = 0) {
       positionTitles: Array.isArray(rule.positionTitles) ? rule.positionTitles : [],
       emptyApproverAction: step?.emptyApproverAction || 'block_submit',
     };
+  } else if (rule.type === 'form_member_field') {
+    legacyRule = {
+      type: 'form_member_field',
+      fieldName: normalizeWorkflowText(rule.fieldName),
+      emptyApproverAction: step?.emptyApproverAction || 'block_submit',
+    };
   } else if (rule.type === 'submitter_manager') {
     legacyRule = {
       type: 'direct_supervisor',
@@ -1939,6 +2025,8 @@ function approvalStepToLegacyNode(step, index = 0) {
       ? `\u8fde\u7eed\u5ba1\u6279\uff1a\u53d1\u8d77\u4eba\u7684\u7b2c ${getSupervisorLevels(rule).join('\u3001')} \u7ea7\u4e3b\u7ba1`
       : rule.type === 'specific_positions'
         ? `\u6307\u5b9a\u804c\u4f4d\uff1a${(Array.isArray(rule.positionTitles) ? rule.positionTitles : []).join('\u3001') || '\u672a\u9009\u62e9'}`
+      : rule.type === 'form_member_field'
+        ? `\u8868\u5355\u4eba\u5458\uff1a${normalizeWorkflowText(rule.fieldName) || '\u672a\u9009\u62e9'}`
       : step?.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
     rule: legacyRule,
     approvalMode: step?.approvalMode === 'all_of' ? 'all_of' : 'one_of',
@@ -2786,8 +2874,7 @@ function getWorkflowConditionValue(condition, context) {
   }
 
   if (field === 'submitter.department') {
-    const department = (directory?.departments || []).find((item) => item.id === applicantMember?.departmentId);
-    return department ? `${department.id} ${department.name}` : applicantMember?.departmentId;
+    return getDepartmentPathText(directory, applicantMember?.departmentId) || applicantMember?.departmentId;
   }
 
   if (field === 'amount') {
@@ -2806,8 +2893,7 @@ function getWorkflowConditionValue(condition, context) {
     const businessDepartment = findBusinessDataValue(businessData, ['department', '部门', '所属部门']);
     if (businessDepartment) return businessDepartment;
 
-    const department = (directory?.departments || []).find((item) => item.id === applicantMember?.departmentId);
-    return department ? `${department.id} ${department.name}` : applicantMember?.departmentId;
+    return getDepartmentPathText(directory, applicantMember?.departmentId) || applicantMember?.departmentId;
   }
 
   return findBusinessDataValue(businessData, [field]);
@@ -3132,6 +3218,46 @@ function findMemberById(directory, memberId) {
   return (directory.members || []).find((member) => member.id === memberId && member.enabled !== false) || null;
 }
 
+function getDepartmentPathText(directory, departmentId) {
+  const departments = Array.isArray(directory?.departments) ? directory.departments : [];
+  const byId = new Map(departments.map((department) => [department.id, department]));
+  const parts = [];
+  const seen = new Set();
+  let current = byId.get(departmentId);
+
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    parts.push(current.id, current.name);
+    current = current.parentId ? byId.get(current.parentId) : null;
+  }
+
+  return parts.filter(Boolean).join(' ');
+}
+
+function findMemberFromBusinessValue(directory, value) {
+  const rawValue = normalizeWorkflowText(value);
+  if (!rawValue) return null;
+
+  const normalizedValue = rawValue.toLowerCase();
+  const enabledMembers = (directory.members || []).filter((member) => member.enabled !== false);
+  const exact = enabledMembers.find((member) => (
+    [member.id, member.name, member.accountUsername]
+      .map((item) => normalizeWorkflowText(item).toLowerCase())
+      .filter(Boolean)
+      .includes(normalizedValue)
+  ));
+  if (exact) return exact;
+
+  return enabledMembers.find((member) => {
+    const candidates = [member.id, member.name, member.accountUsername]
+      .map((item) => normalizeWorkflowText(item).toLowerCase())
+      .filter(Boolean);
+    return candidates.some((candidate) => (
+      normalizedValue.includes(candidate) || candidate.includes(normalizedValue)
+    ));
+  }) || null;
+}
+
 function findMembersByPositionTitles(directory, positionTitles) {
   const titleSet = new Set(
     (Array.isArray(positionTitles) ? positionTitles : [])
@@ -3260,7 +3386,7 @@ function getSupervisorsAtLevels(directory, member, levels) {
   return supervisors;
 }
 
-function resolveApproversForRule(rule, directory, applicantMember) {
+function resolveApproversForRule(rule, directory, applicantMember, businessData) {
   const approverRule = rule || { type: 'specified', memberIds: [] };
   let members = [];
 
@@ -3268,6 +3394,10 @@ function resolveApproversForRule(rule, directory, applicantMember) {
     members = (approverRule.memberIds || []).map((memberId) => findMemberById(directory, memberId)).filter(Boolean);
   } else if (approverRule.type === 'specific_positions') {
     members = findMembersByPositionTitles(directory, approverRule.positionTitles);
+  } else if (approverRule.type === 'form_member_field') {
+    const fieldName = normalizeWorkflowText(approverRule.fieldName);
+    const fieldValue = fieldName ? findBusinessDataValue(businessData, [fieldName]) : undefined;
+    members = [findMemberFromBusinessValue(directory, fieldValue)].filter(Boolean);
   } else if (approverRule.type === 'role') {
     members = getLegacyRoleGroupMemberIds(approverRule.roleGroupId).map((memberId) => findMemberById(directory, memberId)).filter(Boolean);
   } else if (approverRule.type === 'direct_supervisor') {
@@ -3460,7 +3590,7 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
       return;
     }
 
-    const approvers = resolveApproversForRule(rule, directory, applicantMember);
+    const approvers = resolveApproversForRule(rule, directory, applicantMember, businessData);
 
     if (approvers.length === 0) {
       if (rule.emptyApproverAction === 'auto_pass') {
@@ -4934,13 +5064,16 @@ app.post('/api/business-forms', authenticate, requireRoles('developer'), async (
       businessFields: req.body?.businessFields,
       amountFields: req.body?.amountFields,
       fileFields: req.body?.fileFields,
+      attachmentFields: req.body?.attachmentFields,
       dateFields: req.body?.dateFields,
+      dateTimeFields: req.body?.dateTimeFields,
       optionalFields: req.body?.optionalFields,
       multilineFields: req.body?.multilineFields,
       memberFields: req.body?.memberFields,
       departmentFields: req.body?.departmentFields,
       selectFields: req.body?.selectFields,
       detailFields: req.body?.detailFields,
+      durationFields: req.body?.durationFields,
       visibleToUsers: req.body?.visibleToUsers,
     });
 
@@ -4961,13 +5094,16 @@ app.patch('/api/business-forms/:moduleName/:approvalTypeName', authenticate, req
         businessFields: req.body?.businessFields,
         amountFields: req.body?.amountFields,
         fileFields: req.body?.fileFields,
+        attachmentFields: req.body?.attachmentFields,
         dateFields: req.body?.dateFields,
+        dateTimeFields: req.body?.dateTimeFields,
         optionalFields: req.body?.optionalFields,
         multilineFields: req.body?.multilineFields,
         memberFields: req.body?.memberFields,
         departmentFields: req.body?.departmentFields,
         selectFields: req.body?.selectFields,
         detailFields: req.body?.detailFields,
+        durationFields: req.body?.durationFields,
         visibleToUsers: req.body?.visibleToUsers,
       },
     );

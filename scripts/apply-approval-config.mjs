@@ -70,6 +70,30 @@ function normalizeSelectFields(items, businessFields) {
   return Array.from(byField.values());
 }
 
+function normalizeDetailColumn(column) {
+  if (typeof column === 'string') {
+    const name = normalizeText(column);
+    return name ? { name } : null;
+  }
+
+  if (!column || typeof column !== 'object') return null;
+  const name = normalizeText(column.name || column.label || column.field);
+  if (!name) return null;
+
+  const type = ['text', 'number', 'date', 'datetime', 'select', 'member', 'department'].includes(column.type)
+    ? column.type
+    : undefined;
+  const options = normalizeStringList(column.options);
+  const unit = column.unit === 'days' ? 'days' : column.unit === 'hours' ? 'hours' : undefined;
+
+  return {
+    name,
+    ...(type ? { type } : {}),
+    ...(options.length > 0 ? { options } : {}),
+    ...(unit ? { unit } : {}),
+  };
+}
+
 function normalizeDetailFields(items, businessFields) {
   const fieldSet = new Set(businessFields);
   const byField = new Map();
@@ -78,8 +102,31 @@ function normalizeDetailFields(items, businessFields) {
     const field = normalizeText(item?.field);
     if (!field || !fieldSet.has(field)) return;
 
-    const columns = normalizeStringList(item?.columns);
+    const columns = (Array.isArray(item?.columns) ? item.columns : [])
+      .map(normalizeDetailColumn)
+      .filter(Boolean);
     if (columns.length > 0) byField.set(field, { field, columns });
+  });
+
+  return Array.from(byField.values());
+}
+
+function normalizeDurationFields(items, businessFields) {
+  const fieldSet = new Set(businessFields);
+  const byField = new Map();
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const field = normalizeText(item?.field);
+    const startField = normalizeText(item?.startField);
+    const endField = normalizeText(item?.endField);
+    if (!field || !startField || !endField) return;
+    if (!fieldSet.has(field) || !fieldSet.has(startField) || !fieldSet.has(endField)) return;
+    byField.set(field, {
+      field,
+      startField,
+      endField,
+      unit: item?.unit === 'days' ? 'days' : 'hours',
+    });
   });
 
   return Array.from(byField.values());
@@ -126,16 +173,19 @@ function normalizeForm(input, schemaCommonFields) {
       businessFields,
     ),
     fileFields: normalizeConfiguredFields(input?.fileFields, businessFields),
+    attachmentFields: normalizeConfiguredFields(input?.attachmentFields, businessFields),
     dateFields: normalizeConfiguredFields(
       Array.isArray(input?.dateFields) ? input.dateFields : businessFields.filter(isDateBusinessField),
       businessFields,
     ),
+    dateTimeFields: normalizeConfiguredFields(input?.dateTimeFields, businessFields),
     optionalFields: normalizeConfiguredFields(input?.optionalFields, businessFields),
     multilineFields: normalizeConfiguredFields(input?.multilineFields, businessFields),
     memberFields: normalizeConfiguredFields(input?.memberFields, businessFields),
     departmentFields: normalizeConfiguredFields(input?.departmentFields, businessFields),
     selectFields: normalizeSelectFields(input?.selectFields, businessFields),
     detailFields: normalizeDetailFields(input?.detailFields, businessFields),
+    durationFields: normalizeDurationFields(input?.durationFields, businessFields),
     visibleToUsers: input?.visibleToUsers !== false,
     commonFields: normalizeStringList(input?.commonFields).length > 0
       ? normalizeStringList(input.commonFields)

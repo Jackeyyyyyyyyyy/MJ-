@@ -21,6 +21,7 @@ export type AdminView = 'accounts' | 'ai-assistant' | 'organization' | 'workflow
 export type ApproverRuleType =
   | 'specific_members'
   | 'specific_positions'
+  | 'form_member_field'
   | 'submitter_manager'
   | 'specified'
   | 'direct_supervisor'
@@ -71,6 +72,7 @@ export interface ApproverRule {
   memberIds?: string[];
   positionTitles?: string[];
   departmentIds?: string[];
+  fieldName?: string;
   supervisorLevel?: number;
   supervisorDepth?: number;
   supervisorLevels?: string;
@@ -329,7 +331,9 @@ export interface ApprovalType {
   businessFields: string[];
   amountFields?: string[];
   fileFields?: string[];
+  attachmentFields?: string[];
   dateFields?: string[];
+  dateTimeFields?: string[];
   optionalFields?: string[];
   multilineFields?: string[];
   memberFields?: string[];
@@ -340,7 +344,18 @@ export interface ApprovalType {
   }>;
   detailFields?: Array<{
     field: string;
-    columns: string[];
+    columns: Array<string | {
+      name: string;
+      type?: 'text' | 'number' | 'date' | 'datetime' | 'select' | 'member' | 'department';
+      options?: string[];
+      unit?: 'hours' | 'days';
+    }>;
+  }>;
+  durationFields?: Array<{
+    field: string;
+    startField: string;
+    endField: string;
+    unit?: 'hours' | 'days';
   }>;
   visibleToUsers?: boolean;
   commonFields: string[];

@@ -579,6 +579,8 @@ function legacyNodeToStep(node: WorkflowNode, index: number): ApprovalStep {
     approverRule = { type: 'specific_members', memberIds: legacyRule.memberIds || [] };
   } else if (legacyRule.type === 'specific_positions') {
     approverRule = { type: 'specific_positions', positionTitles: legacyRule.positionTitles || [] };
+  } else if (legacyRule.type === 'form_member_field') {
+    approverRule = { type: 'form_member_field', fieldName: String(legacyRule.fieldName || '') };
   } else if (String(legacyRule.type) === 'role') {
     approverRule = { type: 'specific_members', memberIds: getLegacyRoleGroupMemberIds(legacyRule.roleGroupId) };
   } else if (legacyRule.type === 'direct_supervisor') {
@@ -620,6 +622,12 @@ function stepToLegacyNode(step: ApprovalStep, index: number): WorkflowNode {
       positionTitles: rule.positionTitles || [],
       emptyApproverAction: step.emptyApproverAction,
     };
+  } else if (rule.type === 'form_member_field') {
+    legacyRule = {
+      type: 'form_member_field',
+      fieldName: rule.fieldName || '',
+      emptyApproverAction: step.emptyApproverAction,
+    };
   } else if (rule.type === 'submitter_manager') {
     legacyRule = {
       type: 'direct_supervisor',
@@ -642,6 +650,8 @@ function stepToLegacyNode(step: ApprovalStep, index: number): WorkflowNode {
       ? `连续审批：${getSupervisorDepthLabel(rule)}`
       : rule.type === 'specific_positions'
         ? `指定职位：${(rule.positionTitles || []).join('、') || '未选择'}`
+      : rule.type === 'form_member_field'
+        ? `表单人员：${rule.fieldName || '未选择'}`
       : step.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
     rule: legacyRule,
   };
@@ -842,7 +852,7 @@ function normalizeStep(step: Partial<ApprovalStep> | undefined, index: number): 
   } = rule as ApproverRule & { roleGroupId?: string; roleGroupIds?: string[] };
   const type = String(rule.type) === 'department_manager' || String(rule.type) === 'submitter_manager'
     ? 'multi_supervisor'
-    : ['specific_members', 'specific_positions', 'submitter_manager', 'multi_supervisor'].includes(String(rule.type))
+    : ['specific_members', 'specific_positions', 'form_member_field', 'submitter_manager', 'multi_supervisor'].includes(String(rule.type))
       ? rule.type
       : 'specific_members';
 
@@ -1146,6 +1156,8 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
         addValidationError(state, 'branches', `${stepLabel} 必须选择指定成员`, branch.id, step.id);
       } else if (rule.type === 'specific_positions' && (!rule.positionTitles || rule.positionTitles.length === 0)) {
         addValidationError(state, 'branches', `${stepLabel} 必须选择指定职位`, branch.id, step.id);
+      } else if (rule.type === 'form_member_field' && !String(rule.fieldName || '').trim()) {
+        addValidationError(state, 'branches', `${stepLabel} 必须选择表单人员字段`, branch.id, step.id);
       }
     });
   });
@@ -1185,6 +1197,9 @@ function formatStepRule(step: ApprovalStep, directory: OrganizationDirectory) {
   if (rule.type === 'submitter_manager') return '发起人的上级';
   if (rule.type === 'specific_positions') {
     return (rule.positionTitles || []).filter(Boolean).join('、') || '指定职位';
+  }
+  if (rule.type === 'form_member_field') {
+    return rule.fieldName ? `表单人员：${rule.fieldName}` : '表单人员字段';
   }
   return (rule.memberIds || [])
     .map((memberId) => directory.members.find((member) => member.id === memberId)?.name)
@@ -1275,6 +1290,7 @@ function getApproverTypeLabel(type: ApproverRule['type']) {
   if (type === 'multi_supervisor') return '发起人的多级上级';
   if (type === 'submitter_manager') return '发起人的上级';
   if (type === 'specific_positions') return '指定职位';
+  if (type === 'form_member_field') return '表单人员字段';
   return '指定成员';
 }
 
@@ -2265,6 +2281,11 @@ function WorkflowFlowDesigner({
   const selectedStep = selection.type === 'step'
     ? selectedBranch?.approvalSteps.find((step) => step.id === selection.stepId) || null
     : null;
+  const businessScope = getBusinessScopeByNames(draft.basic.moduleName, draft.basic.approvalTypeName);
+  const formMemberFieldOptions = (businessScope?.memberFields || []).map((field) => ({
+    value: field,
+    label: field,
+  }));
   const hasProcessorTask = containsProcessorNode(flowNodes);
   const branchFlowWidth = flowBranches.length > 0
     ? flowBranches.length * FLOW_BRANCH_CARD_WIDTH + Math.max(0, flowBranches.length - 1) * FLOW_BRANCH_GAP
@@ -2561,6 +2582,7 @@ function WorkflowFlowDesigner({
             memberOptions={memberOptions}
             positionOptions={positionOptions}
             departmentOptions={departmentOptions}
+            formMemberFieldOptions={formMemberFieldOptions}
             fieldOptions={fieldOptions}
             previewSubmitter={previewSubmitter}
             onSelect={onSelect}
@@ -2961,6 +2983,7 @@ function StepEditor({
   stepIndex,
   memberOptions,
   positionOptions,
+  formMemberFieldOptions,
   directory,
   previewSubmitter,
   validation,
@@ -2974,6 +2997,7 @@ function StepEditor({
   stepIndex: number;
   memberOptions: Array<{ value: string; label: string }>;
   positionOptions: Array<{ value: string; label: string }>;
+  formMemberFieldOptions: Array<{ value: string; label: string }>;
   directory: OrganizationDirectory;
   previewSubmitter: OrganizationDirectory['members'][number] | null;
   validation: ValidationState;
@@ -3008,10 +3032,11 @@ function StepEditor({
 
         <div className="space-y-2">
           <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">审批人类型</span>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
             {[
               { value: 'specific_members', label: '指定成员' },
               { value: 'specific_positions', label: '指定职位' },
+              { value: 'form_member_field', label: '表单人员' },
               { value: 'multi_supervisor', label: '发起人上级' },
             ].map((item) => (
               <React.Fragment key={item.value}>
@@ -3023,9 +3048,10 @@ function StepEditor({
                       memberIds: [],
                       positionTitles: [],
                       departmentIds: [],
+                      ...(item.value === 'form_member_field' ? { fieldName: formMemberFieldOptions[0]?.value || '' } : {}),
                       ...(item.value === 'multi_supervisor' ? { supervisorDepth: 1 } : {}),
                     },
-                    approvalMode: item.value === 'multi_supervisor' ? 'one_of' : step.approvalMode,
+                    approvalMode: item.value === 'multi_supervisor' || item.value === 'form_member_field' ? 'one_of' : step.approvalMode,
                   })}
                 >
                   {item.label}
@@ -3061,6 +3087,25 @@ function StepEditor({
               emptyText="暂无职位"
               searchPlaceholder="搜索职位"
             />
+          </label>
+        )}
+
+        {step.approverRule.type === 'form_member_field' && (
+          <label className="block space-y-2">
+            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">表单人员字段</span>
+            <select
+              className="input-field text-[13px]"
+              value={step.approverRule.fieldName || ''}
+              onChange={(event) => onUpdateStep(branch.id, step.id, {
+                approverRule: { ...step.approverRule, fieldName: event.target.value },
+                approvalMode: 'one_of',
+              })}
+            >
+              <option value="">{formMemberFieldOptions.length > 0 ? '请选择表单人员字段' : '当前表单没有人员字段'}</option>
+              {formMemberFieldOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
           </label>
         )}
 
@@ -3166,6 +3211,7 @@ function DesignerInspector({
   memberOptions,
   positionOptions,
   departmentOptions,
+  formMemberFieldOptions,
   fieldOptions,
   previewSubmitter,
   onSelect,
@@ -3203,6 +3249,7 @@ function DesignerInspector({
   memberOptions: Array<{ value: string; label: string }>;
   positionOptions: Array<{ value: string; label: string }>;
   departmentOptions: Array<{ value: string; label: string }>;
+  formMemberFieldOptions: Array<{ value: string; label: string }>;
   fieldOptions: ConditionFieldOption[];
   previewSubmitter: OrganizationDirectory['members'][number] | null;
   onSelect: (selection: DesignerSelection) => void;
@@ -3425,7 +3472,7 @@ function DesignerInspector({
               onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, { title: event.target.value })}
             />
           </label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
             <SegmentedButton
               isActive={rule.type === 'specific_members'}
               onClick={() => onUpdateFlowNode(selectedFlowNode.id, {
@@ -3443,6 +3490,15 @@ function DesignerInspector({
               })}
             >
               指定职位
+            </SegmentedButton>
+            <SegmentedButton
+              isActive={rule.type === 'form_member_field'}
+              onClick={() => onUpdateFlowNode(selectedFlowNode.id, {
+                rule: { type: 'form_member_field', fieldName: formMemberFieldOptions[0]?.value || '' },
+                approvalMode: 'one_of',
+              })}
+            >
+              表单人员
             </SegmentedButton>
             <SegmentedButton
               isActive={rule.type === 'multi_supervisor'}
@@ -3475,6 +3531,24 @@ function DesignerInspector({
                 emptyText="暂无职位"
                 searchPlaceholder="搜索职位"
               />
+            </label>
+          )}
+          {rule.type === 'form_member_field' && (
+            <label className="block space-y-2">
+              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">表单人员字段</span>
+              <select
+                className="input-field text-[13px]"
+                value={rule.fieldName || ''}
+                onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, {
+                  rule: { ...rule, fieldName: event.target.value },
+                  approvalMode: 'one_of',
+                })}
+              >
+                <option value="">{formMemberFieldOptions.length > 0 ? '请选择表单人员字段' : '当前表单没有人员字段'}</option>
+                {formMemberFieldOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
             </label>
           )}
           {supportsApprovalMode(rule) && (
@@ -3533,6 +3607,7 @@ function DesignerInspector({
           stepIndex={selectedBranch.approvalSteps.findIndex((step) => step.id === selectedStep.id)}
           memberOptions={memberOptions}
           positionOptions={positionOptions}
+          formMemberFieldOptions={formMemberFieldOptions}
           directory={directory}
           previewSubmitter={previewSubmitter}
           validation={validation}
@@ -4161,6 +4236,11 @@ export default function WorkflowAdmin() {
     () => directory.departments.map((department) => ({ value: department.id, label: department.name })),
     [directory.departments],
   );
+  const formMemberFieldOptions = useMemo(() => {
+    if (!draft) return [];
+    const scope = getBusinessScopeByNames(draft.basic.moduleName, draft.basic.approvalTypeName);
+    return (scope?.memberFields || []).map((field) => ({ value: field, label: field }));
+  }, [draft?.basic.moduleName, draft?.basic.approvalTypeName]);
   const conditionFieldOptionsForDraft = useMemo(
     () => getConditionFieldOptions(draft),
     [draft?.basic.moduleName, draft?.basic.approvalTypeName],
@@ -5281,14 +5361,16 @@ export default function WorkflowAdmin() {
                                     memberIds: [],
                                     positionTitles: [],
                                     departmentIds: [],
+                                    ...(type === 'form_member_field' ? { fieldName: formMemberFieldOptions[0]?.value || '' } : {}),
                                     ...(type === 'multi_supervisor' ? { supervisorDepth: 1 } : {}),
                                   },
-                                  approvalMode: type === 'multi_supervisor' ? 'one_of' : step.approvalMode,
+                                  approvalMode: type === 'multi_supervisor' || type === 'form_member_field' ? 'one_of' : step.approvalMode,
                                 });
                               }}
                             >
                               <option value="specific_members">指定成员</option>
                               <option value="specific_positions">指定职位</option>
+                              <option value="form_member_field">表单人员字段</option>
                               <option value="multi_supervisor">发起人的上级</option>
                             </select>
                             {supportsApprovalMode(step.approverRule) ? (
@@ -5300,7 +5382,7 @@ export default function WorkflowAdmin() {
                                 <option value="one_of">多人任意一人通过</option>
                                 <option value="all_of">所有人都要通过</option>
                               </select>
-                            ) : (
+                            ) : step.approverRule.type === 'multi_supervisor' ? (
                               <input
                                 className="input-field text-[13px]"
                                 value={step.approverRule.supervisorLevels ?? formatSupervisorLevelsText(step.approverRule)}
@@ -5309,6 +5391,12 @@ export default function WorkflowAdmin() {
                                   approverRule: patchSupervisorLevels(step.approverRule, event.target.value),
                                   approvalMode: 'one_of',
                                 })}
+                              />
+                            ) : (
+                              <input
+                                className="input-field text-[13px]"
+                                value="单人审批"
+                                readOnly
                               />
                             )}
                           </div>
@@ -5334,6 +5422,22 @@ export default function WorkflowAdmin() {
                               emptyText="暂无职位"
                               searchPlaceholder="搜索职位"
                             />
+                          )}
+
+                          {step.approverRule.type === 'form_member_field' && (
+                            <select
+                              className="input-field text-[13px]"
+                              value={step.approverRule.fieldName || ''}
+                              onChange={(event) => updateStep(branch.id, step.id, {
+                                approverRule: { ...step.approverRule, fieldName: event.target.value },
+                                approvalMode: 'one_of',
+                              })}
+                            >
+                              <option value="">{formMemberFieldOptions.length > 0 ? '请选择表单人员字段' : '当前表单没有人员字段'}</option>
+                              {formMemberFieldOptions.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
                           )}
 
                           <select

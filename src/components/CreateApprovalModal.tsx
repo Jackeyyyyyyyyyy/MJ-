@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, ChevronRight, Upload, Calendar, DollarSign, FileText, Plus, AlignLeft, Building2, ListChecks, Table2, UserRound } from 'lucide-react';
+import { X, ChevronRight, Upload, Calendar, Clock3, Calculator, DollarSign, FileText, Plus, AlignLeft, Building2, ListChecks, Table2, UserRound } from 'lucide-react';
 import { getVisibleApprovalModules } from '../approvalSchema';
 import { storage } from '../storage';
 import { auth } from '../auth';
@@ -286,11 +286,22 @@ function isNumericField(field: string) {
 }
 
 function isConfiguredNumericField(type: ApprovalType | null, field: string) {
-  return isConfiguredMoneyField(type, field) || field.includes('汇率');
+  return isConfiguredMoneyField(type, field)
+    || field.includes('汇率')
+    || Boolean(getConfiguredDurationRule(type, field));
 }
 
 function isConfiguredFileField(type: ApprovalType | null, field: string) {
   return Array.isArray(type?.fileFields) && type.fileFields.includes(field);
+}
+
+function isConfiguredAttachmentField(type: ApprovalType | null, field: string) {
+  return Array.isArray(type?.attachmentFields) && type.attachmentFields.includes(field);
+}
+
+function isUploadOnlyField(type: ApprovalType | null, field: string) {
+  return isConfiguredAttachmentField(type, field)
+    || (!isConfiguredFileField(type, field) && (field.includes('附件') || field.includes('图片')));
 }
 
 function isConfiguredDateField(type: ApprovalType | null, field: string) {
@@ -299,6 +310,10 @@ function isConfiguredDateField(type: ApprovalType | null, field: string) {
     return type.dateFields.includes(field);
   }
   return isDateField(field);
+}
+
+function isConfiguredDateTimeField(type: ApprovalType | null, field: string) {
+  return Array.isArray(type?.dateTimeFields) && type.dateTimeFields.includes(field);
 }
 
 function isConfiguredOptionalField(type: ApprovalType | null, field: string) {
@@ -330,18 +345,69 @@ function getConfiguredDetailColumns(type: ApprovalType | null, field: string) {
     ? type.detailFields.find((item) => item.field === field)
     : null;
   const columns = Array.isArray(configuredField?.columns) ? configuredField.columns : [];
-  return [...new Set(columns.map((column) => String(column || '').trim()).filter(Boolean))]
-    .map((column) => ({
-      key: column,
-      label: column,
-      placeholder: `输入${column}`,
-      type: isMoneyField(column) || column.includes('数量') || column.includes('单价') ? 'number' : undefined,
-    }));
+  const normalizedColumns = columns
+    .map((column) => {
+      if (typeof column === 'string') {
+        const name = column.trim();
+        if (!name) return null;
+        return {
+          key: name,
+          label: name,
+          placeholder: `输入${name}`,
+          type: isMoneyField(name) || name.includes('数量') || name.includes('单价') ? 'number' : 'text',
+          options: [] as string[],
+        };
+      }
+
+      const name = String(column?.name || '').trim();
+      if (!name) return null;
+      const type = column.type || (isMoneyField(name) || name.includes('数量') || name.includes('单价') ? 'number' : 'text');
+      return {
+        key: name,
+        label: name,
+        placeholder: `输入${name}`,
+        type,
+        options: Array.isArray(column.options) ? column.options : [],
+        unit: column.unit,
+      };
+    })
+    .filter(Boolean);
+
+  const seen = new Set<string>();
+  return normalizedColumns.filter((column) => {
+    if (!column || seen.has(column.key)) return false;
+    seen.add(column.key);
+    return true;
+  });
+}
+
+function getConfiguredDurationRule(type: ApprovalType | null, field: string) {
+  return Array.isArray(type?.durationFields)
+    ? type.durationFields.find((item) => item.field === field) || null
+    : null;
+}
+
+function calculateDurationValue(startValue: unknown, endValue: unknown, unit: 'hours' | 'days' = 'hours') {
+  const startTime = Date.parse(String(startValue || ''));
+  const endTime = Date.parse(String(endValue || ''));
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) return '';
+  const hours = (endTime - startTime) / 36e5;
+  const value = unit === 'days' ? hours / 24 : hours;
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
 }
 
 function createEmptyDetailRow(columns: Array<{ key: string | number }>) {
   return Object.fromEntries(columns.map((column) => [String(column.key), '']));
 }
+
+type StructuredDetailColumn = {
+  key: string;
+  label: string;
+  placeholder: string;
+  type?: string;
+  options?: string[];
+  unit?: 'hours' | 'days';
+};
 
 function getMemberOptionLabel(member: OrganizationSelectOptions['members'][number]) {
   const detail = [member.departmentName, member.title].filter(Boolean).join(' / ');
@@ -486,6 +552,8 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         initialData[field] = createEmptySupplierQuotationInfo();
       } else if (getConfiguredDetailColumns(type, field).length > 0) {
         initialData[field] = [createEmptyDetailRow(getConfiguredDetailColumns(type, field))];
+      } else if (isUploadOnlyField(type, field)) {
+        initialData[field] = [];
       } else if (isConfiguredFileField(type, field)) {
         initialData[field] = createEmptyFileFieldValue();
       } else {
@@ -497,7 +565,20 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   };
 
   const handleInputChange = (field: string, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData(prev => {
+      const next = { ...prev, [field]: value };
+      if (selectedType?.durationFields?.length) {
+        selectedType.durationFields.forEach((rule) => {
+          if (rule.startField !== field && rule.endField !== field) return;
+          next[rule.field] = calculateDurationValue(
+            next[rule.startField],
+            next[rule.endField],
+            rule.unit || 'hours',
+          );
+        });
+      }
+      return next;
+    });
     if (errors[field]) {
       const newErrors = { ...errors };
       delete newErrors[field];
@@ -639,6 +720,14 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       const value = formData[field];
       const isOptional = isConfiguredOptionalField(selectedType, field);
       if (isOptional && isBlankOptionalValue(value)) {
+        return;
+      }
+
+      if (isUploadOnlyField(selectedType, field)) {
+        const attachments = Array.isArray(value) ? value : [];
+        if (attachments.length === 0) {
+          newErrors[field] = '请上传文件';
+        }
         return;
       }
 
@@ -1261,13 +1350,13 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     );
   };
 
-  const getStructuredDetailColumns = (field: string) => {
+  const getStructuredDetailColumns = (field: string): StructuredDetailColumn[] => {
     const configuredColumns = getConfiguredDetailColumns(selectedType, field);
-    if (configuredColumns.length > 0) return configuredColumns;
+    if (configuredColumns.length > 0) return configuredColumns as StructuredDetailColumn[];
 
     if (selectedModule?.name !== '资金' || field !== '明细') return [];
-    if (selectedType?.name === '批量修改') return batchModifyDetailColumns;
-    if (selectedType?.name === '资金减免') return fundsReductionDetailColumns;
+    if (selectedType?.name === '批量修改') return batchModifyDetailColumns as StructuredDetailColumn[];
+    if (selectedType?.name === '资金减免') return fundsReductionDetailColumns as StructuredDetailColumn[];
     return [];
   };
 
@@ -1292,8 +1381,9 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     key: string,
     value: string,
   ) => {
+    const columns = getStructuredDetailColumns(field);
     const rows = getStructuredDetails(field).map((row, index) => (
-      index === rowIndex ? { ...row, [key]: value } : row
+      index === rowIndex ? fillStructuredDetailDuration({ ...row, [key]: value }, columns) : row
     ));
     handleInputChange(field, rows);
   };
@@ -1305,6 +1395,94 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const removeStructuredDetail = (field: string, rowIndex: number) => {
     const rows = getStructuredDetails(field).filter((_, index) => index !== rowIndex);
     handleInputChange(field, rows.length > 0 ? rows : [createEmptyStructuredDetail(field)]);
+  };
+
+  const fillStructuredDetailDuration = (
+    row: Record<string, string>,
+    columns: ReturnType<typeof getStructuredDetailColumns>,
+  ) => {
+    const startColumn = columns.find((column) => /开始/.test(column.label));
+    const endColumn = columns.find((column) => /结束/.test(column.label));
+    const durationColumn = columns.find((column) => /时长/.test(column.label));
+    if (!startColumn || !endColumn || !durationColumn) return row;
+
+    return {
+      ...row,
+      [durationColumn.key]: calculateDurationValue(
+        row[startColumn.key],
+        row[endColumn.key],
+        durationColumn.unit || 'hours',
+      ),
+    };
+  };
+
+  const renderStructuredDetailCell = (
+    field: string,
+    rowIndex: number,
+    row: Record<string, string>,
+    column: ReturnType<typeof getStructuredDetailColumns>[number],
+  ) => {
+    const value = row[column.key] || '';
+    const isDurationColumn = /时长/.test(column.label);
+    const commonClassName = "w-full h-10 px-2 bg-canvas-white border border-transparent focus:border-interactive-blue outline-none text-[13px] font-semibold";
+
+    if (column.type === 'select') {
+      return (
+        <select
+          value={value}
+          onChange={(event) => updateStructuredDetail(field, rowIndex, String(column.key), event.target.value)}
+          className={commonClassName}
+        >
+          <option value="">请选择</option>
+          {(column.options || []).map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      );
+    }
+
+    if (column.type === 'member') {
+      return (
+        <select
+          value={value}
+          onChange={(event) => updateStructuredDetail(field, rowIndex, String(column.key), event.target.value)}
+          className={commonClassName}
+        >
+          <option value="">{organizationOptions.members.length > 0 ? '请选择人员' : '暂无人员'}</option>
+          {organizationOptions.members.map((member) => (
+            <option key={member.id} value={getMemberOptionLabel(member)}>{getMemberOptionLabel(member)}</option>
+          ))}
+        </select>
+      );
+    }
+
+    if (column.type === 'department') {
+      return (
+        <select
+          value={value}
+          onChange={(event) => updateStructuredDetail(field, rowIndex, String(column.key), event.target.value)}
+          className={commonClassName}
+        >
+          <option value="">{organizationOptions.departments.length > 0 ? '请选择部门' : '暂无部门'}</option>
+          {organizationOptions.departments.map((department) => (
+            <option key={department.id} value={department.name}>{department.name}</option>
+          ))}
+        </select>
+      );
+    }
+
+    return (
+      <input
+        type={column.type === 'datetime' ? 'datetime-local' : column.type === 'date' ? 'date' : column.type === 'number' ? 'number' : 'text'}
+        inputMode={column.type === 'number' ? 'decimal' : undefined}
+        step={column.type === 'number' ? '0.01' : undefined}
+        value={value}
+        readOnly={isDurationColumn}
+        onChange={(event) => updateStructuredDetail(field, rowIndex, String(column.key), event.target.value)}
+        className={cn(commonClassName, isDurationColumn && "text-medium-gray")}
+        placeholder={column.placeholder}
+      />
+    );
   };
 
   const renderStructuredDetailInput = (field: string) => {
@@ -1336,14 +1514,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
               <div key={rowIndex} className="grid border-b border-border-silver last:border-b-0 bg-white" style={gridTemplate}>
                 {columns.map((column) => (
                   <div key={column.key} className="p-2">
-                    <input
-                      type={column.type === 'number' ? 'number' : 'text'}
-                      inputMode={column.type === 'number' ? 'decimal' : undefined}
-                      value={row[column.key]}
-                      onChange={(event) => updateStructuredDetail(field, rowIndex, String(column.key), event.target.value)}
-                      className="w-full h-10 px-2 bg-canvas-white border border-transparent focus:border-interactive-blue outline-none text-[13px] font-semibold"
-                      placeholder={column.placeholder}
-                    />
+                    {renderStructuredDetailCell(field, rowIndex, row, column)}
                   </div>
                 ))}
                 <div className="p-2 flex items-center justify-center">
@@ -1396,9 +1567,11 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     const isDate = isConfiguredDateField(selectedType, field);
+    const isDateTime = isConfiguredDateTimeField(selectedType, field);
     const isMoney = isConfiguredMoneyField(selectedType, field);
     const isNumeric = isConfiguredNumericField(selectedType, field);
-    const isFile = field.includes('附件');
+    const durationRule = getConfiguredDurationRule(selectedType, field);
+    const isUploadOnly = isUploadOnlyField(selectedType, field);
     const selectOptions = getConfiguredSelectOptions(selectedType, field);
     const isMemberField = isConfiguredMemberField(selectedType, field);
     const isDepartmentField = isConfiguredDepartmentField(selectedType, field);
@@ -1536,7 +1709,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       );
     }
 
-    if (isFile) {
+    if (isUploadOnly) {
       const attachments = Array.isArray(formData[field])
         ? formData[field] as ApprovalAttachment[]
         : [];
@@ -1605,6 +1778,26 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
             />
             <DollarSign className="absolute right-1 top-1/2 -translate-y-1/2 text-light-silver w-4 h-4" />
           </div>
+        </div>
+      );
+    }
+
+    if (durationRule) {
+      return (
+        <div className="relative">
+          <input
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            readOnly
+            className={cn(
+              "input-field border-b border-border-silver bg-lightest-gray-background pr-11 text-medium-gray focus:border-interactive-blue transition-colors",
+              errors[field] && "border-rose-500"
+            )}
+            placeholder={`${durationRule.startField} 和 ${durationRule.endField} 填完后自动计算`}
+            value={formData[field] || ''}
+          />
+          <Calculator className="absolute right-4 top-1/2 -translate-y-1/2 text-light-silver w-4 h-4 pointer-events-none" />
         </div>
       );
     }
@@ -1699,7 +1892,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     return (
       <div className="relative">
         <input
-          type={isDate ? 'date' : (isNumeric ? 'number' : 'text')}
+          type={isDateTime ? 'datetime-local' : isDate ? 'date' : (isNumeric ? 'number' : 'text')}
           inputMode={isNumeric ? 'decimal' : undefined}
           step={isNumeric ? '0.01' : undefined}
           className={cn(
@@ -1712,6 +1905,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         />
         {isNumeric && <DollarSign className="absolute right-4 top-1/2 -translate-y-1/2 text-light-silver w-4 h-4" />}
         {isDate && <Calendar className="absolute right-4 top-1/2 -translate-y-1/2 text-light-silver w-4 h-4 pointer-events-none" />}
+        {isDateTime && <Clock3 className="absolute right-4 top-1/2 -translate-y-1/2 text-light-silver w-4 h-4 pointer-events-none" />}
       </div>
     );
   };

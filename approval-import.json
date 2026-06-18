@@ -1,0 +1,228 @@
+{
+  "forms": [
+    {
+      "moduleName": "出勤休假",
+      "approvalTypeName": "请假",
+      "businessFields": ["请假类型", "开始时间", "结束时间", "时长", "请假事由", "职务代理人", "图片"],
+      "dateTimeFields": ["开始时间", "结束时间"],
+      "optionalFields": ["图片"],
+      "multilineFields": ["请假事由"],
+      "memberFields": ["职务代理人"],
+      "selectFields": [
+        { "field": "请假类型", "options": ["事假", "病假", "年假", "调休", "婚假", "产假", "陪产假", "丧假", "其他"] }
+      ],
+      "attachmentFields": ["图片"],
+      "durationFields": [
+        { "field": "时长", "startField": "开始时间", "endField": "结束时间", "unit": "hours" }
+      ],
+      "visibleToUsers": true
+    },
+    {
+      "moduleName": "出勤休假",
+      "approvalTypeName": "出差",
+      "businessFields": ["出行方式", "出差事由", "行程"],
+      "multilineFields": ["出差事由"],
+      "selectFields": [
+        { "field": "出行方式", "options": ["私车公用", "开公司车", "其他"] }
+      ],
+      "detailFields": [
+        {
+          "field": "行程",
+          "columns": [
+            { "name": "交通工具", "type": "select", "options": ["飞机", "火车", "汽车", "自驾", "其他"] },
+            { "name": "单程往返", "type": "select", "options": ["单程", "往返"] },
+            { "name": "出发城市", "type": "text" },
+            { "name": "目的城市", "type": "text" },
+            { "name": "开始时间", "type": "datetime" },
+            { "name": "结束时间", "type": "datetime" },
+            { "name": "时长", "type": "number", "unit": "hours" }
+          ]
+        }
+      ],
+      "visibleToUsers": true
+    },
+    {
+      "moduleName": "出勤休假",
+      "approvalTypeName": "外出",
+      "businessFields": ["开始时间", "结束时间", "时长", "外出事由", "图片"],
+      "dateTimeFields": ["开始时间", "结束时间"],
+      "optionalFields": ["图片"],
+      "multilineFields": ["外出事由"],
+      "attachmentFields": ["图片"],
+      "durationFields": [
+        { "field": "时长", "startField": "开始时间", "endField": "结束时间", "unit": "hours" }
+      ],
+      "visibleToUsers": true
+    },
+    {
+      "moduleName": "出勤休假",
+      "approvalTypeName": "加班",
+      "businessFields": ["加班原因", "加班人", "开始时间", "结束时间", "时长", "加班补偿"],
+      "dateTimeFields": ["开始时间", "结束时间"],
+      "multilineFields": ["加班原因"],
+      "memberFields": ["加班人"],
+      "selectFields": [
+        { "field": "加班补偿", "options": ["调休", "加班费", "无"] }
+      ],
+      "durationFields": [
+        { "field": "时长", "startField": "开始时间", "endField": "结束时间", "unit": "hours" }
+      ],
+      "visibleToUsers": true
+    },
+    {
+      "moduleName": "出勤休假",
+      "approvalTypeName": "补卡申请",
+      "businessFields": ["补卡时间", "补卡理由", "图片"],
+      "dateTimeFields": ["补卡时间"],
+      "optionalFields": ["图片"],
+      "multilineFields": ["补卡理由"],
+      "attachmentFields": ["图片"],
+      "visibleToUsers": true
+    }
+  ],
+  "workflows": [
+    {
+      "moduleName": "出勤休假",
+      "approvalTypeName": "请假",
+      "name": "请假审批流",
+      "status": "published",
+      "businessType": "leave",
+      "branches": [
+        {
+          "id": "leave-overseas-lin",
+          "name": "海外事业部 - 林金彪",
+          "isDefault": false,
+          "conditionMode": "rules",
+          "conditions": [{ "id": "leave-lin", "field": "submitter.member", "operator": "eq", "value": "林金彪" }],
+          "approvalSteps": [
+            { "id": "leave-agent-lin", "name": "职务代理人", "approverRule": { "type": "form_member_field", "fieldName": "职务代理人" }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" },
+            { "id": "leave-hr-lin", "name": "方安敬", "approverRule": { "type": "specific_members", "memberIds": ["member-059"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" },
+            { "id": "leave-final-lin", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }
+          ]
+        },
+        {
+          "id": "leave-overseas-office",
+          "name": "海外事业部 - 总经办",
+          "isDefault": false,
+          "conditionMode": "rules",
+          "conditions": [{ "id": "leave-office", "field": "submitter.department", "operator": "eq", "value": "总经办" }],
+          "approvalSteps": [
+            { "id": "leave-agent-office", "name": "职务代理人", "approverRule": { "type": "form_member_field", "fieldName": "职务代理人" }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" },
+            { "id": "leave-liu", "name": "刘小贝", "approverRule": { "type": "specific_members", "memberIds": ["member-089"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" },
+            { "id": "leave-fan", "name": "范璐", "approverRule": { "type": "specific_members", "memberIds": ["fan-lu"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" },
+            { "id": "leave-final-office", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }
+          ]
+        },
+        {
+          "id": "leave-ops-russia",
+          "name": "运营部 - 俄罗斯",
+          "isDefault": false,
+          "conditionMode": "rules",
+          "conditions": [{ "id": "leave-russia", "field": "submitter.department", "operator": "eq", "value": "俄罗斯" }],
+          "approvalSteps": [
+            { "id": "leave-agent-russia", "name": "职务代理人", "approverRule": { "type": "form_member_field", "fieldName": "职务代理人" }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" },
+            { "id": "leave-manager-russia", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" },
+            { "id": "leave-final-russia", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }
+          ]
+        },
+        {
+          "id": "leave-ops-kazakhstan",
+          "name": "运营部 - 哈萨克斯坦",
+          "isDefault": false,
+          "conditionMode": "rules",
+          "conditions": [{ "id": "leave-kazakhstan", "field": "submitter.department", "operator": "eq", "value": "哈萨克斯坦" }],
+          "approvalSteps": [
+            { "id": "leave-agent-kazakhstan", "name": "职务代理人", "approverRule": { "type": "form_member_field", "fieldName": "职务代理人" }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" },
+            { "id": "leave-manager-kazakhstan", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" },
+            { "id": "leave-final-kazakhstan", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }
+          ]
+        },
+        {
+          "id": "leave-ops-default",
+          "name": "运营部 - 其他",
+          "isDefault": false,
+          "conditionMode": "rules",
+          "conditions": [{ "id": "leave-ops", "field": "submitter.department", "operator": "eq", "value": "运营部" }],
+          "approvalSteps": [
+            { "id": "leave-agent-ops", "name": "职务代理人", "approverRule": { "type": "form_member_field", "fieldName": "职务代理人" }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" },
+            { "id": "leave-managers-ops", "name": "连续多级主管", "approverRule": { "type": "multi_supervisor", "supervisorLevels": "1-4" }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" },
+            { "id": "leave-final-ops", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }
+          ]
+        },
+        {
+          "id": "leave-default",
+          "name": "其他人员",
+          "isDefault": true,
+          "conditionMode": "rules",
+          "conditions": [],
+          "approvalSteps": [
+            { "id": "leave-agent-default", "name": "职务代理人", "approverRule": { "type": "form_member_field", "fieldName": "职务代理人" }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" },
+            { "id": "leave-manager-default", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" },
+            { "id": "leave-final-default", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }
+          ]
+        }
+      ],
+      "ccRule": { "timing": "workflow_completed", "memberIds": ["member-060", "member-078", "member-006", "member-052"], "departmentIds": [] }
+    },
+    {
+      "moduleName": "出勤休假",
+      "approvalTypeName": "出差",
+      "name": "出差审批流",
+      "status": "published",
+      "businessType": "leave",
+      "branches": [
+        { "id": "trip-overseas-lin", "name": "海外事业部 - 林金彪", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "trip-lin", "field": "submitter.member", "operator": "eq", "value": "林金彪" }], "approvalSteps": [{ "id": "trip-hr-lin", "name": "方安敬", "approverRule": { "type": "specific_members", "memberIds": ["member-059"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "trip-overseas-office", "name": "海外事业部 - 总经办", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "trip-office", "field": "submitter.department", "operator": "eq", "value": "总经办" }], "approvalSteps": [{ "id": "trip-liu", "name": "刘小贝", "approverRule": { "type": "specific_members", "memberIds": ["member-089"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }, { "id": "trip-fan", "name": "范璐", "approverRule": { "type": "specific_members", "memberIds": ["fan-lu"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "trip-ops-russia", "name": "运营部 - 俄罗斯", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "trip-russia", "field": "submitter.department", "operator": "eq", "value": "俄罗斯" }], "approvalSteps": [{ "id": "trip-manager-russia", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "trip-ops-kazakhstan", "name": "运营部 - 哈萨克斯坦", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "trip-kazakhstan", "field": "submitter.department", "operator": "eq", "value": "哈萨克斯坦" }], "approvalSteps": [{ "id": "trip-manager-kazakhstan", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "trip-ops-default", "name": "运营部 - 其他", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "trip-ops", "field": "submitter.department", "operator": "eq", "value": "运营部" }], "approvalSteps": [{ "id": "trip-managers-ops", "name": "连续多级主管", "approverRule": { "type": "multi_supervisor", "supervisorLevels": "1-4" }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "trip-default", "name": "其他人员", "isDefault": true, "conditionMode": "rules", "conditions": [], "approvalSteps": [{ "id": "trip-manager-default", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] }
+      ],
+      "ccRule": { "timing": "workflow_completed", "memberIds": ["member-078", "member-060"], "departmentIds": [] }
+    },
+    {
+      "moduleName": "出勤休假",
+      "approvalTypeName": "外出",
+      "name": "外出审批流",
+      "status": "published",
+      "businessType": "leave",
+      "branches": [
+        { "id": "outing-overseas-lin", "name": "海外事业部 - 林金彪", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "outing-lin", "field": "submitter.member", "operator": "eq", "value": "林金彪" }], "approvalSteps": [{ "id": "outing-hr-lin", "name": "方安敬", "approverRule": { "type": "specific_members", "memberIds": ["member-059"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }, { "id": "outing-final-lin", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "outing-overseas-office", "name": "海外事业部 - 总经办", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "outing-office", "field": "submitter.department", "operator": "eq", "value": "总经办" }], "approvalSteps": [{ "id": "outing-liu", "name": "刘小贝", "approverRule": { "type": "specific_members", "memberIds": ["member-089"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }, { "id": "outing-fan", "name": "范璐", "approverRule": { "type": "specific_members", "memberIds": ["fan-lu"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }, { "id": "outing-final-office", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "outing-ops-russia", "name": "运营部 - 俄罗斯", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "outing-russia", "field": "submitter.department", "operator": "eq", "value": "俄罗斯" }], "approvalSteps": [{ "id": "outing-manager-russia", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }, { "id": "outing-final-russia", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "outing-ops-kazakhstan", "name": "运营部 - 哈萨克斯坦", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "outing-kazakhstan", "field": "submitter.department", "operator": "eq", "value": "哈萨克斯坦" }], "approvalSteps": [{ "id": "outing-manager-kazakhstan", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }, { "id": "outing-final-kazakhstan", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "outing-ops-default", "name": "运营部 - 其他", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "outing-ops", "field": "submitter.department", "operator": "eq", "value": "运营部" }], "approvalSteps": [{ "id": "outing-managers-ops", "name": "连续多级主管", "approverRule": { "type": "multi_supervisor", "supervisorLevels": "1-4" }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }, { "id": "outing-final-ops", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "outing-default", "name": "其他人员", "isDefault": true, "conditionMode": "rules", "conditions": [], "approvalSteps": [{ "id": "outing-manager-default", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }, { "id": "outing-final-default", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] }
+      ],
+      "ccRule": { "timing": "workflow_completed", "memberIds": ["member-060", "member-078"], "departmentIds": [] }
+    },
+    {
+      "moduleName": "出勤休假",
+      "approvalTypeName": "加班",
+      "name": "加班审批流",
+      "status": "published",
+      "businessType": "leave",
+      "branches": [
+        { "id": "overtime-ops-russia", "name": "运营部 - 俄罗斯", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "overtime-russia", "field": "submitter.department", "operator": "eq", "value": "俄罗斯" }], "approvalSteps": [{ "id": "overtime-manager-russia", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "overtime-ops-kazakhstan", "name": "运营部 - 哈萨克斯坦", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "overtime-kazakhstan", "field": "submitter.department", "operator": "eq", "value": "哈萨克斯坦" }], "approvalSteps": [{ "id": "overtime-manager-kazakhstan", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "overtime-ops-default", "name": "运营部 - 其他", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "overtime-ops", "field": "submitter.department", "operator": "eq", "value": "运营部" }], "approvalSteps": [{ "id": "overtime-managers-ops", "name": "连续多级主管", "approverRule": { "type": "multi_supervisor", "supervisorLevels": "1-4" }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "overtime-default", "name": "其他人员", "isDefault": true, "conditionMode": "rules", "conditions": [], "approvalSteps": [{ "id": "overtime-manager-default", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] }
+      ],
+      "ccRule": { "timing": "workflow_completed", "memberIds": ["member-060"], "departmentIds": [] }
+    },
+    {
+      "moduleName": "出勤休假",
+      "approvalTypeName": "补卡申请",
+      "name": "补卡申请审批流",
+      "status": "published",
+      "businessType": "leave",
+      "branches": [
+        { "id": "punch-ops-russia", "name": "运营部 - 俄罗斯", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "punch-russia", "field": "submitter.department", "operator": "eq", "value": "俄罗斯" }], "approvalSteps": [{ "id": "punch-manager-russia", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }, { "id": "punch-final-russia", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "punch-ops-kazakhstan", "name": "运营部 - 哈萨克斯坦", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "punch-kazakhstan", "field": "submitter.department", "operator": "eq", "value": "哈萨克斯坦" }], "approvalSteps": [{ "id": "punch-manager-kazakhstan", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }, { "id": "punch-final-kazakhstan", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "punch-ops-default", "name": "运营部 - 其他", "isDefault": false, "conditionMode": "rules", "conditions": [{ "id": "punch-ops", "field": "submitter.department", "operator": "eq", "value": "运营部" }], "approvalSteps": [{ "id": "punch-managers-ops", "name": "连续多级主管", "approverRule": { "type": "multi_supervisor", "supervisorLevels": "1-4" }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }, { "id": "punch-final-ops", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] },
+        { "id": "punch-default", "name": "其他人员", "isDefault": true, "conditionMode": "rules", "conditions": [], "approvalSteps": [{ "id": "punch-manager-default", "name": "直接主管", "approverRule": { "type": "multi_supervisor", "supervisorDepth": 1 }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }, { "id": "punch-final-default", "name": "李绳瑶", "approverRule": { "type": "specific_members", "memberIds": ["member-060"] }, "approvalMode": "one_of", "emptyApproverAction": "block_submit" }] }
+      ],
+      "ccRule": { "timing": "workflow_completed", "memberIds": ["member-078"], "departmentIds": [] }
+    }
+  ]
+}

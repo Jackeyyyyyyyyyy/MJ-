@@ -9,6 +9,7 @@ import {
   ApprovalNotification,
   ApprovalRecord,
   ApprovalStatus,
+  ApprovalType,
   OrganizationDirectory,
   OrganizationSelectOptions,
   SystemAccount,
@@ -31,7 +32,9 @@ type BusinessFormInput = {
   businessFields: string[];
   amountFields?: string[];
   fileFields?: string[];
+  attachmentFields?: string[];
   dateFields?: string[];
+  dateTimeFields?: string[];
   optionalFields?: string[];
   multilineFields?: string[];
   memberFields?: string[];
@@ -42,8 +45,9 @@ type BusinessFormInput = {
   }>;
   detailFields?: Array<{
     field: string;
-    columns: string[];
+    columns: ApprovalType['detailFields'][number]['columns'];
   }>;
+  durationFields?: ApprovalType['durationFields'];
   visibleToUsers?: boolean;
 };
 
