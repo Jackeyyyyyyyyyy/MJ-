@@ -368,40 +368,63 @@ function scopeSupportsAmountCurrencyConditions(scope?: BusinessScopeOption | nul
 function getConditionFieldLabel(field: string) {
   if (field === 'amount') return '金额';
   if (field === 'currency') return '币种';
-  if (field === 'amount') return '金额';
   if (field === 'submitter.member') return '提交人';
   if (field === 'submitter.department') return '提交人部门';
+  if (field.startsWith(FORM_FIELD_PREFIX)) return `表单字段：${field.slice(FORM_FIELD_PREFIX.length)}`;
   return field;
 }
 
 function getConditionFieldKind(field: string): ConditionFieldKind {
   if (field === 'currency') return 'currency';
-  return 'number';
+  if (field === `${SUBMITTER_FIELD_PREFIX}department`) return 'department';
+  if (field === `${SUBMITTER_FIELD_PREFIX}member`) return 'member';
+  if (isNumericConditionFieldValue(field)) return 'number';
+  return 'text';
 }
 
 function getConditionOperatorOptions(field: string) {
   if (field === 'currency') {
     return conditionOperatorOptions.filter((option) => currencyConditionOperators.has(option.value));
   }
-  if (field === 'amount') {
+  const fieldKind = getConditionFieldKind(field);
+  if (fieldKind === 'department' || fieldKind === 'member') {
+    return conditionOperatorOptions.filter((option) => identityConditionOperators.has(option.value));
+  }
+  if (fieldKind === 'number') {
     return conditionOperatorOptions.filter((option) => numericConditionOperators.has(option.value));
   }
-  return conditionOperatorOptions.filter((option) => numericConditionOperators.has(option.value));
+  return conditionOperatorOptions.filter((option) => textConditionOperators.has(option.value));
 }
 
 function getFallbackConditionOperator(field: string): WorkflowConditionOperator {
   if (field === 'currency') return 'eq';
-  return 'lte';
+  if (getConditionFieldKind(field) === 'number') return 'lte';
+  return 'eq';
+}
+
+function getConditionFieldOptionsForScope(scope?: BusinessScopeOption | null): ConditionFieldOption[] {
+  const amountOptions: ConditionFieldOption[] = scopeSupportsAmountCurrencyConditions(scope)
+    ? [
+        { value: 'amount', label: '金额', kind: 'number' },
+        { value: 'currency', label: '币种', kind: 'currency' },
+      ]
+    : [];
+  const submitterOptions: ConditionFieldOption[] = [
+    { value: `${SUBMITTER_FIELD_PREFIX}department`, label: '提交人部门', kind: 'department' },
+    { value: `${SUBMITTER_FIELD_PREFIX}member`, label: '提交人', kind: 'member' },
+  ];
+  const formFieldOptions: ConditionFieldOption[] = (scope?.fields || []).map((field) => ({
+    value: `${FORM_FIELD_PREFIX}${field}`,
+    label: `表单字段：${field}`,
+    kind: isNumericConditionFieldValue(field) ? 'number' : 'text',
+  }));
+
+  return [...amountOptions, ...submitterOptions, ...formFieldOptions];
 }
 
 function getConditionFieldOptions(draft: WorkflowVersion | null): ConditionFieldOption[] {
   const scope = draft ? getBusinessScopeByNames(draft.basic.moduleName, draft.basic.approvalTypeName) : null;
-  if (!scopeSupportsAmountCurrencyConditions(scope)) return [];
-
-  return [
-    { value: 'amount', label: '金额', kind: 'number' },
-    { value: 'currency', label: '币种', kind: 'currency' },
-  ];
+  return getConditionFieldOptionsForScope(scope);
 }
 
 function defaultSubmitPermission(): SubmitPermissionRule {
@@ -850,12 +873,13 @@ function normalizeCondition(condition: Partial<WorkflowCondition> | undefined): 
   };
 }
 
-function getAllowedConditionFields(scope: BusinessScopeOption) {
-  if (!scopeSupportsAmountCurrencyConditions(scope)) return new Set<WorkflowConditionField>();
-  return new Set<WorkflowConditionField>(['amount', 'currency']);
+function getAllowedConditionFields(scope: BusinessScopeOption | null) {
+  return new Set<WorkflowConditionField>(
+    getConditionFieldOptionsForScope(scope).map((option) => option.value),
+  );
 }
 
-function getFallbackConditionField(scope: BusinessScopeOption): WorkflowConditionField {
+function getFallbackConditionField(scope: BusinessScopeOption | null): WorkflowConditionField {
   return getAllowedConditionFields(scope).values().next().value || '';
 }
 
@@ -1061,8 +1085,7 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
 
   const branches = draft.branches || [];
   const aiBranchIds = collectAiConditionBranchIds(flowNodesFromDraft(draft));
-  const scope = getBusinessScopeByNames(draft.basic?.moduleName, draft.basic?.approvalTypeName);
-  const canUseRuleConditions = scopeSupportsAmountCurrencyConditions(scope);
+  const canUseRuleConditions = getConditionFieldOptions(draft).length > 0;
   if (!branches.some((branch) => branch.isDefault)) {
     addValidationError(state, 'branches', '必须包含 default branch');
   }
@@ -1072,7 +1095,7 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
     const isAiBranch = branch.conditionMode === 'ai' || aiBranchIds.has(branch.id);
     if (!branch.isDefault && !isAiBranch) {
       if (!canUseRuleConditions) {
-        addValidationError(state, 'branches', `${branchLabel} 所属表单没有金额类字段，不能使用金额/币种条件分化`, branch.id);
+        addValidationError(state, 'branches', `${branchLabel} 当前表单没有可用条件字段`, branch.id);
       }
 
       if (branch.conditions.length === 0) {
@@ -2898,7 +2921,7 @@ function FlowConditionBranchEditor({
       <div className="space-y-3">
         {!fieldOptions.length && (
           <div className="rounded-xl bg-[#fff7e6] px-3 py-2 text-[12px] font-bold text-[#9a5b00]">
-            当前业务表单没有金额类字段，不能配置金额/币种条件分化。
+            当前业务表单没有可用条件字段，不能配置条件分化。
           </div>
         )}
         {conditions.map((condition, conditionIndex) => (
@@ -4343,7 +4366,7 @@ export default function WorkflowAdmin() {
   const addCondition = (branchId: string) => {
     const defaultField = conditionFieldOptionsForDraft[0]?.value;
     if (!defaultField) {
-      window.alert('当前业务表单没有金额类字段，不能添加金额/币种条件。');
+      window.alert('当前业务表单没有可用条件字段，不能添加条件。');
       return;
     }
 
@@ -4371,7 +4394,7 @@ export default function WorkflowAdmin() {
   const addBranch = () => {
     const defaultField = conditionFieldOptionsForDraft[0]?.value;
     if (!defaultField) {
-      window.alert('当前业务表单没有金额类字段，不能新增金额/币种条件分支。');
+      window.alert('当前业务表单没有可用条件字段，不能新增条件分支。');
       return;
     }
 
@@ -4585,7 +4608,7 @@ export default function WorkflowAdmin() {
 
   const insertFlowNode = (path: string[], index: number, kind: FlowInsertKind, branchCount?: number) => {
     if (kind === 'condition' && conditionFieldOptionsForDraft.length === 0) {
-      window.alert('当前业务表单没有金额类字段，不能添加金额/币种条件分化。');
+      window.alert('当前业务表单没有可用条件字段，不能添加条件分化。');
       return;
     }
 
@@ -4644,7 +4667,7 @@ export default function WorkflowAdmin() {
   const addFlowBranchCondition = (nodeId: string, branchId: string) => {
     const defaultField = conditionFieldOptionsForDraft[0]?.value;
     if (!defaultField) {
-      window.alert('当前业务表单没有金额类字段，不能添加金额/币种条件。');
+      window.alert('当前业务表单没有可用条件字段，不能添加条件。');
       return;
     }
 
@@ -5147,55 +5170,15 @@ export default function WorkflowAdmin() {
                             <option key={option.value} value={option.value}>{option.label}</option>
                           ))}
                         </select>
-                        {isNumericConditionFieldValue(condition.field) && condition.operator === 'between' ? (
-                          <>
-                            <input
-                              className="input-field text-[13px]"
-                              type="number"
-                              value={condition.amountMin ?? ''}
-                              onChange={(event) => updateCondition(branch.id, condition.id, { amountMin: event.target.value === '' ? undefined : Number(event.target.value) })}
-                              placeholder="下限"
-                            />
-                            <input
-                              className="input-field text-[13px]"
-                              type="number"
-                              value={condition.amountMax ?? ''}
-                              onChange={(event) => updateCondition(branch.id, condition.id, { amountMax: event.target.value === '' ? undefined : Number(event.target.value) })}
-                              placeholder="上限"
-                            />
-                          </>
-                        ) : isNumericConditionFieldValue(condition.field) && ['gt', 'gte'].includes(condition.operator) ? (
-                          <input
-                            className="input-field text-[13px] lg:col-span-2"
-                            type="number"
-                            value={condition.amountMin ?? ''}
-                            onChange={(event) => updateCondition(branch.id, condition.id, { amountMin: event.target.value === '' ? undefined : Number(event.target.value) })}
-                            placeholder="金额下限"
+                        <div className="lg:col-span-2">
+                          <ConditionValueControl
+                            condition={condition}
+                            branchId={branch.id}
+                            memberOptions={memberOptions}
+                            departmentOptions={departmentOptions}
+                            onUpdateCondition={updateCondition}
                           />
-                        ) : isNumericConditionFieldValue(condition.field) && ['lt', 'lte'].includes(condition.operator) ? (
-                          <input
-                            className="input-field text-[13px] lg:col-span-2"
-                            type="number"
-                            value={condition.amountMax ?? ''}
-                            onChange={(event) => updateCondition(branch.id, condition.id, { amountMax: event.target.value === '' ? undefined : Number(event.target.value) })}
-                            placeholder="金额上限"
-                          />
-                        ) : isNumericConditionFieldValue(condition.field) ? (
-                          <input
-                            className="input-field text-[13px] lg:col-span-2"
-                            type="number"
-                            value={condition.value || ''}
-                            onChange={(event) => updateCondition(branch.id, condition.id, { value: event.target.value })}
-                            placeholder="条件值"
-                          />
-                        ) : (
-                          <input
-                            className="input-field text-[13px] lg:col-span-2"
-                            value={condition.value || ''}
-                            onChange={(event) => updateCondition(branch.id, condition.id, { value: event.target.value })}
-                            placeholder="条件值"
-                          />
-                        )}
+                        </div>
                       </div>
                     ))}
 

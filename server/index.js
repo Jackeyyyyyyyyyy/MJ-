@@ -100,7 +100,7 @@ const STEP_REJECTED = 'rejected';
 const STEP_SKIPPED = 'skipped';
 const DEFAULT_ORGANIZATION_ID = 'default-org';
 const WORKFLOW_BUSINESS_TYPES = new Set(['reimbursement', 'purchase', 'leave', 'general']);
-const WORKFLOW_CONDITION_FIELDS = new Set(['amount', 'category', 'project', 'department']);
+const WORKFLOW_CONDITION_FIELDS = new Set(['amount', 'currency', 'category', 'project', 'department', 'submitter.member', 'submitter.department']);
 const WORKFLOW_CONDITION_OPERATORS = new Set(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq', 'contains', 'not_contains']);
 const NUMERIC_WORKFLOW_CONDITION_OPERATORS = new Set(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq']);
 const TEXT_WORKFLOW_CONDITION_OPERATORS = new Set(['eq', 'neq', 'contains', 'not_contains']);
@@ -970,6 +970,44 @@ function normalizeFileFields(fileFields, businessFields) {
   return normalizeConfiguredBusinessFields(fileFields, businessFields);
 }
 
+function normalizeOptionalFields(optionalFields, businessFields) {
+  return normalizeConfiguredBusinessFields(optionalFields, businessFields);
+}
+
+function normalizeMultilineFields(multilineFields, businessFields) {
+  return normalizeConfiguredBusinessFields(multilineFields, businessFields);
+}
+
+function normalizeMemberFields(memberFields, businessFields) {
+  return normalizeConfiguredBusinessFields(memberFields, businessFields);
+}
+
+function normalizeDepartmentFields(departmentFields, businessFields) {
+  return normalizeConfiguredBusinessFields(departmentFields, businessFields);
+}
+
+function normalizeSelectFields(selectFields, businessFields) {
+  const businessFieldSet = new Set(normalizeStringList(businessFields));
+  const fields = Array.isArray(selectFields) ? selectFields : [];
+  const selected = new Map();
+
+  fields.forEach((item) => {
+    const field = String(item?.field || '').trim();
+    if (!field || !businessFieldSet.has(field)) return;
+
+    const options = normalizeStringList(item?.options);
+    if (options.length === 0) return;
+    selected.set(field, { field, options });
+  });
+
+  return Array.from(selected.values());
+}
+
+function normalizeVisibleToUsers(value, fallback = true) {
+  if (value === undefined || value === null) return fallback;
+  return value !== false;
+}
+
 function isDateBusinessField(field) {
   const value = String(field || '');
   return value.includes('日期') || value.includes('时间');
@@ -994,15 +1032,25 @@ function normalizeApprovalSchema(schema) {
       .map((module) => ({
         name: String(module?.name || '').trim(),
         approvalTypes: (Array.isArray(module?.approvalTypes) ? module.approvalTypes : [])
-          .map((approvalType) => ({
-            name: String(approvalType?.name || '').trim(),
-            businessFields: normalizeStringList(approvalType?.businessFields),
-            amountFields: normalizeAmountFields(approvalType?.amountFields, approvalType?.businessFields),
-            fileFields: normalizeFileFields(approvalType?.fileFields, approvalType?.businessFields),
-            dateFields: normalizeDateFields(approvalType?.dateFields, approvalType?.businessFields),
-            commonFields: normalizeStringList(approvalType?.commonFields),
-            ...(String(approvalType?.notes || '').trim() ? { notes: String(approvalType.notes).trim() } : {}),
-          }))
+          .map((approvalType) => {
+            const businessFields = normalizeStringList(approvalType?.businessFields);
+
+            return {
+              name: String(approvalType?.name || '').trim(),
+              businessFields,
+              amountFields: normalizeAmountFields(approvalType?.amountFields, businessFields),
+              fileFields: normalizeFileFields(approvalType?.fileFields, businessFields),
+              dateFields: normalizeDateFields(approvalType?.dateFields, businessFields),
+              optionalFields: normalizeOptionalFields(approvalType?.optionalFields, businessFields),
+              multilineFields: normalizeMultilineFields(approvalType?.multilineFields, businessFields),
+              memberFields: normalizeMemberFields(approvalType?.memberFields, businessFields),
+              departmentFields: normalizeDepartmentFields(approvalType?.departmentFields, businessFields),
+              selectFields: normalizeSelectFields(approvalType?.selectFields, businessFields),
+              visibleToUsers: normalizeVisibleToUsers(approvalType?.visibleToUsers),
+              commonFields: normalizeStringList(approvalType?.commonFields),
+              ...(String(approvalType?.notes || '').trim() ? { notes: String(approvalType.notes).trim() } : {}),
+            };
+          })
           .filter((approvalType) => approvalType.name && approvalType.businessFields.length > 0),
       }))
       .filter((module) => module.name && module.approvalTypes.length > 0),
@@ -1025,7 +1073,20 @@ async function writeApprovalSchema(schema) {
   return normalized;
 }
 
-async function createBusinessForm({ moduleName, approvalTypeName, businessFields, amountFields, fileFields, dateFields }) {
+async function createBusinessForm({
+  moduleName,
+  approvalTypeName,
+  businessFields,
+  amountFields,
+  fileFields,
+  dateFields,
+  optionalFields,
+  multilineFields,
+  memberFields,
+  departmentFields,
+  selectFields,
+  visibleToUsers,
+}) {
   const schema = await readApprovalSchema();
   const nextModuleName = String(moduleName || '').trim();
   const nextApprovalTypeName = String(approvalTypeName || '').trim();
@@ -1033,6 +1094,12 @@ async function createBusinessForm({ moduleName, approvalTypeName, businessFields
   const nextAmountFields = normalizeAmountFields(amountFields, nextBusinessFields);
   const nextFileFields = normalizeFileFields(fileFields, nextBusinessFields);
   const nextDateFields = normalizeDateFields(dateFields, nextBusinessFields);
+  const nextOptionalFields = normalizeOptionalFields(optionalFields, nextBusinessFields);
+  const nextMultilineFields = normalizeMultilineFields(multilineFields, nextBusinessFields);
+  const nextMemberFields = normalizeMemberFields(memberFields, nextBusinessFields);
+  const nextDepartmentFields = normalizeDepartmentFields(departmentFields, nextBusinessFields);
+  const nextSelectFields = normalizeSelectFields(selectFields, nextBusinessFields);
+  const nextVisibleToUsers = normalizeVisibleToUsers(visibleToUsers);
 
   if (!nextModuleName || !nextApprovalTypeName || nextBusinessFields.length === 0) {
     throw createHttpError('missing business form fields', 400);
@@ -1058,13 +1125,32 @@ async function createBusinessForm({ moduleName, approvalTypeName, businessFields
     amountFields: nextAmountFields,
     fileFields: nextFileFields,
     dateFields: nextDateFields,
+    optionalFields: nextOptionalFields,
+    multilineFields: nextMultilineFields,
+    memberFields: nextMemberFields,
+    departmentFields: nextDepartmentFields,
+    selectFields: nextSelectFields,
+    visibleToUsers: nextVisibleToUsers,
     commonFields,
   });
 
   return writeApprovalSchema(schema);
 }
 
-async function updateBusinessForm(oldModuleName, oldApprovalTypeName, { moduleName, approvalTypeName, businessFields, amountFields, fileFields, dateFields }) {
+async function updateBusinessForm(oldModuleName, oldApprovalTypeName, {
+  moduleName,
+  approvalTypeName,
+  businessFields,
+  amountFields,
+  fileFields,
+  dateFields,
+  optionalFields,
+  multilineFields,
+  memberFields,
+  departmentFields,
+  selectFields,
+  visibleToUsers,
+}) {
   const schema = await readApprovalSchema();
   const currentModuleName = String(oldModuleName || '').trim();
   const currentApprovalTypeName = String(oldApprovalTypeName || '').trim();
@@ -1074,6 +1160,11 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, { moduleNa
   const nextAmountFields = normalizeAmountFields(amountFields, nextBusinessFields);
   const nextFileFields = normalizeFileFields(fileFields, nextBusinessFields);
   const nextDateFields = normalizeDateFields(dateFields, nextBusinessFields);
+  const nextOptionalFields = normalizeOptionalFields(optionalFields, nextBusinessFields);
+  const nextMultilineFields = normalizeMultilineFields(multilineFields, nextBusinessFields);
+  const nextMemberFields = normalizeMemberFields(memberFields, nextBusinessFields);
+  const nextDepartmentFields = normalizeDepartmentFields(departmentFields, nextBusinessFields);
+  const nextSelectFields = normalizeSelectFields(selectFields, nextBusinessFields);
 
   if (!currentModuleName || !currentApprovalTypeName) {
     throw createHttpError('missing business form target', 400);
@@ -1120,7 +1211,32 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, { moduleNa
     amountFields: nextAmountFields,
     fileFields: nextFileFields,
     dateFields: nextDateFields,
+    optionalFields: nextOptionalFields,
+    multilineFields: nextMultilineFields,
+    memberFields: nextMemberFields,
+    departmentFields: nextDepartmentFields,
+    selectFields: nextSelectFields,
+    visibleToUsers: normalizeVisibleToUsers(visibleToUsers, existingType.visibleToUsers !== false),
     commonFields: existingType.commonFields?.length ? existingType.commonFields : schema.commonFields,
+  });
+
+  return writeApprovalSchema(schema);
+}
+
+async function updateBusinessFormVisibility(items) {
+  const schema = await readApprovalSchema();
+  const updates = Array.isArray(items) ? items : [];
+
+  updates.forEach((item) => {
+    const moduleName = String(item?.moduleName || '').trim();
+    const approvalTypeName = String(item?.approvalTypeName || '').trim();
+    if (!moduleName || !approvalTypeName) return;
+
+    const module = schema.modules.find((schemaModule) => schemaModule.name === moduleName);
+    const approvalType = module?.approvalTypes.find((type) => type.name === approvalTypeName);
+    if (approvalType) {
+      approvalType.visibleToUsers = normalizeVisibleToUsers(item?.visibleToUsers);
+    }
   });
 
   return writeApprovalSchema(schema);
@@ -2039,7 +2155,6 @@ function isNumericWorkflowConditionField(field) {
   const normalizedField = normalizeWorkflowText(field);
   if (normalizedField === 'currency') return false;
   if (normalizedField === 'amount') return true;
-  return false;
   const label = normalizedField.startsWith('form:') ? normalizedField.slice(5) : normalizedField;
   return normalizedField === 'amount' || /金额|价格|费用|利润|汇率|数量|总额|时长|天数|小时|修改前|修改后/.test(label);
 }
@@ -2346,6 +2461,28 @@ function hashOrganizationDirectory(directory) {
       members: (directory.members || []).map(({ accountUsername: _accountUsername, ...member }) => member),
     }))
     .digest('hex');
+}
+
+function getOrganizationSelectOptions(directory) {
+  const departmentsById = new Map(directory.departments.map((department) => [department.id, department]));
+
+  return {
+    departments: directory.departments.map((department) => ({
+      id: department.id,
+      name: department.name,
+      ...(department.parentId ? { parentId: department.parentId } : {}),
+    })),
+    members: directory.members
+      .filter((member) => member.enabled !== false)
+      .map((member) => ({
+        id: member.id,
+        name: member.name,
+        departmentId: member.departmentId,
+        departmentName: departmentsById.get(member.departmentId)?.name || '',
+        title: member.title,
+      })),
+    ...(directory.updatedAt ? { updatedAt: directory.updatedAt } : {}),
+  };
 }
 
 async function readBundledOrganizationDirectory() {
@@ -4729,6 +4866,14 @@ app.get('/api/organization', authenticate, requireRoles('developer'), async (_re
   }
 });
 
+app.get('/api/organization/options', authenticate, async (_req, res, next) => {
+  try {
+    res.json(getOrganizationSelectOptions(await readOrganizationDirectory()));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.put('/api/organization', authenticate, requireRoles('developer'), async (req, res, next) => {
   try {
     const { departments, members } = req.body || {};
@@ -4766,6 +4911,12 @@ app.post('/api/business-forms', authenticate, requireRoles('developer'), async (
       amountFields: req.body?.amountFields,
       fileFields: req.body?.fileFields,
       dateFields: req.body?.dateFields,
+      optionalFields: req.body?.optionalFields,
+      multilineFields: req.body?.multilineFields,
+      memberFields: req.body?.memberFields,
+      departmentFields: req.body?.departmentFields,
+      selectFields: req.body?.selectFields,
+      visibleToUsers: req.body?.visibleToUsers,
     });
 
     res.status(201).json(schema);
@@ -4786,6 +4937,12 @@ app.patch('/api/business-forms/:moduleName/:approvalTypeName', authenticate, req
         amountFields: req.body?.amountFields,
         fileFields: req.body?.fileFields,
         dateFields: req.body?.dateFields,
+        optionalFields: req.body?.optionalFields,
+        multilineFields: req.body?.multilineFields,
+        memberFields: req.body?.memberFields,
+        departmentFields: req.body?.departmentFields,
+        selectFields: req.body?.selectFields,
+        visibleToUsers: req.body?.visibleToUsers,
       },
     );
 
@@ -4798,6 +4955,14 @@ app.patch('/api/business-forms/:moduleName/:approvalTypeName', authenticate, req
 app.delete('/api/business-forms/:moduleName/:approvalTypeName', authenticate, requireRoles('developer'), async (req, res, next) => {
   try {
     res.json(await deleteBusinessForm(req.params.moduleName, req.params.approvalTypeName));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/business-form-visibility', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    res.json(await updateBusinessFormVisibility(req.body?.items));
   } catch (error) {
     next(error);
   }

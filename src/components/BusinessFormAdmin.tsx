@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, DollarSign, Edit3, Loader2, Lock, Paperclip, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
+import { AlignLeft, Asterisk, Building2, Calendar, DollarSign, Edit3, Eye, EyeOff, ListChecks, Loader2, Lock, Paperclip, Plus, RotateCcw, Save, Search, Trash2, UserRound, X } from 'lucide-react';
 import { approvalSchema, replaceApprovalSchema } from '../approvalSchema';
 import { storage } from '../storage';
 import { ApprovalType, Module } from '../types';
@@ -25,6 +25,17 @@ function getBusinessFormKey(moduleName: string, approvalTypeName: string) {
 
 function isProtectedBusinessForm(moduleName: string, approvalTypeName: string) {
   return protectedBusinessForms.has(getBusinessFormKey(moduleName, approvalTypeName));
+}
+
+function getInitialVisibilityMap() {
+  const entries = approvalSchema.modules.flatMap((module) => (
+    module.approvalTypes.map((type) => [
+      getBusinessFormKey(module.name, type.name),
+      type.visibleToUsers !== false,
+    ] as const)
+  ));
+
+  return Object.fromEntries(entries);
 }
 
 function normalizeFields(value: string) {
@@ -62,6 +73,46 @@ function getInitialDateFields(type: ApprovalType) {
   return sourceFields.filter((field) => businessFieldSet.has(field));
 }
 
+function getInitialOptionalFields(type: ApprovalType) {
+  const configuredFields = Array.isArray(type.optionalFields) ? type.optionalFields : [];
+  const businessFieldSet = new Set(type.businessFields);
+  return configuredFields.filter((field) => businessFieldSet.has(field));
+}
+
+function getInitialMultilineFields(type: ApprovalType) {
+  const configuredFields = Array.isArray(type.multilineFields) ? type.multilineFields : [];
+  const businessFieldSet = new Set(type.businessFields);
+  return configuredFields.filter((field) => businessFieldSet.has(field));
+}
+
+function getInitialMemberFields(type: ApprovalType) {
+  const configuredFields = Array.isArray(type.memberFields) ? type.memberFields : [];
+  const businessFieldSet = new Set(type.businessFields);
+  return configuredFields.filter((field) => businessFieldSet.has(field));
+}
+
+function getInitialDepartmentFields(type: ApprovalType) {
+  const configuredFields = Array.isArray(type.departmentFields) ? type.departmentFields : [];
+  const businessFieldSet = new Set(type.businessFields);
+  return configuredFields.filter((field) => businessFieldSet.has(field));
+}
+
+function getInitialSelectFieldOptions(type: ApprovalType) {
+  const businessFieldSet = new Set(type.businessFields);
+  return (Array.isArray(type.selectFields) ? type.selectFields : []).reduce<Record<string, string>>((optionsByField, item) => {
+    const field = String(item?.field || '').trim();
+    if (!field || !businessFieldSet.has(field)) return optionsByField;
+
+    const options = (Array.isArray(item.options) ? item.options : [])
+      .map((option) => String(option || '').trim())
+      .filter(Boolean);
+    if (options.length > 0) {
+      optionsByField[field] = options.join('\n');
+    }
+    return optionsByField;
+  }, {});
+}
+
 function isAmountCurrencyField(field: string) {
   return /金额|价格|利润|总额/.test(field);
 }
@@ -87,10 +138,18 @@ export default function BusinessFormAdmin() {
   const [amountFields, setAmountFields] = React.useState<string[]>([]);
   const [fileFields, setFileFields] = React.useState<string[]>([]);
   const [dateFields, setDateFields] = React.useState<string[]>([]);
+  const [optionalFields, setOptionalFields] = React.useState<string[]>([]);
+  const [multilineFields, setMultilineFields] = React.useState<string[]>([]);
+  const [memberFields, setMemberFields] = React.useState<string[]>([]);
+  const [departmentFields, setDepartmentFields] = React.useState<string[]>([]);
+  const [selectFieldOptions, setSelectFieldOptions] = React.useState<Record<string, string>>({});
   const [editingTarget, setEditingTarget] = React.useState<EditingTarget | null>(null);
+  const [visibilityMap, setVisibilityMap] = React.useState<Record<string, boolean>>(() => getInitialVisibilityMap());
+  const [visibilityQuery, setVisibilityQuery] = React.useState('');
   const [message, setMessage] = React.useState('');
   const [error, setError] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isVisibilitySaving, setIsVisibilitySaving] = React.useState(false);
 
   const businessFields = React.useMemo(() => normalizeFields(fieldText), [fieldText]);
   const selectedAmountFields = React.useMemo(
@@ -105,10 +164,54 @@ export default function BusinessFormAdmin() {
     () => dateFields.filter((field) => businessFields.includes(field)),
     [dateFields, businessFields],
   );
+  const selectedOptionalFields = React.useMemo(
+    () => optionalFields.filter((field) => businessFields.includes(field)),
+    [optionalFields, businessFields],
+  );
+  const selectedMultilineFields = React.useMemo(
+    () => multilineFields.filter((field) => businessFields.includes(field)),
+    [multilineFields, businessFields],
+  );
+  const selectedMemberFields = React.useMemo(
+    () => memberFields.filter((field) => businessFields.includes(field)),
+    [memberFields, businessFields],
+  );
+  const selectedDepartmentFields = React.useMemo(
+    () => departmentFields.filter((field) => businessFields.includes(field)),
+    [departmentFields, businessFields],
+  );
+  const selectedSelectFields = React.useMemo(
+    () => businessFields
+      .map((field) => ({
+        field,
+        options: normalizeFields(selectFieldOptions[field] || ''),
+      }))
+      .filter((item) => item.options.length > 0),
+    [businessFields, selectFieldOptions],
+  );
   const hasAmountCurrencyField = selectedAmountFields.length > 0;
   const hasCurrencyOnlyField = businessFields.some(isCurrencyOnlyField);
   const moduleOptions = approvalSchema.modules.map((module) => module.name);
   const isEditing = Boolean(editingTarget);
+  const allForms = React.useMemo(() => approvalSchema.modules.flatMap((module) => (
+    module.approvalTypes.map((type) => ({
+      key: getBusinessFormKey(module.name, type.name),
+      moduleName: module.name,
+      approvalTypeName: type.name,
+    }))
+  )), []);
+  const visibleCount = allForms.filter((form) => visibilityMap[form.key] !== false).length;
+  const hiddenCount = allForms.length - visibleCount;
+  const visibilityKeyword = visibilityQuery.trim().toLowerCase();
+  const filteredModules = approvalSchema.modules
+    .map((module) => ({
+      ...module,
+      approvalTypes: module.approvalTypes.filter((type) => {
+        if (!visibilityKeyword) return true;
+        return `${module.name} ${type.name}`.toLowerCase().includes(visibilityKeyword);
+      }),
+    }))
+    .filter((module) => module.approvalTypes.length > 0);
 
   const updateBusinessFields = (fields: string[]) => {
     setFieldText([...new Set(fields.map((field) => field.trim()).filter(Boolean))].join('\n'));
@@ -122,6 +225,14 @@ export default function BusinessFormAdmin() {
     ));
     setFileFields((current) => current.filter((item) => item !== field));
     setDateFields((current) => current.filter((item) => item !== field));
+    setMultilineFields((current) => current.filter((item) => item !== field));
+    setMemberFields((current) => current.filter((item) => item !== field));
+    setDepartmentFields((current) => current.filter((item) => item !== field));
+    setSelectFieldOptions((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
   };
 
   const toggleFileField = (field: string) => {
@@ -132,6 +243,14 @@ export default function BusinessFormAdmin() {
     ));
     setAmountFields((current) => current.filter((item) => item !== field));
     setDateFields((current) => current.filter((item) => item !== field));
+    setMultilineFields((current) => current.filter((item) => item !== field));
+    setMemberFields((current) => current.filter((item) => item !== field));
+    setDepartmentFields((current) => current.filter((item) => item !== field));
+    setSelectFieldOptions((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
   };
 
   const toggleDateField = (field: string) => {
@@ -142,6 +261,103 @@ export default function BusinessFormAdmin() {
     ));
     setAmountFields((current) => current.filter((item) => item !== field));
     setFileFields((current) => current.filter((item) => item !== field));
+    setMultilineFields((current) => current.filter((item) => item !== field));
+    setMemberFields((current) => current.filter((item) => item !== field));
+    setDepartmentFields((current) => current.filter((item) => item !== field));
+    setSelectFieldOptions((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const toggleOptionalField = (field: string) => {
+    setOptionalFields((current) => (
+      current.includes(field)
+        ? current.filter((item) => item !== field)
+        : [...current, field]
+    ));
+  };
+
+  const setAllVisible = (visible: boolean) => {
+    setVisibilityMap(Object.fromEntries(allForms.map((form) => [form.key, visible])));
+  };
+
+  const toggleFormVisibility = (moduleName: string, approvalTypeName: string) => {
+    const key = getBusinessFormKey(moduleName, approvalTypeName);
+    setVisibilityMap((current) => ({
+      ...current,
+      [key]: current[key] === false,
+    }));
+  };
+
+  const toggleMultilineField = (field: string) => {
+    setMultilineFields((current) => (
+      current.includes(field)
+        ? current.filter((item) => item !== field)
+        : [...current, field]
+    ));
+    setAmountFields((current) => current.filter((item) => item !== field));
+    setFileFields((current) => current.filter((item) => item !== field));
+    setDateFields((current) => current.filter((item) => item !== field));
+    setMemberFields((current) => current.filter((item) => item !== field));
+    setDepartmentFields((current) => current.filter((item) => item !== field));
+    setSelectFieldOptions((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const toggleMemberField = (field: string) => {
+    setMemberFields((current) => (
+      current.includes(field)
+        ? current.filter((item) => item !== field)
+        : [...current, field]
+    ));
+    setAmountFields((current) => current.filter((item) => item !== field));
+    setFileFields((current) => current.filter((item) => item !== field));
+    setDateFields((current) => current.filter((item) => item !== field));
+    setMultilineFields((current) => current.filter((item) => item !== field));
+    setDepartmentFields((current) => current.filter((item) => item !== field));
+    setSelectFieldOptions((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const toggleDepartmentField = (field: string) => {
+    setDepartmentFields((current) => (
+      current.includes(field)
+        ? current.filter((item) => item !== field)
+        : [...current, field]
+    ));
+    setAmountFields((current) => current.filter((item) => item !== field));
+    setFileFields((current) => current.filter((item) => item !== field));
+    setDateFields((current) => current.filter((item) => item !== field));
+    setMultilineFields((current) => current.filter((item) => item !== field));
+    setMemberFields((current) => current.filter((item) => item !== field));
+    setSelectFieldOptions((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const updateSelectFieldOptions = (field: string, value: string) => {
+    setSelectFieldOptions((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    if (value.trim()) {
+      setAmountFields((current) => current.filter((item) => item !== field));
+      setFileFields((current) => current.filter((item) => item !== field));
+      setDateFields((current) => current.filter((item) => item !== field));
+      setMultilineFields((current) => current.filter((item) => item !== field));
+      setMemberFields((current) => current.filter((item) => item !== field));
+      setDepartmentFields((current) => current.filter((item) => item !== field));
+    }
   };
 
   const resetForm = () => {
@@ -151,6 +367,11 @@ export default function BusinessFormAdmin() {
     setAmountFields([]);
     setFileFields([]);
     setDateFields([]);
+    setOptionalFields([]);
+    setMultilineFields([]);
+    setMemberFields([]);
+    setDepartmentFields([]);
+    setSelectFieldOptions({});
     setEditingTarget(null);
     setError('');
   };
@@ -167,6 +388,11 @@ export default function BusinessFormAdmin() {
     setAmountFields(getInitialAmountFields(type));
     setFileFields(getInitialFileFields(type));
     setDateFields(getInitialDateFields(type));
+    setOptionalFields(getInitialOptionalFields(type));
+    setMultilineFields(getInitialMultilineFields(type));
+    setMemberFields(getInitialMemberFields(type));
+    setDepartmentFields(getInitialDepartmentFields(type));
+    setSelectFieldOptions(getInitialSelectFieldOptions(type));
     setEditingTarget({
       moduleName: module.name,
       approvalTypeName: type.name,
@@ -227,6 +453,11 @@ export default function BusinessFormAdmin() {
             amountFields: selectedAmountFields,
             fileFields: selectedFileFields,
             dateFields: selectedDateFields,
+            optionalFields: selectedOptionalFields,
+            multilineFields: selectedMultilineFields,
+            memberFields: selectedMemberFields,
+            departmentFields: selectedDepartmentFields,
+            selectFields: selectedSelectFields,
           })
         : await storage.createBusinessForm({
             moduleName: nextModuleName,
@@ -235,6 +466,11 @@ export default function BusinessFormAdmin() {
             amountFields: selectedAmountFields,
             fileFields: selectedFileFields,
             dateFields: selectedDateFields,
+            optionalFields: selectedOptionalFields,
+            multilineFields: selectedMultilineFields,
+            memberFields: selectedMemberFields,
+            departmentFields: selectedDepartmentFields,
+            selectFields: selectedSelectFields,
           });
 
       replaceApprovalSchema(nextSchema);
@@ -246,6 +482,29 @@ export default function BusinessFormAdmin() {
       setError(submitError instanceof Error ? submitError.message : '保存失败，请稍后再试。');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSaveVisibility = async () => {
+    setMessage('');
+    setError('');
+    setIsVisibilitySaving(true);
+
+    try {
+      const nextSchema = await storage.updateBusinessFormVisibility(
+        allForms.map((form) => ({
+          moduleName: form.moduleName,
+          approvalTypeName: form.approvalTypeName,
+          visibleToUsers: visibilityMap[form.key] !== false,
+        })),
+      );
+      replaceApprovalSchema(nextSchema);
+      setVisibilityMap(getInitialVisibilityMap());
+      setMessage('表单显示范围已保存，员工端入口和左侧业务模块已同步刷新。');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '保存显示范围失败，请稍后再试。');
+    } finally {
+      setIsVisibilitySaving(false);
     }
   };
 
@@ -320,6 +579,235 @@ export default function BusinessFormAdmin() {
               className="input-field min-h-[220px] resize-y py-3 text-[14px] leading-7"
             />
           </label>
+
+          <div className="rounded-2xl border border-[#ffd8dc] bg-[#fff8f8] p-4">
+            <div className="space-y-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
+                  <Asterisk size={15} strokeWidth={2.8} />
+                  非必填字段
+                </div>
+                <p className="mt-1 text-[12px] font-semibold text-medium-gray">
+                  默认所有业务字段都是必填。勾选后，该字段在用户发起申请时可以留空；未勾选字段会显示红色星号。
+                </p>
+              </div>
+              {businessFields.length > 0 ? (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {businessFields.map((field) => {
+                    const checked = selectedOptionalFields.includes(field);
+
+                    return (
+                      <label
+                        key={field}
+                        className={cn(
+                          'flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border bg-white px-3 py-2 text-[12px] font-black transition-colors',
+                          checked
+                            ? 'border-rose-400 text-rose-700 shadow-sm'
+                            : 'border-border-silver text-midnight-graphite hover:border-rose-200',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleOptionalField(field)}
+                          className="h-4 w-4 accent-rose-500"
+                        />
+                        <span className="min-w-0 truncate">{field}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
+                  先填写业务字段，再选择哪些字段允许留空。
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[#e0e7ff] bg-[#f8faff] p-4">
+            <div className="space-y-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
+                  <ListChecks size={15} strokeWidth={2.8} />
+                  选项字段
+                </div>
+                <p className="mt-1 text-[12px] font-semibold text-medium-gray">
+                  给字段填写选项后，用户发起申请时会显示下拉选择。一行一个选项，适合类型、是否、用途、地区等字段。
+                </p>
+              </div>
+              {businessFields.length > 0 ? (
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {businessFields.map((field) => {
+                    const optionText = selectFieldOptions[field] || '';
+                    const active = normalizeFields(optionText).length > 0;
+
+                    return (
+                      <label
+                        key={field}
+                        className={cn(
+                          'block rounded-xl border bg-white p-3 transition-colors',
+                          active ? 'border-indigo-400 shadow-sm' : 'border-border-silver',
+                        )}
+                      >
+                        <span className={cn(
+                          'block truncate text-[12px] font-black',
+                          active ? 'text-indigo-700' : 'text-midnight-graphite',
+                        )}>
+                          {field}
+                        </span>
+                        <textarea
+                          value={optionText}
+                          onChange={(event) => updateSelectFieldOptions(field, event.target.value)}
+                          placeholder={'选项一\n选项二'}
+                          className="mt-2 min-h-[86px] w-full resize-y rounded-lg border border-border-silver bg-canvas-white px-3 py-2 text-[12px] font-semibold text-midnight-graphite outline-none transition-colors focus:border-indigo-400"
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
+                  先填写业务字段，再为字段配置下拉选项。
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[#e6e0d4] bg-[#fffdf8] p-4">
+            <div className="space-y-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
+                  <AlignLeft size={15} strokeWidth={2.8} />
+                  多行文本字段
+                </div>
+                <p className="mt-1 text-[12px] font-semibold text-medium-gray">
+                  适合原因说明、备注、详细描述这类内容较长的字段。
+                </p>
+              </div>
+              {businessFields.length > 0 ? (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {businessFields.map((field) => {
+                    const checked = selectedMultilineFields.includes(field);
+
+                    return (
+                      <label
+                        key={field}
+                        className={cn(
+                          'flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border bg-white px-3 py-2 text-[12px] font-black transition-colors',
+                          checked
+                            ? 'border-amber-500 text-amber-700 shadow-sm'
+                            : 'border-border-silver text-midnight-graphite hover:border-amber-200',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleMultilineField(field)}
+                          className="h-4 w-4 accent-amber-600"
+                        />
+                        <span className="min-w-0 truncate">{field}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
+                  先填写业务字段，再选择哪些字段是多行文本。
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[#d8e8ff] bg-[#f7fbff] p-4">
+            <div className="space-y-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
+                  <UserRound size={15} strokeWidth={2.8} />
+                  人员字段
+                </div>
+                <p className="mt-1 text-[12px] font-semibold text-medium-gray">
+                  适合申请人选择同事、对接人、负责人、交接人等字段。
+                </p>
+              </div>
+              {businessFields.length > 0 ? (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {businessFields.map((field) => {
+                    const checked = selectedMemberFields.includes(field);
+
+                    return (
+                      <label
+                        key={field}
+                        className={cn(
+                          'flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border bg-white px-3 py-2 text-[12px] font-black transition-colors',
+                          checked
+                            ? 'border-sky-500 text-sky-700 shadow-sm'
+                            : 'border-border-silver text-midnight-graphite hover:border-sky-200',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleMemberField(field)}
+                          className="h-4 w-4 accent-sky-600"
+                        />
+                        <span className="min-w-0 truncate">{field}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
+                  先填写业务字段，再选择哪些字段是人员字段。
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[#dbe8ce] bg-[#fbfff7] p-4">
+            <div className="space-y-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
+                  <Building2 size={15} strokeWidth={2.8} />
+                  部门字段
+                </div>
+                <p className="mt-1 text-[12px] font-semibold text-medium-gray">
+                  适合费用归属部门、申请部门、调入/调出部门等字段。
+                </p>
+              </div>
+              {businessFields.length > 0 ? (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {businessFields.map((field) => {
+                    const checked = selectedDepartmentFields.includes(field);
+
+                    return (
+                      <label
+                        key={field}
+                        className={cn(
+                          'flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border bg-white px-3 py-2 text-[12px] font-black transition-colors',
+                          checked
+                            ? 'border-lime-500 text-lime-700 shadow-sm'
+                            : 'border-border-silver text-midnight-graphite hover:border-lime-200',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleDepartmentField(field)}
+                          className="h-4 w-4 accent-lime-600"
+                        />
+                        <span className="min-w-0 truncate">{field}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
+                  先填写业务字段，再选择哪些字段是部门字段。
+                </div>
+              )}
+            </div>
+          </div>
 
           <div className="rounded-2xl border border-[#d8e8ff] bg-[#f5fbff] p-4">
             <div className="space-y-3">
@@ -467,6 +955,7 @@ export default function BusinessFormAdmin() {
                 const isSelectedAmountField = selectedAmountFields.includes(field);
                 const isSelectedFileField = selectedFileFields.includes(field);
                 const isSelectedDateField = selectedDateFields.includes(field);
+                const isSelectedOptionalField = selectedOptionalFields.includes(field);
                 const fieldKindLabel = isSelectedAmountField
                   ? '金额+币种'
                   : isSelectedFileField
@@ -494,6 +983,12 @@ export default function BusinessFormAdmin() {
                     )}
                   >
                     {field}
+                    <span className={cn(
+                      'rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black',
+                      isSelectedOptionalField ? 'text-rose-700' : 'text-rose-500',
+                    )}>
+                      {isSelectedOptionalField ? '非必填' : '必填'}
+                    </span>
                     {fieldKindLabel && (
                       <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black">
                         {fieldKindLabel}
@@ -523,26 +1018,78 @@ export default function BusinessFormAdmin() {
         </form>
 
         <aside className="space-y-4 rounded-2xl border border-border-silver bg-canvas-white p-5">
-          <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
-            <Plus size={15} strokeWidth={3} />
-            已有业务
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
+              <Plus size={15} strokeWidth={3} />
+              已有业务
+            </div>
+            <div className="flex shrink-0 overflow-hidden rounded-full bg-white text-[10px] font-black shadow-sm">
+              <span className="px-2.5 py-1 text-emerald-700">{visibleCount} 显示</span>
+              <span className="border-l border-border-silver px-2.5 py-1 text-medium-gray">{hiddenCount} 隐藏</span>
+            </div>
           </div>
+
+          <label className="relative block">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-light-silver" />
+            <input
+              value={visibilityQuery}
+              onChange={(event) => setVisibilityQuery(event.target.value)}
+              placeholder="搜索模块或表单"
+              className="input-field h-11 pl-10 text-[13px]"
+            />
+          </label>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setAllVisible(true)}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-white px-3 text-[12px] font-black text-midnight-graphite shadow-sm transition-colors hover:text-interactive-blue"
+            >
+              <Eye size={14} strokeWidth={2.6} />
+              全部显示
+            </button>
+            <button
+              type="button"
+              onClick={() => setAllVisible(false)}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-white px-3 text-[12px] font-black text-midnight-graphite shadow-sm transition-colors hover:text-rose-600"
+            >
+              <EyeOff size={14} strokeWidth={2.6} />
+              全部隐藏
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void handleSaveVisibility()}
+            disabled={isVisibilitySaving}
+            className={cn('btn-primary h-11 w-full text-[13px] font-black', isVisibilitySaving && 'opacity-70')}
+          >
+            {isVisibilitySaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+            <span>{isVisibilitySaving ? '正在保存显示范围' : '保存显示范围'}</span>
+          </button>
+
           <div className="max-h-[560px] space-y-3 overflow-y-auto pr-1">
-            {approvalSchema.modules.map((module) => (
+            {filteredModules.map((module) => (
               <div key={module.name} className="rounded-xl bg-white p-3 shadow-sm">
-                <div className="text-[13px] font-black text-midnight-graphite">{module.name}</div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="truncate text-[13px] font-black text-midnight-graphite">{module.name}</div>
+                  <span className="shrink-0 rounded-full bg-lightest-gray-background px-2 py-0.5 text-[10px] font-black text-medium-gray">
+                    {module.approvalTypes.length} 个表单
+                  </span>
+                </div>
                 <div className="mt-2 space-y-2">
                   {module.approvalTypes.map((type) => {
                     const isActive = editingTarget?.moduleName === module.name
                       && editingTarget?.approvalTypeName === type.name;
                     const isProtected = isProtectedBusinessForm(module.name, type.name);
+                    const isVisible = visibilityMap[getBusinessFormKey(module.name, type.name)] !== false;
 
                     return (
                       <div
                         key={type.name}
                         className={cn(
                           'rounded-lg px-3 py-2 transition-colors',
-                          isActive ? 'bg-[#e7f1ff]' : 'bg-lightest-gray-background',
+                          isActive ? 'bg-[#e7f1ff]' : isVisible ? 'bg-lightest-gray-background' : 'bg-[#f1f2f5]',
                         )}
                       >
                         <div className="flex items-center gap-2">
@@ -556,10 +1103,29 @@ export default function BusinessFormAdmin() {
                                 </span>
                               )}
                             </div>
-                            <div className="mt-0.5 text-[11px] font-semibold text-medium-gray">
-                              {type.businessFields.length} 个字段
+                            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-medium-gray">
+                              <span>{type.businessFields.length} 个字段</span>
+                              <span className={cn(
+                                'rounded-full px-2 py-0.5 text-[10px] font-black',
+                                isVisible ? 'bg-emerald-50 text-emerald-700' : 'bg-white text-medium-gray',
+                              )}>
+                                {isVisible ? '员工可见' : '已隐藏'}
+                              </span>
                             </div>
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => toggleFormVisibility(module.name, type.name)}
+                            title={isVisible ? '隐藏员工入口' : '显示到员工入口'}
+                            aria-label={isVisible ? '隐藏员工入口' : '显示到员工入口'}
+                            className={cn(
+                              'inline-flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white text-[0px] shadow-sm transition-colors',
+                              isVisible ? 'text-emerald-700 hover:text-rose-600' : 'text-medium-gray hover:text-interactive-blue',
+                            )}
+                          >
+                            {isVisible ? <Eye size={12} strokeWidth={2.6} /> : <EyeOff size={12} strokeWidth={2.6} />}
+                            {isVisible ? '隐藏' : '显示'}
+                          </button>
                           <button
                             type="button"
                             onClick={() => startEditing(module, type)}
@@ -589,6 +1155,11 @@ export default function BusinessFormAdmin() {
                 </div>
               </div>
             ))}
+            {filteredModules.length === 0 && (
+              <div className="rounded-xl bg-white px-4 py-6 text-center text-[12px] font-bold text-light-gray shadow-sm">
+                没有匹配的业务表单
+              </div>
+            )}
           </div>
         </aside>
       </div>

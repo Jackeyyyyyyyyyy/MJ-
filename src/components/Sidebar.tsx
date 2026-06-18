@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { approvalSchema } from '../approvalSchema';
+import { approvalSchema, getVisibleApprovalModules } from '../approvalSchema';
 import { AdminView, Role } from '../types';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -57,9 +57,10 @@ export default function Sidebar({
   const isSuperAdminPerspective = Boolean(isSuperAdmin && currentPerspective === 'developer');
   const canUseAiAssistant = currentPerspective === 'boss' || isSuperAdminPerspective;
   const isAiAssistantActive = activeAdminView === 'ai-assistant' || activeAdminView === 'ai-branch-logs';
+  const businessModules = isSuperAdminPerspective ? approvalSchema.modules : getVisibleApprovalModules();
   const [isAiAssistantExpanded, setIsAiAssistantExpanded] = useState(true);
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({
-    [approvalSchema.modules[0].name]: true,
+    [businessModules[0]?.name || '']: true,
   });
 
   const toggleModule = (moduleName: string) => {
@@ -241,7 +242,7 @@ export default function Sidebar({
             <span>业务模块</span>
           </div>
           <div className="space-y-0.5">
-            {approvalSchema.modules.map((module) => (
+            {businessModules.map((module) => (
               <div key={module.name} className="space-y-0.5">
                 <button
                   onClick={() => toggleModule(module.name)}

@@ -10,6 +10,7 @@ import {
   ApprovalRecord,
   ApprovalStatus,
   OrganizationDirectory,
+  OrganizationSelectOptions,
   SystemAccount,
   WorkflowTemplate,
   WorkflowTemplateInput,
@@ -31,6 +32,21 @@ type BusinessFormInput = {
   amountFields?: string[];
   fileFields?: string[];
   dateFields?: string[];
+  optionalFields?: string[];
+  multilineFields?: string[];
+  memberFields?: string[];
+  departmentFields?: string[];
+  selectFields?: Array<{
+    field: string;
+    options: string[];
+  }>;
+  visibleToUsers?: boolean;
+};
+
+type BusinessFormVisibilityInput = {
+  moduleName: string;
+  approvalTypeName: string;
+  visibleToUsers: boolean;
 };
 
 interface RequestOptions {
@@ -145,6 +161,13 @@ export const storage = {
     );
   },
 
+  updateBusinessFormVisibility(items: BusinessFormVisibilityInput[]): Promise<Schema> {
+    return request<Schema>('/business-form-visibility', {
+      method: 'PATCH',
+      body: JSON.stringify({ items }),
+    }, { skipImpersonation: true });
+  },
+
   getRecords(): Promise<ApprovalRecord[]> {
     return request<ApprovalRecord[]>('/records');
   },
@@ -251,6 +274,10 @@ export const storage = {
 
   getOrganizationDirectory(): Promise<OrganizationDirectory> {
     return request<OrganizationDirectory>('/organization', undefined, { skipImpersonation: true });
+  },
+
+  getOrganizationOptions(): Promise<OrganizationSelectOptions> {
+    return request<OrganizationSelectOptions>('/organization/options');
   },
 
   saveOrganizationDirectory(directory: OrganizationDirectory): Promise<OrganizationDirectory> {

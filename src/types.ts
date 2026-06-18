@@ -50,6 +50,22 @@ export interface OrganizationDirectory {
   updatedAt?: string;
 }
 
+export interface OrganizationSelectOptions {
+  departments: Array<{
+    id: string;
+    name: string;
+    parentId?: string;
+  }>;
+  members: Array<{
+    id: string;
+    name: string;
+    departmentId: string;
+    departmentName: string;
+    title: string;
+  }>;
+  updatedAt?: string;
+}
+
 export interface ApproverRule {
   type: ApproverRuleType;
   memberIds?: string[];
@@ -314,6 +330,15 @@ export interface ApprovalType {
   amountFields?: string[];
   fileFields?: string[];
   dateFields?: string[];
+  optionalFields?: string[];
+  multilineFields?: string[];
+  memberFields?: string[];
+  departmentFields?: string[];
+  selectFields?: Array<{
+    field: string;
+    options: string[];
+  }>;
+  visibleToUsers?: boolean;
   commonFields: string[];
   notes?: string;
 }

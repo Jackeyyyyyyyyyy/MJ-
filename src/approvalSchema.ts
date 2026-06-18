@@ -1,4 +1,4 @@
-import { Schema } from './types';
+import { ApprovalType, Module, Schema } from './types';
 
 export const approvalSchema: Schema = {
   "systemName": "MJ审批",
@@ -576,4 +576,17 @@ export function replaceApprovalSchema(nextSchema: Schema, options: { notify?: bo
   if (options.notify !== false && typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('approval-schema-updated'));
   }
+}
+
+export function isApprovalTypeVisibleToUsers(type: ApprovalType) {
+  return type.visibleToUsers !== false;
+}
+
+export function getVisibleApprovalModules(modules: Module[] = approvalSchema.modules): Module[] {
+  return modules
+    .map((module) => ({
+      ...module,
+      approvalTypes: module.approvalTypes.filter(isApprovalTypeVisibleToUsers),
+    }))
+    .filter((module) => module.approvalTypes.length > 0);
 }

@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, ChevronRight, Upload, Calendar, DollarSign, FileText, Plus } from 'lucide-react';
-import { approvalSchema } from '../approvalSchema';
+import { X, ChevronRight, Upload, Calendar, DollarSign, FileText, Plus, AlignLeft, Building2, ListChecks, UserRound } from 'lucide-react';
+import { getVisibleApprovalModules } from '../approvalSchema';
 import { storage } from '../storage';
 import { auth } from '../auth';
 import { cn } from '../lib/utils';
-import { ApprovalAttachment, Module, ApprovalType } from '../types';
+import { ApprovalAttachment, Module, ApprovalType, OrganizationSelectOptions } from '../types';
 
 interface BatchModifyDetailRow {
   [key: string]: string;
@@ -146,6 +146,7 @@ const supplierRoleServiceColumns: Array<{ key: keyof SupplierRoleServiceRow; lab
 
 const projectCargoOptions = ['项目货', '非项目货'];
 const currencyOptions = ['CNY', 'USD', 'EUR', 'HKD', 'JPY', 'GBP'];
+const emptyOrganizationOptions: OrganizationSelectOptions = { departments: [], members: [] };
 
 const supplierQuotationColumns: Array<{ key: keyof SupplierQuotationRow; label: string; placeholder: string }> = [
   { key: 'truckType', label: '拖车类型', placeholder: '输入拖车类型' },
@@ -300,6 +301,35 @@ function isConfiguredDateField(type: ApprovalType | null, field: string) {
   return isDateField(field);
 }
 
+function isConfiguredOptionalField(type: ApprovalType | null, field: string) {
+  return Array.isArray(type?.optionalFields) && type.optionalFields.includes(field);
+}
+
+function isConfiguredMultilineField(type: ApprovalType | null, field: string) {
+  return Array.isArray(type?.multilineFields) && type.multilineFields.includes(field);
+}
+
+function isConfiguredMemberField(type: ApprovalType | null, field: string) {
+  return Array.isArray(type?.memberFields) && type.memberFields.includes(field);
+}
+
+function isConfiguredDepartmentField(type: ApprovalType | null, field: string) {
+  return Array.isArray(type?.departmentFields) && type.departmentFields.includes(field);
+}
+
+function getConfiguredSelectOptions(type: ApprovalType | null, field: string) {
+  const configuredField = Array.isArray(type?.selectFields)
+    ? type.selectFields.find((item) => item.field === field)
+    : null;
+  const options = Array.isArray(configuredField?.options) ? configuredField.options : [];
+  return [...new Set(options.map((option) => String(option || '').trim()).filter(Boolean))];
+}
+
+function getMemberOptionLabel(member: OrganizationSelectOptions['members'][number]) {
+  const detail = [member.departmentName, member.title].filter(Boolean).join(' / ');
+  return detail ? `${member.name} - ${detail}` : member.name;
+}
+
 function isMoneyInputValue(value: unknown): value is MoneyInputValue {
   return !!value
     && typeof value === 'object'
@@ -366,6 +396,22 @@ function createEmptyFileFieldValue(): FileFieldValue {
   return { text: '', attachments: [] };
 }
 
+function isBlankOptionalValue(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') return value.trim() === '';
+  if (typeof value === 'number') return !Number.isFinite(value);
+  if (isMoneyInputValue(value)) return !String(value.amount || '').trim();
+  if (isFileFieldValue(value)) return !value.text.trim() && value.attachments.length === 0;
+  if (Array.isArray(value)) {
+    return value.length === 0 || value.every((item) => isBlankOptionalValue(item));
+  }
+  if (typeof value === 'object') {
+    return Object.values(value).every((item) => isBlankOptionalValue(item));
+  }
+
+  return false;
+}
+
 export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: CreateApprovalModalProps) {
   const [step, setStep] = useState(1);
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
@@ -373,8 +419,31 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [uploadingFields, setUploadingFields] = useState<Record<string, boolean>>({});
+  const [organizationOptions, setOrganizationOptions] = useState<OrganizationSelectOptions>(emptyOrganizationOptions);
 
   const user = auth.getCurrentUser();
+  const visibleModules = React.useMemo(() => getVisibleApprovalModules(), []);
+
+  React.useEffect(() => {
+    if (!isOpen) return undefined;
+
+    let isCancelled = false;
+    void storage.getOrganizationOptions()
+      .then((options) => {
+        if (!isCancelled) {
+          setOrganizationOptions(options);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setOrganizationOptions(emptyOrganizationOptions);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen]);
 
   const handleModuleSelect = (module: Module) => {
     setSelectedModule(module);
@@ -548,6 +617,11 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     const newErrors: Record<string, string> = {};
     selectedType.businessFields.forEach(field => {
       const value = formData[field];
+      const isOptional = isConfiguredOptionalField(selectedType, field);
+      if (isOptional && isBlankOptionalValue(value)) {
+        return;
+      }
+
       if (isConfiguredFileField(selectedType, field)) {
         const fileValue = toFileFieldValue(value);
         if (!fileValue.text.trim() || fileValue.attachments.length === 0) {
@@ -635,7 +709,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         return;
       }
 
-      if (!formData[field]) {
+      if (isBlankOptionalValue(formData[field])) {
         newErrors[field] = '必填项';
       }
     });
@@ -1299,6 +1373,93 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     const isMoney = isConfiguredMoneyField(selectedType, field);
     const isNumeric = isConfiguredNumericField(selectedType, field);
     const isFile = field.includes('附件');
+    const selectOptions = getConfiguredSelectOptions(selectedType, field);
+    const isMemberField = isConfiguredMemberField(selectedType, field);
+    const isDepartmentField = isConfiguredDepartmentField(selectedType, field);
+    const isMultilineField = isConfiguredMultilineField(selectedType, field);
+
+    if (selectOptions.length > 0) {
+      return (
+        <div className="relative">
+          <select
+            className={cn(
+              "input-field border-b border-border-silver pr-11 focus:border-interactive-blue transition-colors",
+              !formData[field] && "text-light-gray",
+              errors[field] && "border-rose-500"
+            )}
+            value={formData[field]}
+            onChange={(event) => handleInputChange(field, event.target.value)}
+          >
+            <option value="">请选择{field}</option>
+            {selectOptions.map((option) => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+          <ListChecks className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none" />
+        </div>
+      );
+    }
+
+    if (isMemberField) {
+      return (
+        <div className="relative">
+          <select
+            className={cn(
+              "input-field border-b border-border-silver pr-11 focus:border-interactive-blue transition-colors",
+              !formData[field] && "text-light-gray",
+              errors[field] && "border-rose-500"
+            )}
+            value={formData[field]}
+            onChange={(event) => handleInputChange(field, event.target.value)}
+          >
+            <option value="">{organizationOptions.members.length > 0 ? `请选择${field}` : '暂无可选人员'}</option>
+            {organizationOptions.members.map((member) => (
+              <option key={member.id} value={member.name}>{getMemberOptionLabel(member)}</option>
+            ))}
+          </select>
+          <UserRound className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none" />
+        </div>
+      );
+    }
+
+    if (isDepartmentField) {
+      return (
+        <div className="relative">
+          <select
+            className={cn(
+              "input-field border-b border-border-silver pr-11 focus:border-interactive-blue transition-colors",
+              !formData[field] && "text-light-gray",
+              errors[field] && "border-rose-500"
+            )}
+            value={formData[field]}
+            onChange={(event) => handleInputChange(field, event.target.value)}
+          >
+            <option value="">{organizationOptions.departments.length > 0 ? `请选择${field}` : '暂无可选部门'}</option>
+            {organizationOptions.departments.map((department) => (
+              <option key={department.id} value={department.name}>{department.name}</option>
+            ))}
+          </select>
+          <Building2 className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none" />
+        </div>
+      );
+    }
+
+    if (isMultilineField) {
+      return (
+        <div className="relative">
+          <textarea
+            className={cn(
+              "input-field min-h-[120px] resize-y border-b border-border-silver py-3 pr-11 leading-7 focus:border-interactive-blue transition-colors",
+              errors[field] && "border-rose-500"
+            )}
+            placeholder={`输入${field}`}
+            value={formData[field]}
+            onChange={(event) => handleInputChange(field, event.target.value)}
+          />
+          <AlignLeft className="absolute right-4 top-5 h-4 w-4 text-light-silver pointer-events-none" />
+        </div>
+      );
+    }
 
     if (isConfiguredFileField(selectedType, field)) {
       const fileValue = toFileFieldValue(formData[field]);
@@ -1422,6 +1583,93 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       );
     }
 
+    if (selectOptions.length > 0) {
+      return (
+        <div className="relative">
+          <select
+            className={cn(
+              "input-field border-b border-border-silver focus:border-interactive-blue transition-colors",
+              !formData[field] && "text-light-gray",
+              errors[field] && "border-rose-500"
+            )}
+            value={formData[field] || ''}
+            onChange={(event) => handleInputChange(field, event.target.value)}
+          >
+            <option value="">请选择{field}</option>
+            {selectOptions.map((option) => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+          <ListChecks className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none" />
+        </div>
+      );
+    }
+
+    if (isMemberField) {
+      return (
+        <div className="relative">
+          <select
+            className={cn(
+              "input-field border-b border-border-silver focus:border-interactive-blue transition-colors",
+              !formData[field] && "text-light-gray",
+              errors[field] && "border-rose-500"
+            )}
+            value={formData[field] || ''}
+            onChange={(event) => handleInputChange(field, event.target.value)}
+          >
+            <option value="">{organizationOptions.members.length > 0 ? `请选择${field}` : '暂无人员可选'}</option>
+            {organizationOptions.members.map((member) => {
+              const label = getMemberOptionLabel(member);
+
+              return (
+                <option key={member.id} value={label}>{label}</option>
+              );
+            })}
+          </select>
+          <UserRound className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none" />
+        </div>
+      );
+    }
+
+    if (isDepartmentField) {
+      return (
+        <div className="relative">
+          <select
+            className={cn(
+              "input-field border-b border-border-silver focus:border-interactive-blue transition-colors",
+              !formData[field] && "text-light-gray",
+              errors[field] && "border-rose-500"
+            )}
+            value={formData[field] || ''}
+            onChange={(event) => handleInputChange(field, event.target.value)}
+          >
+            <option value="">{organizationOptions.departments.length > 0 ? `请选择${field}` : '暂无部门可选'}</option>
+            {organizationOptions.departments.map((department) => (
+              <option key={department.id} value={department.name}>{department.name}</option>
+            ))}
+          </select>
+          <Building2 className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none" />
+        </div>
+      );
+    }
+
+    if (isMultilineField) {
+      return (
+        <div className="relative">
+          <textarea
+            className={cn(
+              "input-field min-h-[120px] resize-y border-b border-border-silver py-3 pr-11 leading-6 focus:border-interactive-blue transition-colors",
+              errors[field] && "border-rose-500"
+            )}
+            placeholder={`输入${field}`}
+            value={formData[field] || ''}
+            onChange={(event) => handleInputChange(field, event.target.value)}
+          />
+          <AlignLeft className="absolute right-4 top-6 h-4 w-4 text-light-silver pointer-events-none" />
+        </div>
+      );
+    }
+
     return (
       <div className="relative">
         <input
@@ -1491,7 +1739,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
                 <div className="space-y-4">
                   <p className="text-[14px] font-semibold text-medium-gray mb-6">选择目标业务模块</p>
                   <div className="grid grid-cols-1 gap-3">
-                    {approvalSchema.modules.map(module => (
+                    {visibleModules.map(module => (
                       <button
                         key={module.name}
                         onClick={() => handleModuleSelect(module)}
@@ -1509,6 +1757,11 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
                         <ChevronRight size={18} strokeWidth={2} className="text-light-silver group-hover:text-interactive-blue transition-colors" />
                       </button>
                     ))}
+                    {visibleModules.length === 0 && (
+                      <div className="rounded-2xl border border-border-silver bg-canvas-white p-8 text-center text-[13px] font-bold text-medium-gray">
+                        暂无可发起的审批表单
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1548,11 +1801,14 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
                     {selectedType.businessFields.map(field => (
                       <div key={field} className="space-y-3">
                         <label className="text-[15px] font-semibold text-midnight-graphite ml-1">
+                          {!isConfiguredOptionalField(selectedType, field) && (
+                            <span className="mr-1 align-middle text-rose-500">*</span>
+                          )}
                           {field}
                         </label>
                         {renderFieldInput(field)}
                         {errors[field] && (
-                          <p className="text-[13px] text-rose-500 font-medium ml-1">该项为必填业务数据</p>
+                          <p className="text-[13px] text-rose-500 font-medium ml-1">{errors[field]}</p>
                         )}
                       </div>
                     ))}
