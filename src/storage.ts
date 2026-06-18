@@ -40,6 +40,10 @@ type BusinessFormInput = {
     field: string;
     options: string[];
   }>;
+  detailFields?: Array<{
+    field: string;
+    columns: string[];
+  }>;
   visibleToUsers?: boolean;
 };
 

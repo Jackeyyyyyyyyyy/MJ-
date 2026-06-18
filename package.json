@@ -11,6 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "push:keys": "node scripts/generate-vapid-keys.mjs",
+    "approval:apply": "node scripts/apply-approval-config.mjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "lint": "tsc --noEmit"
   },

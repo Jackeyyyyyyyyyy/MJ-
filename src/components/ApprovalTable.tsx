@@ -13,6 +13,28 @@ interface ApprovalTableProps {
   showActions?: boolean;
 }
 
+function formatBusinessValuePreview(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? `${value.length} 条明细` : '暂无明细';
+  }
+
+  if (value && typeof value === 'object') {
+    const data = value as Record<string, unknown>;
+    if ('currency' in data && 'amount' in data) {
+      return [data.currency, data.amount].filter((item) => String(item || '').trim()).join(' ') || '-';
+    }
+    if ('text' in data && Array.isArray(data.attachments)) {
+      return String(data.text || '') || `${data.attachments.length} 个附件`;
+    }
+    return Object.entries(data)
+      .slice(0, 2)
+      .map(([key, item]) => `${key}：${String(item || '-')}`)
+      .join('，');
+  }
+
+  return String(value || '-');
+}
+
 export default function ApprovalTable({ 
   records, 
   onViewDetail
@@ -50,7 +72,7 @@ export default function ApprovalTable({
           <div className="flex items-center gap-3">
             {Object.entries(record.businessData).slice(0, 1).map(([key, value]) => (
               <span key={key} className="text-[15px] font-medium text-charcoal-grey truncate italic">
-                {String(value)}
+                {formatBusinessValuePreview(value)}
               </span>
             ))}
             {Object.keys(record.businessData).length > 1 && (

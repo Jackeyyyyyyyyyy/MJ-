@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlignLeft, Asterisk, Building2, Calendar, DollarSign, Edit3, Eye, EyeOff, ListChecks, Loader2, Lock, Paperclip, Plus, RotateCcw, Save, Search, Trash2, UserRound, X } from 'lucide-react';
+import { AlignLeft, Asterisk, Building2, Calendar, DollarSign, Edit3, Eye, EyeOff, ListChecks, Loader2, Lock, Paperclip, Plus, RotateCcw, Save, Search, Table2, Trash2, UserRound, X } from 'lucide-react';
 import { approvalSchema, replaceApprovalSchema } from '../approvalSchema';
 import { storage } from '../storage';
 import { ApprovalType, Module } from '../types';
@@ -113,6 +113,22 @@ function getInitialSelectFieldOptions(type: ApprovalType) {
   }, {});
 }
 
+function getInitialDetailFieldColumns(type: ApprovalType) {
+  const businessFieldSet = new Set(type.businessFields);
+  return (Array.isArray(type.detailFields) ? type.detailFields : []).reduce<Record<string, string>>((columnsByField, item) => {
+    const field = String(item?.field || '').trim();
+    if (!field || !businessFieldSet.has(field)) return columnsByField;
+
+    const columns = (Array.isArray(item.columns) ? item.columns : [])
+      .map((column) => String(column || '').trim())
+      .filter(Boolean);
+    if (columns.length > 0) {
+      columnsByField[field] = columns.join('\n');
+    }
+    return columnsByField;
+  }, {});
+}
+
 function isAmountCurrencyField(field: string) {
   return /金额|价格|利润|总额/.test(field);
 }
@@ -143,6 +159,7 @@ export default function BusinessFormAdmin() {
   const [memberFields, setMemberFields] = React.useState<string[]>([]);
   const [departmentFields, setDepartmentFields] = React.useState<string[]>([]);
   const [selectFieldOptions, setSelectFieldOptions] = React.useState<Record<string, string>>({});
+  const [detailFieldColumns, setDetailFieldColumns] = React.useState<Record<string, string>>({});
   const [editingTarget, setEditingTarget] = React.useState<EditingTarget | null>(null);
   const [visibilityMap, setVisibilityMap] = React.useState<Record<string, boolean>>(() => getInitialVisibilityMap());
   const [visibilityQuery, setVisibilityQuery] = React.useState('');
@@ -189,6 +206,15 @@ export default function BusinessFormAdmin() {
       .filter((item) => item.options.length > 0),
     [businessFields, selectFieldOptions],
   );
+  const selectedDetailFields = React.useMemo(
+    () => businessFields
+      .map((field) => ({
+        field,
+        columns: normalizeFields(detailFieldColumns[field] || ''),
+      }))
+      .filter((item) => item.columns.length > 0),
+    [businessFields, detailFieldColumns],
+  );
   const hasAmountCurrencyField = selectedAmountFields.length > 0;
   const hasCurrencyOnlyField = businessFields.some(isCurrencyOnlyField);
   const moduleOptions = approvalSchema.modules.map((module) => module.name);
@@ -233,6 +259,11 @@ export default function BusinessFormAdmin() {
       delete next[field];
       return next;
     });
+    setDetailFieldColumns((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
   };
 
   const toggleFileField = (field: string) => {
@@ -251,6 +282,11 @@ export default function BusinessFormAdmin() {
       delete next[field];
       return next;
     });
+    setDetailFieldColumns((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
   };
 
   const toggleDateField = (field: string) => {
@@ -265,6 +301,11 @@ export default function BusinessFormAdmin() {
     setMemberFields((current) => current.filter((item) => item !== field));
     setDepartmentFields((current) => current.filter((item) => item !== field));
     setSelectFieldOptions((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+    setDetailFieldColumns((current) => {
       const next = { ...current };
       delete next[field];
       return next;
@@ -307,6 +348,11 @@ export default function BusinessFormAdmin() {
       delete next[field];
       return next;
     });
+    setDetailFieldColumns((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
   };
 
   const toggleMemberField = (field: string) => {
@@ -321,6 +367,11 @@ export default function BusinessFormAdmin() {
     setMultilineFields((current) => current.filter((item) => item !== field));
     setDepartmentFields((current) => current.filter((item) => item !== field));
     setSelectFieldOptions((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+    setDetailFieldColumns((current) => {
       const next = { ...current };
       delete next[field];
       return next;
@@ -343,6 +394,11 @@ export default function BusinessFormAdmin() {
       delete next[field];
       return next;
     });
+    setDetailFieldColumns((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
   };
 
   const updateSelectFieldOptions = (field: string, value: string) => {
@@ -357,6 +413,31 @@ export default function BusinessFormAdmin() {
       setMultilineFields((current) => current.filter((item) => item !== field));
       setMemberFields((current) => current.filter((item) => item !== field));
       setDepartmentFields((current) => current.filter((item) => item !== field));
+      setDetailFieldColumns((current) => {
+        const next = { ...current };
+        delete next[field];
+        return next;
+      });
+    }
+  };
+
+  const updateDetailFieldColumns = (field: string, value: string) => {
+    setDetailFieldColumns((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    if (value.trim()) {
+      setAmountFields((current) => current.filter((item) => item !== field));
+      setFileFields((current) => current.filter((item) => item !== field));
+      setDateFields((current) => current.filter((item) => item !== field));
+      setMultilineFields((current) => current.filter((item) => item !== field));
+      setMemberFields((current) => current.filter((item) => item !== field));
+      setDepartmentFields((current) => current.filter((item) => item !== field));
+      setSelectFieldOptions((current) => {
+        const next = { ...current };
+        delete next[field];
+        return next;
+      });
     }
   };
 
@@ -372,6 +453,7 @@ export default function BusinessFormAdmin() {
     setMemberFields([]);
     setDepartmentFields([]);
     setSelectFieldOptions({});
+    setDetailFieldColumns({});
     setEditingTarget(null);
     setError('');
   };
@@ -393,6 +475,7 @@ export default function BusinessFormAdmin() {
     setMemberFields(getInitialMemberFields(type));
     setDepartmentFields(getInitialDepartmentFields(type));
     setSelectFieldOptions(getInitialSelectFieldOptions(type));
+    setDetailFieldColumns(getInitialDetailFieldColumns(type));
     setEditingTarget({
       moduleName: module.name,
       approvalTypeName: type.name,
@@ -458,6 +541,7 @@ export default function BusinessFormAdmin() {
             memberFields: selectedMemberFields,
             departmentFields: selectedDepartmentFields,
             selectFields: selectedSelectFields,
+            detailFields: selectedDetailFields,
           })
         : await storage.createBusinessForm({
             moduleName: nextModuleName,
@@ -471,6 +555,7 @@ export default function BusinessFormAdmin() {
             memberFields: selectedMemberFields,
             departmentFields: selectedDepartmentFields,
             selectFields: selectedSelectFields,
+            detailFields: selectedDetailFields,
           });
 
       replaceApprovalSchema(nextSchema);
@@ -669,6 +754,55 @@ export default function BusinessFormAdmin() {
               ) : (
                 <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
                   先填写业务字段，再为字段配置下拉选项。
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[#dce7ef] bg-[#f7fbfd] p-4">
+            <div className="space-y-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
+                  <Table2 size={15} strokeWidth={2.8} />
+                  明细字段
+                </div>
+                <p className="mt-1 text-[12px] font-semibold text-medium-gray">
+                  给字段填写列名后，用户发起申请时会显示可增删行的明细表格。一行一个列名，适合费用明细、付款明细、行程明细。
+                </p>
+              </div>
+              {businessFields.length > 0 ? (
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {businessFields.map((field) => {
+                    const columnText = detailFieldColumns[field] || '';
+                    const active = normalizeFields(columnText).length > 0;
+
+                    return (
+                      <label
+                        key={field}
+                        className={cn(
+                          'block rounded-xl border bg-white p-3 transition-colors',
+                          active ? 'border-cyan-500 shadow-sm' : 'border-border-silver',
+                        )}
+                      >
+                        <span className={cn(
+                          'block truncate text-[12px] font-black',
+                          active ? 'text-cyan-700' : 'text-midnight-graphite',
+                        )}>
+                          {field}
+                        </span>
+                        <textarea
+                          value={columnText}
+                          onChange={(event) => updateDetailFieldColumns(field, event.target.value)}
+                          placeholder={'费用项目\n金额\n备注'}
+                          className="mt-2 min-h-[86px] w-full resize-y rounded-lg border border-border-silver bg-canvas-white px-3 py-2 text-[12px] font-semibold text-midnight-graphite outline-none transition-colors focus:border-cyan-400"
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
+                  先填写业务字段，再为字段配置明细表格列。
                 </div>
               )}
             </div>

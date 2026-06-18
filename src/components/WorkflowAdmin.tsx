@@ -56,6 +56,8 @@ interface BusinessScopeOption {
   businessType: WorkflowBusinessType;
   fields: string[];
   amountFields: string[];
+  memberFields: string[];
+  departmentFields: string[];
 }
 
 type ConditionFieldKind = 'number' | 'currency' | 'text' | 'member' | 'department';
@@ -114,6 +116,8 @@ function getBusinessScopeOptions(): BusinessScopeOption[] {
         businessType: inferBusinessTypeFromNames(module.name, approvalType.name),
         fields: [...new Set(fields.filter(Boolean))],
         amountFields: [...new Set(amountFields.filter(Boolean))],
+        memberFields: [...new Set((approvalType.memberFields || []).filter(Boolean))],
+        departmentFields: [...new Set((approvalType.departmentFields || []).filter(Boolean))],
       };
     })
   ));
@@ -378,6 +382,9 @@ function getConditionFieldKind(field: string): ConditionFieldKind {
   if (field === 'currency') return 'currency';
   if (field === `${SUBMITTER_FIELD_PREFIX}department`) return 'department';
   if (field === `${SUBMITTER_FIELD_PREFIX}member`) return 'member';
+  const readableField = field.startsWith(FORM_FIELD_PREFIX) ? field.slice(FORM_FIELD_PREFIX.length) : field;
+  if (/部门|科室|组织|团队/.test(readableField)) return 'department';
+  if (/人员|员工|同事|负责人|经办人|交接人|对接人|申请人|联系人/.test(readableField)) return 'member';
   if (isNumericConditionFieldValue(field)) return 'number';
   return 'text';
 }
@@ -416,7 +423,11 @@ function getConditionFieldOptionsForScope(scope?: BusinessScopeOption | null): C
   const formFieldOptions: ConditionFieldOption[] = (scope?.fields || []).map((field) => ({
     value: `${FORM_FIELD_PREFIX}${field}`,
     label: `表单字段：${field}`,
-    kind: isNumericConditionFieldValue(field) ? 'number' : 'text',
+    kind: scope?.departmentFields.includes(field)
+      ? 'department'
+      : scope?.memberFields.includes(field)
+        ? 'member'
+        : getConditionFieldKind(`${FORM_FIELD_PREFIX}${field}`),
   }));
 
   return [...amountOptions, ...submitterOptions, ...formFieldOptions];
@@ -4842,6 +4853,8 @@ export default function WorkflowAdmin() {
       businessType: draft.businessType || selectedTemplate.businessType || 'general',
       fields: [],
       amountFields: [],
+      memberFields: [],
+      departmentFields: [],
     };
 
     const confirmed = window.confirm(`确认初始化「${scope.approvalTypeName}」审批流？当前草稿会被重置为空白流程。`);

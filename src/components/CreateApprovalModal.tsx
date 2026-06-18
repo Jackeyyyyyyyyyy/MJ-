@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, ChevronRight, Upload, Calendar, DollarSign, FileText, Plus, AlignLeft, Building2, ListChecks, UserRound } from 'lucide-react';
+import { X, ChevronRight, Upload, Calendar, DollarSign, FileText, Plus, AlignLeft, Building2, ListChecks, Table2, UserRound } from 'lucide-react';
 import { getVisibleApprovalModules } from '../approvalSchema';
 import { storage } from '../storage';
 import { auth } from '../auth';
@@ -325,6 +325,24 @@ function getConfiguredSelectOptions(type: ApprovalType | null, field: string) {
   return [...new Set(options.map((option) => String(option || '').trim()).filter(Boolean))];
 }
 
+function getConfiguredDetailColumns(type: ApprovalType | null, field: string) {
+  const configuredField = Array.isArray(type?.detailFields)
+    ? type.detailFields.find((item) => item.field === field)
+    : null;
+  const columns = Array.isArray(configuredField?.columns) ? configuredField.columns : [];
+  return [...new Set(columns.map((column) => String(column || '').trim()).filter(Boolean))]
+    .map((column) => ({
+      key: column,
+      label: column,
+      placeholder: `输入${column}`,
+      type: isMoneyField(column) || column.includes('数量') || column.includes('单价') ? 'number' : undefined,
+    }));
+}
+
+function createEmptyDetailRow(columns: Array<{ key: string | number }>) {
+  return Object.fromEntries(columns.map((column) => [String(column.key), '']));
+}
+
 function getMemberOptionLabel(member: OrganizationSelectOptions['members'][number]) {
   const detail = [member.departmentName, member.title].filter(Boolean).join(' / ');
   return detail ? `${member.name} - ${detail}` : member.name;
@@ -466,6 +484,8 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         initialData[field] = createEmptyProjectCargoChange();
       } else if (selectedModule?.name === '供应商' && type.name === '报价' && field === '报价信息') {
         initialData[field] = createEmptySupplierQuotationInfo();
+      } else if (getConfiguredDetailColumns(type, field).length > 0) {
+        initialData[field] = [createEmptyDetailRow(getConfiguredDetailColumns(type, field))];
       } else if (isConfiguredFileField(type, field)) {
         initialData[field] = createEmptyFileFieldValue();
       } else {
@@ -954,7 +974,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
           </button>
         </div>
         <div className="overflow-x-auto no-scrollbar">
-          <div className={minWidth}>
+          <div style={{ minWidth }}>
             <div className={cn("grid border-b border-border-silver bg-canvas-white", gridTemplate)}>
               {columns.map((column) => (
                 <div key={column.key} className="px-3 py-3 text-[12px] font-bold text-medium-gray">
@@ -1242,15 +1262,19 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   };
 
   const getStructuredDetailColumns = (field: string) => {
+    const configuredColumns = getConfiguredDetailColumns(selectedType, field);
+    if (configuredColumns.length > 0) return configuredColumns;
+
     if (selectedModule?.name !== '资金' || field !== '明细') return [];
     if (selectedType?.name === '批量修改') return batchModifyDetailColumns;
     if (selectedType?.name === '资金减免') return fundsReductionDetailColumns;
     return [];
   };
 
-  const createEmptyStructuredDetail = () => {
-    if (selectedType?.name === '资金减免') return createEmptyFundsReductionDetail();
-    return createEmptyBatchModifyDetail();
+  const createEmptyStructuredDetail = (field: string) => {
+    const columns = getStructuredDetailColumns(field);
+    if (columns.length > 0) return createEmptyDetailRow(columns);
+    return {};
   };
 
   const isStructuredDetailField = (field: string) => {
@@ -1259,7 +1283,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
 
   const getStructuredDetails = (field: string): Array<Record<string, string>> => {
     const value = formData[field];
-    return Array.isArray(value) && value.length > 0 ? value : [createEmptyStructuredDetail()];
+    return Array.isArray(value) && value.length > 0 ? value : [createEmptyStructuredDetail(field)];
   };
 
   const updateStructuredDetail = (
@@ -1275,21 +1299,22 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   };
 
   const addStructuredDetail = (field: string) => {
-    handleInputChange(field, [...getStructuredDetails(field), createEmptyStructuredDetail()]);
+    handleInputChange(field, [...getStructuredDetails(field), createEmptyStructuredDetail(field)]);
   };
 
   const removeStructuredDetail = (field: string, rowIndex: number) => {
     const rows = getStructuredDetails(field).filter((_, index) => index !== rowIndex);
-    handleInputChange(field, rows.length > 0 ? rows : [createEmptyStructuredDetail()]);
+    handleInputChange(field, rows.length > 0 ? rows : [createEmptyStructuredDetail(field)]);
   };
 
   const renderStructuredDetailInput = (field: string) => {
     const columns = getStructuredDetailColumns(field);
     const rows = getStructuredDetails(field);
-    const gridTemplate = selectedType?.name === '资金减免'
-      ? "grid-cols-[1.05fr_1fr_1fr_0.95fr_1fr_0.95fr_52px]"
-      : "grid-cols-[1.05fr_1fr_1fr_0.9fr_1fr_0.95fr_1fr_52px]";
-    const minWidth = selectedType?.name === '资金减免' ? "min-w-[840px]" : "min-w-[980px]";
+    const columnCount = Math.max(columns.length, 1);
+    const gridTemplate = {
+      gridTemplateColumns: `repeat(${columnCount}, minmax(150px, 1fr)) 52px`,
+    };
+    const minWidth = `${Math.max(620, columnCount * 170 + 52)}px`;
 
     return (
       <div className={cn(
@@ -1298,7 +1323,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       )}>
         <div className="overflow-x-auto no-scrollbar">
           <div className={minWidth}>
-            <div className={cn("grid border-b border-border-silver bg-pure-white", gridTemplate)}>
+            <div className="grid border-b border-border-silver bg-pure-white" style={gridTemplate}>
               {columns.map((column) => (
                 <div key={column.key} className="px-3 py-3 text-[12px] font-bold text-medium-gray">
                   {column.label}
@@ -1308,7 +1333,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
             </div>
 
             {rows.map((row, rowIndex) => (
-              <div key={rowIndex} className={cn("grid border-b border-border-silver last:border-b-0 bg-white", gridTemplate)}>
+              <div key={rowIndex} className="grid border-b border-border-silver last:border-b-0 bg-white" style={gridTemplate}>
                 {columns.map((column) => (
                   <div key={column.key} className="p-2">
                     <input
@@ -1342,7 +1367,8 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
           className="w-full h-12 bg-pure-white text-action-blue text-[13px] font-bold hover:bg-lightest-gray-background transition-colors flex items-center justify-center gap-2"
         >
           <Plus size={15} strokeWidth={3} />
-          添加明细
+          <Table2 size={15} strokeWidth={2.5} />
+          添加{field}
         </button>
       </div>
     );

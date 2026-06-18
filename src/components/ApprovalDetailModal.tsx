@@ -148,6 +148,7 @@ function isSupplierInfoChangeValue(value: unknown): value is SupplierInfoChangeV
 }
 
 function getStructuredDetailColumns(value: unknown) {
+  if (isAttachmentList(value)) return [];
   if (!Array.isArray(value) || value.length === 0) return [];
 
   const matchesColumns = (columns: typeof batchModifyDetailColumns) => value.every((row) => {
@@ -156,7 +157,28 @@ function getStructuredDetailColumns(value: unknown) {
 
   if (matchesColumns(batchModifyDetailColumns)) return batchModifyDetailColumns;
   if (matchesColumns(fundsReductionDetailColumns)) return fundsReductionDetailColumns;
-  return [];
+  const rowsAreObjects = value.every((row) => (
+    !!row && typeof row === 'object' && !Array.isArray(row) && !isAttachmentList(row)
+  ));
+  if (!rowsAreObjects) return [];
+
+  const firstRow = value[0] as Record<string, unknown>;
+  const keys = Object.keys(firstRow).filter((key) => key.trim());
+  if (keys.length === 0) return [];
+
+  return keys.map((key) => ({ key, label: key }));
+}
+
+function getDetailTableGridStyle(columnCount: number): React.CSSProperties {
+  return {
+    gridTemplateColumns: `repeat(${Math.max(columnCount, 1)}, minmax(150px, 1fr))`,
+  };
+}
+
+function getDetailTableMinWidth(columnCount: number): React.CSSProperties {
+  return {
+    minWidth: `${Math.max(620, Math.max(columnCount, 1) * 170)}px`,
+  };
 }
 
 function getAiSuggestionDisplay(record: ApprovalRecord) {
@@ -714,12 +736,13 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                         renderFileFieldDisplay(value)
                       ) : getStructuredDetailColumns(value).length > 0 ? (
                         <div className="overflow-x-auto no-scrollbar">
-                          <div className="min-w-[840px] overflow-hidden rounded-2xl border border-border-silver bg-white">
+                          <div
+                            className="overflow-hidden rounded-2xl border border-border-silver bg-white"
+                            style={getDetailTableMinWidth(getStructuredDetailColumns(value).length)}
+                          >
                             <div
-                              className={cn(
-                                "grid border-b border-border-silver bg-canvas-white",
-                                getStructuredDetailColumns(value).length === 7 ? "grid-cols-7" : "grid-cols-6",
-                              )}
+                              className="grid border-b border-border-silver bg-canvas-white"
+                              style={getDetailTableGridStyle(getStructuredDetailColumns(value).length)}
                             >
                               {getStructuredDetailColumns(value).map((column) => (
                                 <div key={column.key} className="px-3 py-3 text-[11px] font-black text-medium-gray">
@@ -730,10 +753,8 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                             {value.map((row, rowIndex) => (
                               <div
                                 key={rowIndex}
-                                className={cn(
-                                  "grid border-b border-border-silver last:border-b-0",
-                                  getStructuredDetailColumns(value).length === 7 ? "grid-cols-7" : "grid-cols-6",
-                                )}
+                                className="grid border-b border-border-silver last:border-b-0"
+                                style={getDetailTableGridStyle(getStructuredDetailColumns(value).length)}
                               >
                                 {getStructuredDetailColumns(value).map((column) => (
                                   <div key={column.key} className="px-3 py-4 text-[13px] font-bold text-black break-all">

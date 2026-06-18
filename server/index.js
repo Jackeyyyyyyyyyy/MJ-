@@ -1003,6 +1003,23 @@ function normalizeSelectFields(selectFields, businessFields) {
   return Array.from(selected.values());
 }
 
+function normalizeDetailFields(detailFields, businessFields) {
+  const businessFieldSet = new Set(normalizeStringList(businessFields));
+  const fields = Array.isArray(detailFields) ? detailFields : [];
+  const selected = new Map();
+
+  fields.forEach((item) => {
+    const field = String(item?.field || '').trim();
+    if (!field || !businessFieldSet.has(field)) return;
+
+    const columns = normalizeStringList(item?.columns);
+    if (columns.length === 0) return;
+    selected.set(field, { field, columns });
+  });
+
+  return Array.from(selected.values());
+}
+
 function normalizeVisibleToUsers(value, fallback = true) {
   if (value === undefined || value === null) return fallback;
   return value !== false;
@@ -1046,6 +1063,7 @@ function normalizeApprovalSchema(schema) {
               memberFields: normalizeMemberFields(approvalType?.memberFields, businessFields),
               departmentFields: normalizeDepartmentFields(approvalType?.departmentFields, businessFields),
               selectFields: normalizeSelectFields(approvalType?.selectFields, businessFields),
+              detailFields: normalizeDetailFields(approvalType?.detailFields, businessFields),
               visibleToUsers: normalizeVisibleToUsers(approvalType?.visibleToUsers),
               commonFields: normalizeStringList(approvalType?.commonFields),
               ...(String(approvalType?.notes || '').trim() ? { notes: String(approvalType.notes).trim() } : {}),
@@ -1085,6 +1103,7 @@ async function createBusinessForm({
   memberFields,
   departmentFields,
   selectFields,
+  detailFields,
   visibleToUsers,
 }) {
   const schema = await readApprovalSchema();
@@ -1099,6 +1118,7 @@ async function createBusinessForm({
   const nextMemberFields = normalizeMemberFields(memberFields, nextBusinessFields);
   const nextDepartmentFields = normalizeDepartmentFields(departmentFields, nextBusinessFields);
   const nextSelectFields = normalizeSelectFields(selectFields, nextBusinessFields);
+  const nextDetailFields = normalizeDetailFields(detailFields, nextBusinessFields);
   const nextVisibleToUsers = normalizeVisibleToUsers(visibleToUsers);
 
   if (!nextModuleName || !nextApprovalTypeName || nextBusinessFields.length === 0) {
@@ -1130,6 +1150,7 @@ async function createBusinessForm({
     memberFields: nextMemberFields,
     departmentFields: nextDepartmentFields,
     selectFields: nextSelectFields,
+    detailFields: nextDetailFields,
     visibleToUsers: nextVisibleToUsers,
     commonFields,
   });
@@ -1149,6 +1170,7 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, {
   memberFields,
   departmentFields,
   selectFields,
+  detailFields,
   visibleToUsers,
 }) {
   const schema = await readApprovalSchema();
@@ -1165,6 +1187,7 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, {
   const nextMemberFields = normalizeMemberFields(memberFields, nextBusinessFields);
   const nextDepartmentFields = normalizeDepartmentFields(departmentFields, nextBusinessFields);
   const nextSelectFields = normalizeSelectFields(selectFields, nextBusinessFields);
+  const nextDetailFields = normalizeDetailFields(detailFields, nextBusinessFields);
 
   if (!currentModuleName || !currentApprovalTypeName) {
     throw createHttpError('missing business form target', 400);
@@ -1216,6 +1239,7 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, {
     memberFields: nextMemberFields,
     departmentFields: nextDepartmentFields,
     selectFields: nextSelectFields,
+    detailFields: nextDetailFields,
     visibleToUsers: normalizeVisibleToUsers(visibleToUsers, existingType.visibleToUsers !== false),
     commonFields: existingType.commonFields?.length ? existingType.commonFields : schema.commonFields,
   });
@@ -4916,6 +4940,7 @@ app.post('/api/business-forms', authenticate, requireRoles('developer'), async (
       memberFields: req.body?.memberFields,
       departmentFields: req.body?.departmentFields,
       selectFields: req.body?.selectFields,
+      detailFields: req.body?.detailFields,
       visibleToUsers: req.body?.visibleToUsers,
     });
 
@@ -4942,6 +4967,7 @@ app.patch('/api/business-forms/:moduleName/:approvalTypeName', authenticate, req
         memberFields: req.body?.memberFields,
         departmentFields: req.body?.departmentFields,
         selectFields: req.body?.selectFields,
+        detailFields: req.body?.detailFields,
         visibleToUsers: req.body?.visibleToUsers,
       },
     );

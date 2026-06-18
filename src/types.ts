@@ -338,6 +338,10 @@ export interface ApprovalType {
     field: string;
     options: string[];
   }>;
+  detailFields?: Array<{
+    field: string;
+    columns: string[];
+  }>;
   visibleToUsers?: boolean;
   commonFields: string[];
   notes?: string;
