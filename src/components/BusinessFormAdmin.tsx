@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlignLeft, Asterisk, Building2, Calculator, Calendar, Clock3, DollarSign, Edit3, Eye, EyeOff, ListChecks, Loader2, Lock, Paperclip, Plus, RotateCcw, Save, Search, Table2, Trash2, Upload, UserRound, X } from 'lucide-react';
+import { AlignLeft, Asterisk, Building2, Calculator, Calendar, ChevronDown, Clock3, DollarSign, Edit3, Eye, EyeOff, ListChecks, Loader2, Lock, Paperclip, Plus, RotateCcw, Save, Search, Table2, Trash2, Upload, UserRound, X } from 'lucide-react';
 import { approvalSchema, replaceApprovalSchema } from '../approvalSchema';
 import { storage } from '../storage';
 import { ApprovalType, Module } from '../types';
@@ -210,6 +210,29 @@ function getFieldKindLabel(field: string) {
   if (isAmountCurrencyField(field)) return '金额+币种';
   if (isCurrencyOnlyField(field)) return '币种';
   return '';
+}
+
+function FieldSectionHeader({
+  icon,
+  title,
+  count,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  count: number;
+}) {
+  return (
+    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 [&::-webkit-details-marker]:hidden">
+      <span className="flex min-w-0 items-center gap-2 text-[13px] font-black text-midnight-graphite">
+        {icon}
+        <span className="truncate">{title}</span>
+      </span>
+      <span className="flex shrink-0 items-center gap-2 rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-medium-gray shadow-sm">
+        {count > 0 ? `${count} 已选` : '未配置'}
+        <ChevronDown className="transition-transform group-open:rotate-180" size={13} strokeWidth={2.8} />
+      </span>
+    </summary>
+  );
 }
 
 export default function BusinessFormAdmin() {
@@ -825,7 +848,13 @@ export default function BusinessFormAdmin() {
             />
           </label>
 
-          <div className="rounded-2xl border border-[#ffd8dc] bg-[#fff8f8] p-4">
+          <details className="group rounded-2xl border border-[#ffd8dc] bg-[#fff8f8]">
+            <FieldSectionHeader
+              icon={<Asterisk size={15} strokeWidth={2.8} />}
+              title="非必填字段"
+              count={selectedOptionalFields.length}
+            />
+            <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
             <div className="space-y-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
@@ -868,9 +897,16 @@ export default function BusinessFormAdmin() {
                 </div>
               )}
             </div>
-          </div>
+            </div>
+          </details>
 
-          <div className="rounded-2xl border border-[#e0e7ff] bg-[#f8faff] p-4">
+          <details className="group rounded-2xl border border-[#e0e7ff] bg-[#f8faff]">
+            <FieldSectionHeader
+              icon={<ListChecks size={15} strokeWidth={2.8} />}
+              title="选项字段"
+              count={selectedSelectFields.length}
+            />
+            <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
             <div className="space-y-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
@@ -918,8 +954,15 @@ export default function BusinessFormAdmin() {
               )}
             </div>
           </div>
+          </details>
 
-          <div className="rounded-2xl border border-[#dce7ef] bg-[#f7fbfd] p-4">
+          <details className="group rounded-2xl border border-[#dce7ef] bg-[#f7fbfd]">
+            <FieldSectionHeader
+              icon={<Table2 size={15} strokeWidth={2.8} />}
+              title="明细字段"
+              count={selectedDetailFields.length}
+            />
+            <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
             <div className="space-y-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
@@ -966,9 +1009,16 @@ export default function BusinessFormAdmin() {
                 </div>
               )}
             </div>
-          </div>
+            </div>
+          </details>
 
-          <div className="rounded-2xl border border-[#e6e0d4] bg-[#fffdf8] p-4">
+          <details className="group rounded-2xl border border-[#e6e0d4] bg-[#fffdf8]">
+            <FieldSectionHeader
+              icon={<AlignLeft size={15} strokeWidth={2.8} />}
+              title="多行文本字段"
+              count={selectedMultilineFields.length}
+            />
+            <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
             <div className="space-y-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
@@ -1012,8 +1062,15 @@ export default function BusinessFormAdmin() {
               )}
             </div>
           </div>
+          </details>
 
-          <div className="rounded-2xl border border-[#d8e8ff] bg-[#f7fbff] p-4">
+          <details className="group rounded-2xl border border-[#d8e8ff] bg-[#f7fbff]">
+            <FieldSectionHeader
+              icon={<UserRound size={15} strokeWidth={2.8} />}
+              title="人员字段"
+              count={selectedMemberFields.length}
+            />
+            <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
             <div className="space-y-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
@@ -1056,9 +1113,16 @@ export default function BusinessFormAdmin() {
                 </div>
               )}
             </div>
-          </div>
+            </div>
+          </details>
 
-          <div className="rounded-2xl border border-[#dbe8ce] bg-[#fbfff7] p-4">
+          <details className="group rounded-2xl border border-[#dbe8ce] bg-[#fbfff7]">
+            <FieldSectionHeader
+              icon={<Building2 size={15} strokeWidth={2.8} />}
+              title="部门字段"
+              count={selectedDepartmentFields.length}
+            />
+            <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
             <div className="space-y-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
@@ -1102,8 +1166,15 @@ export default function BusinessFormAdmin() {
               )}
             </div>
           </div>
+          </details>
 
-          <div className="rounded-2xl border border-[#d8e8ff] bg-[#f5fbff] p-4">
+          <details className="group rounded-2xl border border-[#d8e8ff] bg-[#f5fbff]">
+            <FieldSectionHeader
+              icon={<DollarSign size={15} strokeWidth={2.8} />}
+              title="金额字段"
+              count={selectedAmountFields.length}
+            />
+            <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
             <div className="space-y-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
@@ -1151,9 +1222,16 @@ export default function BusinessFormAdmin() {
                 当前只有币种字段，没有金额类字段；普通条件分化需要金额类字段才会开放。
               </div>
             )}
-          </div>
+            </div>
+          </details>
 
-          <div className="rounded-2xl border border-[#e5ddff] bg-[#fbf9ff] p-4">
+          <details className="group rounded-2xl border border-[#e5ddff] bg-[#fbf9ff]">
+            <FieldSectionHeader
+              icon={<Calendar size={15} strokeWidth={2.8} />}
+              title="日期/时间字段"
+              count={selectedDateFields.length}
+            />
+            <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
             <div className="space-y-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
@@ -1197,8 +1275,15 @@ export default function BusinessFormAdmin() {
               )}
             </div>
           </div>
+          </details>
 
-          <div className="rounded-2xl border border-[#d7e2ff] bg-[#f6f9ff] p-4">
+          <details className="group rounded-2xl border border-[#d7e2ff] bg-[#f6f9ff]">
+            <FieldSectionHeader
+              icon={<Clock3 size={15} strokeWidth={2.8} />}
+              title="日期时间字段"
+              count={selectedDateTimeFields.length}
+            />
+            <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
             <div className="space-y-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
@@ -1241,9 +1326,16 @@ export default function BusinessFormAdmin() {
                 </div>
               )}
             </div>
-          </div>
+            </div>
+          </details>
 
-          <div className="rounded-2xl border border-[#d8ead2] bg-[#f8fdf6] p-4">
+          <details className="group rounded-2xl border border-[#d8ead2] bg-[#f8fdf6]">
+            <FieldSectionHeader
+              icon={<Calculator size={15} strokeWidth={2.8} />}
+              title="自动时长字段"
+              count={selectedDurationFields.length}
+            />
+            <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
             <div className="space-y-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
@@ -1267,8 +1359,15 @@ export default function BusinessFormAdmin() {
               )}
             </div>
           </div>
+          </details>
 
-          <div className="rounded-2xl border border-[#d8e7f8] bg-[#f7fbff] p-4">
+          <details className="group rounded-2xl border border-[#d8e7f8] bg-[#f7fbff]">
+            <FieldSectionHeader
+              icon={<Upload size={15} strokeWidth={2.8} />}
+              title="上传字段"
+              count={selectedAttachmentFields.length}
+            />
+            <div className="p-4 pt-0">
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
                 <Upload size={15} strokeWidth={2.8} />
@@ -1306,9 +1405,16 @@ export default function BusinessFormAdmin() {
                 </div>
               )}
             </div>
-          </div>
+            </div>
+          </details>
 
-          <div className="rounded-2xl border border-[#cfeadc] bg-[#f8fdfb] p-4">
+          <details className="group rounded-2xl border border-[#cfeadc] bg-[#f8fdfb]">
+            <FieldSectionHeader
+              icon={<Paperclip size={15} strokeWidth={2.8} />}
+              title="文件字段"
+              count={selectedFileFields.length}
+            />
+            <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
             <div className="space-y-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
@@ -1351,8 +1457,8 @@ export default function BusinessFormAdmin() {
                 </div>
               )}
             </div>
-          </div>
-
+            </div>
+          </details>
           {businessFields.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {businessFields.map((field) => {
