@@ -5914,7 +5914,20 @@ app.use('/api', (_req, res) => {
 });
 
 const distDir = path.resolve(__dirname, '..', 'dist');
-app.use(express.static(distDir));
+const noStoreStaticFiles = new Set(['index.html', 'manifest.webmanifest', 'service-worker.js']);
+
+app.use(express.static(distDir, {
+  setHeaders(res, filePath) {
+    if (noStoreStaticFiles.has(path.basename(filePath))) {
+      res.setHeader('Cache-Control', 'no-store');
+      return;
+    }
+
+    if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    }
+  },
+}));
 app.get('*', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   res.sendFile(path.join(distDir, 'index.html'));
