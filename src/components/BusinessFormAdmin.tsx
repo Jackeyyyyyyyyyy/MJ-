@@ -1228,7 +1228,7 @@ export default function BusinessFormAdmin() {
           <details className="group rounded-2xl border border-[#e5ddff] bg-[#fbf9ff]">
             <FieldSectionHeader
               icon={<Calendar size={15} strokeWidth={2.8} />}
-              title="日期/时间字段"
+              title="日期字段"
               count={selectedDateFields.length}
             />
             <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
@@ -1236,10 +1236,10 @@ export default function BusinessFormAdmin() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
                   <Calendar size={15} strokeWidth={2.8} />
-                  日期/时间字段
+                  日期字段
                 </div>
                 <p className="mt-1 text-[12px] font-semibold text-medium-gray">
-                  从上面的业务字段里选择哪些是日期或时间字段。被选中的字段会在发起申请时使用日期选择器。
+                  只需要选择年月日的字段，例如申请日期、预计完成日期。发起申请时会使用日期选择器。
                 </p>
               </div>
               {businessFields.length > 0 ? (
@@ -1270,7 +1270,7 @@ export default function BusinessFormAdmin() {
                 </div>
               ) : (
                 <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
-                  先填写业务字段，再选择哪些字段是日期/时间字段。
+                  先填写业务字段，再选择哪些字段只需要填写日期。
                 </div>
               )}
             </div>
@@ -1280,7 +1280,7 @@ export default function BusinessFormAdmin() {
           <details className="group rounded-2xl border border-[#d7e2ff] bg-[#f6f9ff]">
             <FieldSectionHeader
               icon={<Clock3 size={15} strokeWidth={2.8} />}
-              title="日期时间字段"
+              title="日期+时间字段"
               count={selectedDateTimeFields.length}
             />
             <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
@@ -1288,10 +1288,10 @@ export default function BusinessFormAdmin() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
                   <Clock3 size={15} strokeWidth={2.8} />
-                  日期时间字段
+                  日期+时间字段
                 </div>
                 <p className="mt-1 text-[12px] font-semibold text-medium-gray">
-                  适合开始时间、结束时间、补卡时间这类需要精确到小时/分钟的字段。被选中后，用户发起申请时会看到日期时间选择器。
+                  需要精确到小时/分钟的字段，例如开始时间、结束时间、补卡时间。发起申请时会使用日期时间选择器。
                 </p>
               </div>
               {businessFields.length > 0 ? (
@@ -1322,7 +1322,7 @@ export default function BusinessFormAdmin() {
                 </div>
               ) : (
                 <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
-                  先填写业务字段，再选择哪些字段是日期时间字段。
+                  先填写业务字段，再选择哪些字段需要填写日期和具体时间。
                 </div>
               )}
             </div>
@@ -1337,10 +1337,6 @@ export default function BusinessFormAdmin() {
             />
             <div className="p-4 pt-0">
             <div className="space-y-3">
-              <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
-                <Upload size={15} strokeWidth={2.8} />
-                上传字段
-              </div>
               {businessFields.length > 0 ? (
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {businessFields.map((field) => {

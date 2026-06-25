@@ -10,6 +10,7 @@ interface LoginPageProps {
 export default function LoginPage({ onLogin }: LoginPageProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberDevice, setRememberDevice] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -19,7 +20,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     setIsSubmitting(true);
 
     try {
-      const user = await auth.login(username, password);
+      const user = await auth.login(username, password, { rememberDevice });
       if (user) {
         onLogin();
       } else {
@@ -83,6 +84,19 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                 required
               />
             </div>
+
+            <label className="flex cursor-pointer select-none items-center gap-3 text-[13px] font-semibold text-medium-gray">
+              <input
+                type="checkbox"
+                checked={rememberDevice}
+                onChange={(e) => setRememberDevice(e.target.checked)}
+                className="peer sr-only"
+              />
+              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border border-border-silver bg-white transition-colors peer-checked:border-black peer-checked:bg-black">
+                <span className={`${rememberDevice ? 'block' : 'hidden'} h-2 w-1 rotate-45 border-b-2 border-r-2 border-white`} />
+              </span>
+              <span>记住此设备</span>
+            </label>
 
             {error && (
               <p className="text-[12px] text-rose-500 font-bold text-center animate-in fade-in slide-in-from-top-1">

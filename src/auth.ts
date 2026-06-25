@@ -2,11 +2,19 @@ import { User, Role } from './types';
 
 const AUTH_KEY = 'mj_approval_auth';
 const ACTIVE_ACCOUNT_KEY = 'mj_active_account';
+const PERSPECTIVE_KEY = 'mj_current_perspective';
 
 interface AuthSession {
   user: User;
   token: string;
   expiresAt: number;
+}
+
+type AuthStorage = Storage;
+
+interface StoredAuthSession {
+  session: AuthSession;
+  storage: AuthStorage;
 }
 
 export function normalizeRole(role?: string | null): Role {
@@ -26,30 +34,40 @@ function normalizeUser(user?: Partial<User> | null): User | null {
   };
 }
 
-function readSession(): AuthSession | null {
-  const data = localStorage.getItem(AUTH_KEY);
+function clearSessionStorage(storage: AuthStorage) {
+  storage.removeItem(AUTH_KEY);
+  storage.removeItem(ACTIVE_ACCOUNT_KEY);
+}
+
+function clearUserState() {
+  [localStorage, sessionStorage].forEach((storage) => {
+    storage.removeItem(AUTH_KEY);
+    storage.removeItem(PERSPECTIVE_KEY);
+    storage.removeItem(ACTIVE_ACCOUNT_KEY);
+  });
+}
+
+function parseStoredSession(storage: AuthStorage): AuthSession | null {
+  const data = storage.getItem(AUTH_KEY);
   if (!data) return null;
 
   try {
     const session = JSON.parse(data) as Partial<AuthSession>;
 
     if (!session.user || !session.token || !session.expiresAt) {
-      localStorage.removeItem(AUTH_KEY);
-      localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+      clearSessionStorage(storage);
       return null;
     }
 
     if (Date.now() > session.expiresAt) {
-      localStorage.removeItem(AUTH_KEY);
-      localStorage.removeItem('mj_current_perspective');
-      localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+      storage.removeItem(PERSPECTIVE_KEY);
+      clearSessionStorage(storage);
       return null;
     }
 
     const normalizedUser = normalizeUser(session.user);
     if (!normalizedUser) {
-      localStorage.removeItem(AUTH_KEY);
-      localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+      clearSessionStorage(storage);
       return null;
     }
 
@@ -59,37 +77,54 @@ function readSession(): AuthSession | null {
       user: normalizedUser,
     } as AuthSession;
   } catch {
-    localStorage.removeItem(AUTH_KEY);
-    localStorage.removeItem('mj_current_perspective');
-    localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+    storage.removeItem(PERSPECTIVE_KEY);
+    clearSessionStorage(storage);
     return null;
   }
 }
 
-function readActiveAccount(): User | null {
-  const session = readSession();
-  if (session?.user.role !== 'developer') return null;
+function readStoredSession(): StoredAuthSession | null {
+  const sessionOnlySession = parseStoredSession(sessionStorage);
+  if (sessionOnlySession) {
+    return { session: sessionOnlySession, storage: sessionStorage };
+  }
 
-  const data = localStorage.getItem(ACTIVE_ACCOUNT_KEY);
+  const rememberedSession = parseStoredSession(localStorage);
+  if (rememberedSession) {
+    return { session: rememberedSession, storage: localStorage };
+  }
+
+  return null;
+}
+
+function readSession(): AuthSession | null {
+  return readStoredSession()?.session || null;
+}
+
+function readActiveAccount(): User | null {
+  const storedSession = readStoredSession();
+  if (storedSession?.session.user.role !== 'developer') return null;
+
+  const data = storedSession.storage.getItem(ACTIVE_ACCOUNT_KEY);
   if (!data) return null;
 
   try {
     const account = JSON.parse(data) as Partial<User>;
     const normalizedAccount = normalizeUser(account);
     if (!normalizedAccount || normalizedAccount.role === 'developer') {
-      localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+      storedSession.storage.removeItem(ACTIVE_ACCOUNT_KEY);
       return null;
     }
 
     return normalizedAccount;
   } catch {
-    localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+    storedSession.storage.removeItem(ACTIVE_ACCOUNT_KEY);
     return null;
   }
 }
 
 export const auth = {
-  async login(username: string, password: string): Promise<User | null> {
+  async login(username: string, password: string, options: { rememberDevice?: boolean } = {}): Promise<User | null> {
     const response = await fetch('/api/auth/login', {
       method: 'POST',
       headers: {
@@ -105,15 +140,19 @@ export const auth = {
       ...session,
       user: normalizeUser(session.user) || session.user,
     };
-    localStorage.setItem(AUTH_KEY, JSON.stringify(normalizedSession));
-    localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+    const targetStorage = options.rememberDevice ? localStorage : sessionStorage;
+    const otherStorage = options.rememberDevice ? sessionStorage : localStorage;
+
+    otherStorage.removeItem(AUTH_KEY);
+    otherStorage.removeItem(PERSPECTIVE_KEY);
+    otherStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+    targetStorage.setItem(AUTH_KEY, JSON.stringify(normalizedSession));
+    targetStorage.removeItem(ACTIVE_ACCOUNT_KEY);
     return normalizedSession.user;
   },
 
   logout() {
-    localStorage.removeItem(AUTH_KEY);
-    localStorage.removeItem('mj_current_perspective');
-    localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+    clearUserState();
   },
 
   getSessionUser(): User | null {
@@ -133,29 +172,29 @@ export const auth = {
   },
 
   setPerspective(role: Role) {
-    const user = this.getSessionUser();
-    if (user?.role === 'developer') {
-      localStorage.setItem('mj_current_perspective', role);
+    const storedSession = readStoredSession();
+    if (storedSession?.session.user.role === 'developer') {
+      storedSession.storage.setItem(PERSPECTIVE_KEY, role);
     }
   },
 
   setActiveAccount(account: User) {
-    const sessionUser = this.getSessionUser();
-    if (sessionUser?.role !== 'developer') return;
+    const storedSession = readStoredSession();
+    if (storedSession?.session.user.role !== 'developer') return;
 
     const role = normalizeRole(account.role);
     if (role === 'developer') {
-      localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
-      localStorage.setItem('mj_current_perspective', 'developer');
+      storedSession.storage.removeItem(ACTIVE_ACCOUNT_KEY);
+      storedSession.storage.setItem(PERSPECTIVE_KEY, 'developer');
       return;
     }
 
-    localStorage.setItem(ACTIVE_ACCOUNT_KEY, JSON.stringify({
+    storedSession.storage.setItem(ACTIVE_ACCOUNT_KEY, JSON.stringify({
       username: account.username,
       role,
       name: account.name,
     }));
-    localStorage.setItem('mj_current_perspective', role);
+    storedSession.storage.setItem(PERSPECTIVE_KEY, role);
   },
 
   getImpersonatedUsername(): string | null {

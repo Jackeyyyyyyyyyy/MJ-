@@ -5,6 +5,7 @@ import {
   ArrowUp,
   Bot,
   Building2,
+  Check,
   CheckCircle2,
   CircleHelp,
   Crosshair,
@@ -107,7 +108,6 @@ const identityConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'ne
 const emptyApproverActionOptions: Array<{ value: EmptyApproverAction; label: string }> = [
   { value: 'auto_pass', label: '自动通过' },
   { value: 'auto_reject', label: '自动拒绝' },
-  { value: 'transfer_admin', label: '自动转交管理员' },
   { value: 'assign_members', label: '指定人员审批' },
 ];
 const workflowCurrencyOptions = ['CNY', 'USD', 'EUR', 'HKD', 'JPY', 'GBP'];
@@ -165,10 +165,6 @@ function getLegacyRoleGroupMemberIds(roleGroupId?: string) {
 
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-}
-
-function readSelectedValues(event: React.ChangeEvent<HTMLSelectElement>) {
-  return Array.from(event.currentTarget.selectedOptions, (option) => (option as HTMLOptionElement).value);
 }
 
 function inferBusinessTypeFromNames(moduleName: string, approvalTypeName: string): WorkflowBusinessType {
@@ -472,7 +468,7 @@ function buildConditionMultiValuePatch(values: string[]): Partial<WorkflowCondit
 
 function normalizeEmptyApproverAction(action?: string): EmptyApproverAction {
   if (emptyApproverActionOptions.some((option) => option.value === action)) return action as EmptyApproverAction;
-  return 'transfer_admin';
+  return 'auto_pass';
 }
 
 function getConfigurableEmptyApproverAction(action?: string): EmptyApproverAction {
@@ -587,7 +583,7 @@ function defaultStep(index: number): ApprovalStep {
       memberIds: [],
     },
     approvalMode: 'one_of',
-    emptyApproverAction: 'transfer_admin',
+    emptyApproverAction: 'auto_pass',
     emptyApproverMemberIds: [],
   };
 }
@@ -1694,34 +1690,27 @@ function ApproverChoiceRow({
   label,
   active,
   onSelect,
-  help,
 }: {
   label: string;
   active: boolean;
   onSelect: () => void;
-  help?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onSelect}
-      className="flex min-h-10 w-full items-center gap-3 text-left text-[15px] font-black text-midnight-graphite"
+      className={cn(
+        "flex min-h-9 w-full items-center gap-2.5 rounded-md px-2 text-left text-[13px] font-medium transition-colors",
+        active ? "bg-[#f2f8ff] text-interactive-blue" : "text-midnight-graphite hover:bg-lightest-gray-background"
+      )}
     >
       <span className={cn(
-        "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2",
+        "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2",
         active ? "border-interactive-blue" : "border-light-silver"
       )}>
-        {active && <span className="h-2.5 w-2.5 rounded-full bg-interactive-blue" />}
+        {active && <span className="h-2 w-2 rounded-full bg-interactive-blue" />}
       </span>
-      <span>{label}</span>
-      {help && (
-        <CircleHelp
-          className="shrink-0 text-light-gray"
-          size={15}
-          strokeWidth={2.4}
-          aria-label={help}
-        />
-      )}
+      <span className="min-w-0 truncate">{label}</span>
     </button>
   );
 }
@@ -1738,13 +1727,13 @@ function ApproverChoiceSelector({
   const selectedChoice = getApproverChoice(rule);
 
   return (
-    <div className="grid gap-6 sm:grid-cols-2">
+    <div className="grid gap-3 sm:grid-cols-2">
       <div className="space-y-3">
-        <div className="flex items-center gap-2 text-[14px] font-black text-midnight-graphite">
-          <UserRound size={16} strokeWidth={2.5} />
+        <div className="flex items-center gap-2 text-[12px] font-semibold text-medium-gray">
+          <UserRound size={15} strokeWidth={2.4} />
           常用审批人
         </div>
-        <div className="space-y-2">
+        <div className="space-y-1">
           <ApproverChoiceRow
             label="指定成员"
             active={selectedChoice === 'specific_members'}
@@ -1764,28 +1753,25 @@ function ApproverChoiceSelector({
       </div>
 
       <div className="space-y-3">
-        <div className="flex items-center gap-2 text-[14px] font-black text-midnight-graphite">
-          <UserCheck size={16} strokeWidth={2.5} />
+        <div className="flex items-center gap-2 text-[12px] font-semibold text-medium-gray">
+          <UserCheck size={15} strokeWidth={2.4} />
           主管
         </div>
-        <div className="space-y-2">
+        <div className="space-y-1">
           <ApproverChoiceRow
             label="直属主管"
             active={selectedChoice === 'direct_supervisor'}
             onSelect={() => onChange('direct_supervisor')}
-            help="按发起人的直属上级审批。"
           />
           <ApproverChoiceRow
             label="部门主管"
             active={selectedChoice === 'department_manager'}
             onSelect={() => onChange('department_manager')}
-            help="按组织架构里勾选的部门主管审批。"
           />
           <ApproverChoiceRow
             label="连续多级主管"
             active={selectedChoice === 'multi_supervisor'}
             onSelect={() => onChange('multi_supervisor')}
-            help="按发起人的上级链连续审批。"
           />
         </div>
       </div>
@@ -1813,12 +1799,12 @@ function DepartmentManagerRuleControl({
   const shouldIncludeSelf = rule.departmentManagerIncludeSelf === true;
 
   return (
-    <div className="space-y-3">
-      <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">部门主管</span>
-      <label className="flex items-center gap-3">
-        <span className="shrink-0 text-[13px] font-black text-medium-gray">发起人的</span>
+    <div className="space-y-3 rounded-md border border-[#d7d7dc] bg-white p-3">
+      <span className="text-[12px] font-semibold text-medium-gray">部门主管规则</span>
+      <label className="grid gap-2">
+        <span className="shrink-0 text-[12px] font-medium text-medium-gray">发起人的</span>
         <select
-          className="input-field h-11 text-[13px]"
+          className={inspectorControlClassName}
           value={level}
           onChange={(event) => onChange(patchDepartmentManagerRule(rule, { departmentManagerLevel: Number(event.target.value) }))}
         >
@@ -1827,7 +1813,7 @@ function DepartmentManagerRuleControl({
           ))}
         </select>
       </label>
-      <label className="flex items-center gap-3 text-[13px] font-black text-midnight-graphite">
+      <label className="flex items-center gap-2.5 text-[13px] font-medium text-midnight-graphite">
         <input
           type="checkbox"
           checked={shouldFallbackToParent}
@@ -1837,7 +1823,7 @@ function DepartmentManagerRuleControl({
         找不到主管时，由上级主管代审批
         <CircleHelp className="text-light-gray" size={15} strokeWidth={2.4} />
       </label>
-      <label className="flex items-center gap-3 text-[13px] font-black text-midnight-graphite">
+      <label className="flex items-center gap-2.5 text-[13px] font-medium text-midnight-graphite">
         <input
           type="checkbox"
           checked={shouldIncludeSelf}
@@ -1856,7 +1842,7 @@ function getApprovalModeLabel(mode: ApprovalMode) {
 
 function getEmptyApproverActionLabel(action: ApprovalStep['emptyApproverAction']) {
   const normalizedAction = getConfigurableEmptyApproverAction(action);
-  return emptyApproverActionOptions.find((option) => option.value === normalizedAction)?.label || '自动转交管理员';
+  return emptyApproverActionOptions.find((option) => option.value === normalizedAction)?.label || '自动通过';
 }
 
 type FlowAnchorSide = 'top' | 'bottom' | 'left' | 'right';
@@ -1869,6 +1855,43 @@ const FLOW_ARROW_WIDTH = 10;
 const FLOW_ARROW_HEIGHT = 7;
 const FLOW_BRANCH_CARD_WIDTH = 300;
 const FLOW_BRANCH_GAP = 180;
+
+function normalizeFlowBranchWidths(branchWidths: number[]) {
+  return branchWidths.length > 0
+    ? branchWidths.map((width) => Math.max(FLOW_BRANCH_CARD_WIDTH, width))
+    : [FLOW_BRANCH_CARD_WIDTH];
+}
+
+function getFlowBranchLayoutWidth(branchWidths: number[]) {
+  const widths = normalizeFlowBranchWidths(branchWidths);
+  return widths.reduce((total, width) => total + width, 0) + Math.max(0, widths.length - 1) * FLOW_BRANCH_GAP;
+}
+
+function getFlowBranchCenters(branchWidths: number[]) {
+  const widths = normalizeFlowBranchWidths(branchWidths);
+  let cursor = 0;
+
+  return widths.map((width) => {
+    const center = cursor + width / 2;
+    cursor += width + FLOW_BRANCH_GAP;
+    return center;
+  });
+}
+
+function getFlowConditionBranchWidths(conditions: WorkflowConditionBranch[] = []) {
+  if (conditions.length === 0) return [FLOW_BRANCH_CARD_WIDTH];
+
+  return conditions.map((condition) => (
+    Math.max(FLOW_BRANCH_CARD_WIDTH, getFlowSequenceLayoutWidth(condition.nodes || []))
+  ));
+}
+
+function getFlowSequenceLayoutWidth(nodes: WorkflowNode[] = []) {
+  return nodes.reduce((maxWidth, node) => {
+    if (node.type !== 'condition') return Math.max(maxWidth, FLOW_BRANCH_CARD_WIDTH);
+    return Math.max(maxWidth, getFlowBranchLayoutWidth(getFlowConditionBranchWidths(node.conditions || [])));
+  }, FLOW_BRANCH_CARD_WIDTH);
+}
 
 function getNodeAnchor(node: FlowNodeBox, side: FlowAnchorSide): FlowPoint {
   switch (side) {
@@ -2012,37 +2035,41 @@ function FlowConnector({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function FlowBranchRail({ count }: { count: number }) {
-  if (count <= 1) return null;
+function FlowBranchRail({ branchWidths }: { branchWidths: number[] }) {
+  const widths = normalizeFlowBranchWidths(branchWidths);
+  if (widths.length <= 1) return null;
 
-  const width = count * FLOW_BRANCH_CARD_WIDTH + (count - 1) * FLOW_BRANCH_GAP;
+  const width = getFlowBranchLayoutWidth(widths);
   const height = 88;
-  const cardStep = FLOW_BRANCH_CARD_WIDTH + FLOW_BRANCH_GAP;
-  const firstCenter = FLOW_BRANCH_CARD_WIDTH / 2;
-  const lastCenter = firstCenter + (count - 1) * cardStep;
-  const branchCenters = Array.from({ length: count }, (_, index) => firstCenter + index * cardStep);
+  const branchCenters = getFlowBranchCenters(widths);
+  const firstCenter = branchCenters[0];
+  const lastCenter = branchCenters[branchCenters.length - 1];
   const splitY = 38;
   const arrowY = height - FLOW_ARROW_HEIGHT - 2;
 
   return (
-    <FlowConnectorLayer
-      arrows={branchCenters.map((center) => ({ x: center, y: arrowY }))}
-      className="top-0 h-[88px]"
-      height={height}
-      paths={[
-        buildOrthogonalPath({ x: width / 2, y: 0 }, { x: width / 2, y: splitY }),
-        `M ${firstCenter} ${splitY} H ${lastCenter}`,
-        ...branchCenters.map((center) => buildOrthogonalPath({ x: center, y: splitY }, { x: center, y: arrowY })),
-      ]}
-      width={width}
-    />
+    <div className="relative h-[88px]" style={{ width: `${width}px` }}>
+      <FlowConnectorLayer
+        arrows={branchCenters.map((center) => ({ x: center, y: arrowY }))}
+        className="top-0 h-[88px]"
+        height={height}
+        paths={[
+          buildOrthogonalPath({ x: width / 2, y: 0 }, { x: width / 2, y: splitY }),
+          `M ${firstCenter} ${splitY} H ${lastCenter}`,
+          ...branchCenters.map((center) => buildOrthogonalPath({ x: center, y: splitY }, { x: center, y: arrowY })),
+        ]}
+        width={width}
+      />
+    </div>
   );
 }
 
 const FlowBranchLane: React.FC<{
+  width: number;
   showBottomConnector: boolean;
   children: React.ReactNode;
 }> = ({
+  width,
   showBottomConnector,
   children,
 }) => {
@@ -2050,7 +2077,10 @@ const FlowBranchLane: React.FC<{
   const height = 56;
 
   return (
-    <div className="relative mx-auto flex h-full w-[300px] min-w-[300px] flex-col items-center">
+    <div
+      className="relative mx-auto flex h-full flex-col items-center"
+      style={{ minWidth: `${width}px`, width: `${width}px` }}
+    >
       <div className="relative z-10 flex w-full flex-col items-center">
         {children}
       </div>
@@ -2080,14 +2110,15 @@ const FlowBranchLane: React.FC<{
   );
 };
 
-function FlowMergeRail({ count }: { count: number }) {
-  if (count <= 1) return <FlowConnector />;
+function FlowMergeRail({ branchWidths }: { branchWidths: number[] }) {
+  const widths = normalizeFlowBranchWidths(branchWidths);
+  if (widths.length <= 1) return <FlowConnector />;
 
-  const width = count * FLOW_BRANCH_CARD_WIDTH + (count - 1) * FLOW_BRANCH_GAP;
+  const width = getFlowBranchLayoutWidth(widths);
   const height = 88;
-  const cardStep = FLOW_BRANCH_CARD_WIDTH + FLOW_BRANCH_GAP;
-  const firstCenter = FLOW_BRANCH_CARD_WIDTH / 2;
-  const lastCenter = firstCenter + (count - 1) * cardStep;
+  const branchCenters = getFlowBranchCenters(widths);
+  const firstCenter = branchCenters[0];
+  const lastCenter = branchCenters[branchCenters.length - 1];
   const mergeY = 34;
   const arrowY = height - FLOW_ARROW_HEIGHT - 2;
 
@@ -2541,46 +2572,57 @@ function FlowSequence({
             </div>
           )}
 
-          {node.type === 'condition' && (
-            <div className="relative my-1 pt-4">
-              <FlowBranchRail count={Math.max(1, node.conditions?.length || 0)} />
-              <div
-                className="relative grid items-start"
-                style={{
-                  columnGap: `${FLOW_BRANCH_GAP}px`,
-                  gridTemplateColumns: `repeat(${Math.max(1, node.conditions?.length || 0)}, ${FLOW_BRANCH_CARD_WIDTH}px)`,
-                }}
-              >
-                {(node.conditions || []).map((condition, conditionIndex) => (
-                  <FlowBranchLane key={condition.id} showBottomConnector={(node.conditions?.length || 0) > 1}>
-                    <FlowNode
-                      tone="condition"
-                      kicker={condition.isDefault ? '其余情况' : `条件 ${conditionIndex + 1}`}
-                      title={condition.title || (condition.isDefault ? '其余情况' : `条件 ${conditionIndex + 1}`)}
-                      subtitle={getFlowBranchSubtitle(condition, directory)}
-                      icon={<GitBranch size={17} strokeWidth={2.5} />}
-                      selected={selection.type === 'flow-node' && selection.nodeId === node.id}
-                      onClick={() => onSelect({ type: 'flow-node', nodeId: node.id })}
-                    />
-                    <FlowSequence
-                      nodes={condition.nodes || []}
-                      path={[...path, condition.id]}
-                      directory={directory}
-                      previewSubmitter={previewSubmitter}
-                      selection={selection}
-                      validation={validation}
-                      onSelect={onSelect}
-                      onInsert={onInsert}
-                      processorRule={processorRule}
-                      canUseRuleConditions={canUseRuleConditions}
-                      canAddProcessorTask={canAddProcessorTask}
-                    />
-                  </FlowBranchLane>
-                ))}
+          {node.type === 'condition' && (() => {
+            const conditionBranches = node.conditions || [];
+            const branchWidths = getFlowConditionBranchWidths(conditionBranches);
+
+            return (
+              <div className="relative my-1 pt-4">
+                <FlowBranchRail branchWidths={branchWidths} />
+                <div
+                  className="relative grid items-start"
+                  style={{
+                    columnGap: `${FLOW_BRANCH_GAP}px`,
+                    gridTemplateColumns: branchWidths.map((width) => `${width}px`).join(' '),
+                  }}
+                >
+                  {conditionBranches.map((condition, conditionIndex) => (
+                    <FlowBranchLane
+                      key={condition.id}
+                      width={branchWidths[conditionIndex] || FLOW_BRANCH_CARD_WIDTH}
+                      showBottomConnector={conditionBranches.length > 1}
+                    >
+                      <div className="w-[300px]">
+                        <FlowNode
+                          tone="condition"
+                          kicker={condition.isDefault ? '其余情况' : `条件 ${conditionIndex + 1}`}
+                          title={condition.title || (condition.isDefault ? '其余情况' : `条件 ${conditionIndex + 1}`)}
+                          subtitle={getFlowBranchSubtitle(condition, directory)}
+                          icon={<GitBranch size={17} strokeWidth={2.5} />}
+                          selected={selection.type === 'flow-node' && selection.nodeId === node.id}
+                          onClick={() => onSelect({ type: 'flow-node', nodeId: node.id })}
+                        />
+                      </div>
+                      <FlowSequence
+                        nodes={condition.nodes || []}
+                        path={[...path, condition.id]}
+                        directory={directory}
+                        previewSubmitter={previewSubmitter}
+                        selection={selection}
+                        validation={validation}
+                        onSelect={onSelect}
+                        onInsert={onInsert}
+                        processorRule={processorRule}
+                        canUseRuleConditions={canUseRuleConditions}
+                        canAddProcessorTask={canAddProcessorTask}
+                      />
+                    </FlowBranchLane>
+                  ))}
+                </div>
+                <FlowMergeRail branchWidths={branchWidths} />
               </div>
-              <FlowMergeRail count={Math.max(1, node.conditions?.length || 0)} />
-            </div>
-          )}
+            );
+          })()}
 
           <FlowGap
             compact
@@ -2689,9 +2731,10 @@ function WorkflowFlowDesigner({
     label: field,
   }));
   const hasProcessorTask = containsProcessorNode(flowNodes);
-  const branchFlowWidth = flowBranches.length > 0
+  const legacyBranchFlowWidth = flowBranches.length > 0
     ? flowBranches.length * FLOW_BRANCH_CARD_WIDTH + Math.max(0, flowBranches.length - 1) * FLOW_BRANCH_GAP
     : FLOW_BRANCH_CARD_WIDTH;
+  const branchFlowWidth = Math.max(legacyBranchFlowWidth, getFlowSequenceLayoutWidth(flowNodes));
   const activeSelection: DesignerSelection = (
     (selection.type === 'branch' && selectedBranch)
     || (selection.type === 'step' && selectedStep)
@@ -2921,7 +2964,11 @@ function WorkflowFlowDesigner({
               transformOrigin: '0 0',
             }}
           >
-            <div ref={canvasFlowRef} className="mx-auto flex max-w-[1480px] flex-col items-center">
+            <div
+              ref={canvasFlowRef}
+              className="mx-auto flex flex-col items-center"
+              style={{ width: `${branchFlowWidth}px` }}
+            >
               <div className="w-[300px]">
                 <FlowNode
                   tone="submit"
@@ -3025,13 +3072,50 @@ function InspectorHeader({
   description: string;
 }) {
   return (
-    <div className="border-b border-border-silver px-4 py-4">
-      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-light-gray">{label}</p>
-      <h3 className="mt-1 text-[17px] font-black text-midnight-graphite">{title}</h3>
+    <div className="border-b border-[#e5e5ea] bg-white px-5 py-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-medium-gray">{label}</p>
+      <h3 className="mt-1 text-[20px] font-semibold leading-7 text-midnight-graphite">{title}</h3>
       <p className="hidden">{description}</p>
     </div>
   );
 }
+
+function InspectorSection({
+  title,
+  children,
+  className,
+}: {
+  title?: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={cn("space-y-3 border-b border-[#ececf0] px-5 py-4 last:border-b-0", className)}>
+      {title && (
+        <h4 className="text-[13px] font-semibold text-medium-gray">{title}</h4>
+      )}
+      {children}
+    </section>
+  );
+}
+
+function InspectorField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block space-y-2">
+      <span className="text-[12px] font-semibold text-medium-gray">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+const inspectorControlClassName = "h-10 w-full rounded-md border border-[#d7d7dc] bg-white px-3 text-[13px] font-medium text-midnight-graphite outline-none transition-all placeholder:text-light-gray focus:border-interactive-blue focus:ring-2 focus:ring-sky-blue-highlight";
+const inspectorDangerButtonClassName = "flex h-10 w-full items-center justify-center rounded-md border border-[#ffd1d8] bg-[#fff5f6] text-[13px] font-semibold text-[#c62828] transition-colors hover:border-[#f6a8b2] hover:bg-[#ffebee]";
 
 function SegmentedButton({
   isActive,
@@ -3434,7 +3518,7 @@ function StepEditor({
         )}
 
         <label className="block space-y-2">
-          <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">节点名称</span>
+          <span className="text-[12px] font-medium uppercase tracking-wider text-light-gray">节点名称</span>
           <input
             className="input-field text-[14px]"
             value={step.name}
@@ -3511,7 +3595,7 @@ function StepEditor({
         {step.approverRule.type === 'multi_supervisor' && getApproverChoice(step.approverRule) === 'multi_supervisor' && (
           <div className="space-y-2">
             <label className="block space-y-2">
-              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">主管层级</span>
+              <span className="text-[12px] font-medium uppercase tracking-wider text-light-gray">主管层级</span>
               <input
                 className="input-field text-[14px]"
                 value={step.approverRule.supervisorLevels ?? formatSupervisorLevelsText(step.approverRule)}
@@ -3533,7 +3617,7 @@ function StepEditor({
 
         {supportsApprovalMode(step.approverRule) && (
           <label className="block space-y-2">
-            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">通过方式</span>
+            <span className="text-[12px] font-medium uppercase tracking-wider text-light-gray">通过方式</span>
             <select
               className="input-field text-[13px]"
               value={step.approvalMode}
@@ -3854,37 +3938,38 @@ function DesignerInspector({
     return (
       <aside className={inspectorClassName}>
         <InspectorHeader label="审批节点" title={selectedFlowNode.title || '审批节点'} description="配置当前审批节点。" />
-        <div className="space-y-5 p-5">
-          <label className="block space-y-2">
-            <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">节点名称</span>
+        <div>
+          <InspectorSection title="基础信息">
+            <InspectorField label="节点名称">
             <input
-              className="input-field text-[14px]"
+              className={inspectorControlClassName}
               value={selectedFlowNode.title || ''}
               onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, { title: event.target.value })}
             />
-          </label>
-          <ApproverChoiceSelector
-            rule={rule}
-            formMemberFieldOptions={formMemberFieldOptions}
-            onChange={(choice) => onUpdateFlowNode(selectedFlowNode.id, {
-              rule: createApproverRuleForChoice(choice, formMemberFieldOptions),
-              approvalMode: getApprovalModeForChoice(choice, selectedFlowNode.approvalMode),
-            })}
-          />
-          {rule.type === 'specific_members' && (
-            <label className="block space-y-2">
-              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">指定成员</span>
+            </InspectorField>
+          </InspectorSection>
+
+          <InspectorSection title="审批人">
+            <ApproverChoiceSelector
+              rule={rule}
+              formMemberFieldOptions={formMemberFieldOptions}
+              onChange={(choice) => onUpdateFlowNode(selectedFlowNode.id, {
+                rule: createApproverRuleForChoice(choice, formMemberFieldOptions),
+                approvalMode: getApprovalModeForChoice(choice, selectedFlowNode.approvalMode),
+              })}
+            />
+            {rule.type === 'specific_members' && (
+              <InspectorField label="指定成员">
               <MultiSelect
                 value={rule.memberIds || []}
                 options={memberOptions}
                 onChange={(memberIds) => onUpdateFlowNode(selectedFlowNode.id, { rule: { ...rule, memberIds } })}
                 emptyText="暂无成员"
               />
-            </label>
-          )}
-          {rule.type === 'specific_positions' && (
-            <label className="block space-y-2">
-              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">指定职位</span>
+              </InspectorField>
+            )}
+            {rule.type === 'specific_positions' && (
+              <InspectorField label="指定职位">
               <MultiSelect
                 value={rule.positionTitles || []}
                 options={positionOptions}
@@ -3892,13 +3977,12 @@ function DesignerInspector({
                 emptyText="暂无职位"
                 searchPlaceholder="搜索职位"
               />
-            </label>
-          )}
-          {(rule.type === 'form_member_field' || rule.type === 'initiator_select') && (
-            <label className="block space-y-2">
-              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">发起人自选字段</span>
+              </InspectorField>
+            )}
+            {(rule.type === 'form_member_field' || rule.type === 'initiator_select') && (
+              <InspectorField label="发起人自选字段">
               <select
-                className="input-field text-[13px]"
+                className={inspectorControlClassName}
                 value={rule.fieldName || ''}
                 onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, {
                   rule: { ...rule, fieldName: event.target.value },
@@ -3910,31 +3994,17 @@ function DesignerInspector({
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
-            </label>
-          )}
-          <DepartmentManagerRuleControl
-            rule={rule}
-            onChange={(nextRule) => onUpdateFlowNode(selectedFlowNode.id, { rule: nextRule })}
-          />
-          {supportsApprovalMode(rule) && (
-            <label className="block space-y-2">
-              <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">通过方式</span>
-              <select
-                className="input-field text-[13px]"
-                value={selectedFlowNode.approvalMode || 'one_of'}
-                onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, { approvalMode: event.target.value as ApprovalMode })}
-              >
-                <option value="one_of">多人任意一人通过</option>
-                <option value="all_of">所有人都要通过</option>
-              </select>
-            </label>
-          )}
-          {rule.type === 'multi_supervisor' && getApproverChoice(rule) === 'multi_supervisor' && (
-            <div className="space-y-2">
-              <label className="block space-y-2">
-                <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">主管层级</span>
+              </InspectorField>
+            )}
+            <DepartmentManagerRuleControl
+              rule={rule}
+              onChange={(nextRule) => onUpdateFlowNode(selectedFlowNode.id, { rule: nextRule })}
+            />
+            {rule.type === 'multi_supervisor' && getApproverChoice(rule) === 'multi_supervisor' && (
+              <div className="space-y-2">
+                <InspectorField label="主管层级">
                 <input
-                  className="input-field text-[14px]"
+                  className={inspectorControlClassName}
                   value={rule.supervisorLevels ?? formatSupervisorLevelsText(rule)}
                   placeholder="例如：1-3 或 1,3"
                   onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, {
@@ -3942,22 +4012,61 @@ function DesignerInspector({
                     approvalMode: 'one_of',
                   })}
                 />
-              </label>
-              <SupervisorChainPreview
-                rule={rule}
-                directory={directory}
-                previewSubmitter={previewSubmitter}
-                previewKey={selectedFlowNode.id}
-              />
-            </div>
+                </InspectorField>
+                <SupervisorChainPreview
+                  rule={rule}
+                  directory={directory}
+                  previewSubmitter={previewSubmitter}
+                  previewKey={selectedFlowNode.id}
+                />
+              </div>
+            )}
+          </InspectorSection>
+
+          {supportsApprovalMode(rule) && (
+            <InspectorSection title="通过方式">
+              <InspectorField label="审批规则">
+                <select
+                  className={inspectorControlClassName}
+                  value={selectedFlowNode.approvalMode || 'one_of'}
+                  onChange={(event) => onUpdateFlowNode(selectedFlowNode.id, { approvalMode: event.target.value as ApprovalMode })}
+                >
+                  <option value="one_of">多人任意一人通过</option>
+                  <option value="all_of">所有人都要通过</option>
+                </select>
+              </InspectorField>
+            </InspectorSection>
           )}
-          <button
-            type="button"
-            onClick={() => onRemoveFlowNode(selectedFlowNode.id)}
-            className="h-11 w-full rounded-full bg-[#ffebee] text-[13px] font-black text-[#c62828]"
-          >
-            删除这个节点
-          </button>
+
+          <InspectorSection>
+            <EmptyApproverActionControl
+              step={{
+                id: selectedFlowNode.id,
+                name: selectedFlowNode.title || '审批节点',
+                approverRule: rule,
+                approvalMode: selectedFlowNode.approvalMode || 'one_of',
+                emptyApproverAction: getConfigurableEmptyApproverAction(selectedFlowNode.emptyApproverAction),
+                emptyApproverMemberIds: selectedFlowNode.emptyApproverMemberIds,
+              }}
+              memberOptions={memberOptions}
+              onChange={(patch) => {
+                const nextPatch: Partial<WorkflowNode> = {};
+                if (patch.emptyApproverAction !== undefined) nextPatch.emptyApproverAction = patch.emptyApproverAction;
+                if (patch.emptyApproverMemberIds !== undefined) nextPatch.emptyApproverMemberIds = patch.emptyApproverMemberIds;
+                onUpdateFlowNode(selectedFlowNode.id, nextPatch);
+              }}
+            />
+          </InspectorSection>
+
+          <InspectorSection title="危险操作">
+            <button
+              type="button"
+              onClick={() => onRemoveFlowNode(selectedFlowNode.id)}
+              className={inspectorDangerButtonClassName}
+            >
+              删除这个节点
+            </button>
+          </InspectorSection>
         </div>
       </aside>
     );
@@ -4323,10 +4432,6 @@ function MultiSelect({
       || option.value.toLowerCase().includes(normalizedKeyword)
     ));
   }, [normalizedKeyword, options]);
-  const visibleValues = useMemo(
-    () => new Set(filteredOptions.map((option) => option.value)),
-    [filteredOptions],
-  );
   const selectedOptions = useMemo(() => {
     const optionMap = new Map(options.map((option) => [option.value, option.label]));
     return value.map((selectedValue) => ({
@@ -4334,35 +4439,39 @@ function MultiSelect({
       label: optionMap.get(selectedValue) || selectedValue,
     }));
   }, [options, value]);
-  const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const selectedVisibleValues = readSelectedValues(event);
-    const hiddenSelectedValues = value.filter((selectedValue) => !visibleValues.has(selectedValue));
-    onChange([...hiddenSelectedValues, ...selectedVisibleValues]);
+  const selectedValueSet = useMemo(() => new Set(value), [value]);
+  const toggleValue = (nextValue: string) => {
+    if (selectedValueSet.has(nextValue)) {
+      onChange(value.filter((currentValue) => currentValue !== nextValue));
+      return;
+    }
+
+    onChange([...value, nextValue]);
   };
   const removeSelectedValue = (selectedValue: string) => {
     onChange(value.filter((currentValue) => currentValue !== selectedValue));
   };
 
   return (
-    <div className="space-y-2">
-      <div className="relative">
+    <div className="space-y-2 rounded-md border border-[#d7d7dc] bg-white p-2">
+      <div className="relative rounded-md bg-lightest-gray-background">
         <Search
           aria-hidden="true"
           className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-light-gray"
-          size={15}
-          strokeWidth={2.5}
+          size={14}
+          strokeWidth={2.4}
         />
         <input
-          className="input-field h-10 py-2 pl-9 pr-3 text-[13px]"
+          className="h-9 w-full rounded-md bg-transparent py-2 pl-9 pr-3 text-[13px] font-medium text-midnight-graphite outline-none placeholder:text-light-gray focus:ring-2 focus:ring-sky-blue-highlight"
           value={keyword}
           onChange={(event) => setKeyword(event.target.value)}
           placeholder={searchPlaceholder}
         />
       </div>
       {selectedOptions.length > 0 && (
-        <div className="rounded-xl border border-border-silver bg-white px-3 py-2">
+        <div className="rounded-md bg-[#f8f8fa] px-2 py-2">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="text-[11px] font-black text-medium-gray">已选 {selectedOptions.length} 项</span>
+            <span className="text-[11px] font-semibold text-medium-gray">已选 {selectedOptions.length} 项</span>
             <button
               type="button"
               onClick={(event) => {
@@ -4370,7 +4479,7 @@ function MultiSelect({
                 event.stopPropagation();
                 onChange([]);
               }}
-              className="text-[11px] font-black text-interactive-blue hover:text-midnight-graphite"
+              className="text-[11px] font-semibold text-interactive-blue hover:text-midnight-graphite"
             >
               清空
             </button>
@@ -4385,7 +4494,7 @@ function MultiSelect({
                   event.stopPropagation();
                   removeSelectedValue(option.value);
                 }}
-                className="group inline-flex max-w-full items-center gap-1 rounded-full bg-lightest-gray-background px-2.5 py-1 text-left text-[12px] font-bold text-midnight-graphite transition-colors hover:bg-[#ffebee] hover:text-[#c62828]"
+                className="group inline-flex max-w-full items-center gap-1 rounded-full bg-white px-2.5 py-1 text-left text-[12px] font-medium text-midnight-graphite transition-colors hover:bg-[#ffebee] hover:text-[#c62828]"
                 aria-label={`取消选择 ${option.label}`}
                 title={`取消选择 ${option.label}`}
               >
@@ -4396,24 +4505,39 @@ function MultiSelect({
           </div>
         </div>
       )}
-      <select
-        multiple
-        className="input-field min-h-[116px] text-[13px]"
-        value={value}
-        onChange={handleChange}
-      >
+      <div className="max-h-[172px] overflow-y-auto rounded-md">
         {options.length === 0 ? (
-          <option disabled>{emptyText}</option>
+          <div className="px-3 py-5 text-center text-[12px] font-medium text-light-gray">{emptyText}</div>
         ) : filteredOptions.length === 0 ? (
-          <option disabled>未找到匹配项</option>
+          <div className="px-3 py-5 text-center text-[12px] font-medium text-light-gray">未找到匹配项</div>
         ) : (
-          filteredOptions.map((option) => (
-            <option key={option.value} value={option.value}>{option.label}</option>
-          ))
+          filteredOptions.map((option) => {
+            const isSelected = selectedValueSet.has(option.value);
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => toggleValue(option.value)}
+                className={cn(
+                  "flex min-h-9 w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] font-medium transition-colors",
+                  isSelected ? "bg-[#e7f1ff] text-interactive-blue" : "text-midnight-graphite hover:bg-lightest-gray-background",
+                )}
+              >
+                <span className={cn(
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                  isSelected ? "border-interactive-blue bg-interactive-blue text-white" : "border-light-silver bg-white",
+                )}>
+                  {isSelected && <Check size={12} strokeWidth={3} />}
+                </span>
+                <span className="min-w-0 truncate">{option.label}</span>
+              </button>
+            );
+          })
         )}
-      </select>
+      </div>
       {options.length > 0 && (
-        <p className="text-[11px] font-bold text-light-gray">
+        <p className="px-1 text-[11px] font-semibold text-light-gray">
           {normalizedKeyword ? `找到 ${filteredOptions.length} 项` : `共 ${options.length} 项`}
           {value.length > 0 ? ` · 已选 ${value.length} 项` : ''}
         </p>
@@ -4443,25 +4567,27 @@ function EmptyApproverActionControl({
 
   return (
     <div className="space-y-3">
-      <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">审批人为空时</span>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <span className="block text-[13px] font-semibold text-medium-gray">审批人为空时</span>
+      <div className="space-y-1.5">
         {emptyApproverActionOptions.map((option) => (
           <button
             key={option.value}
             type="button"
             onClick={() => updateAction(option.value)}
             className={cn(
-              "flex min-h-11 items-center justify-between rounded-xl border px-3 py-2 text-left text-[13px] font-black transition-all",
+              "flex min-h-10 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] font-medium transition-colors",
               selectedAction === option.value
-                ? "border-interactive-blue bg-[#e7f1ff] text-interactive-blue"
-                : "border-border-silver bg-white text-midnight-graphite hover:border-interactive-blue/40",
+                ? "bg-[#f2f8ff] text-interactive-blue"
+                : "text-midnight-graphite hover:bg-lightest-gray-background",
             )}
           >
             <span>{option.label}</span>
             <span className={cn(
-              "h-4 w-4 rounded-full border-2",
-              selectedAction === option.value ? "border-interactive-blue bg-interactive-blue" : "border-light-silver bg-white",
-            )} />
+              "order-first flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2",
+              selectedAction === option.value ? "border-interactive-blue" : "border-light-silver bg-white",
+            )}>
+              {selectedAction === option.value && <span className="h-2 w-2 rounded-full bg-interactive-blue" />}
+            </span>
           </button>
         ))}
       </div>
