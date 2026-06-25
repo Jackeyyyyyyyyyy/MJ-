@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Building2, Crosshair, GitBranch, Link2, Maximize2, Minimize2, Minus, Plus, Save, Trash2, UserRound, Users } from 'lucide-react';
+import { Building2, Crosshair, GitBranch, Link2, Maximize2, Minimize2, Minus, Plus, Save, Search, Trash2, UserRound, Users } from 'lucide-react';
 import { storage } from '../storage';
 import { OrganizationDepartment, OrganizationDirectory, OrganizationMember, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
@@ -19,6 +19,16 @@ function getDepartmentName(directory: OrganizationDirectory, departmentId?: stri
 
 function getMemberName(directory: OrganizationDirectory, memberId?: string) {
   return directory.members.find((member) => member.id === memberId)?.name || '未配置成员';
+}
+
+function normalizeMemberIds(memberIds?: string[]) {
+  return [...new Set((memberIds || []).map((memberId) => memberId.trim()).filter(Boolean))];
+}
+
+function getDepartmentManagerNames(directory: OrganizationDirectory, department?: OrganizationDepartment | null) {
+  return normalizeMemberIds(department?.managerMemberIds)
+    .map((memberId) => directory.members.find((member) => member.id === memberId && member.enabled !== false)?.name)
+    .filter(Boolean);
 }
 
 interface DepartmentChartNode {
@@ -318,6 +328,14 @@ function buildHealthMessages(directory: OrganizationDirectory) {
       messages.push({ tone: 'danger', text: `${department.name} 的部门层级存在循环` });
     }
 
+    normalizeMemberIds(department.managerMemberIds).forEach((managerMemberId) => {
+      const manager = directory.members.find((member) => member.id === managerMemberId);
+      if (!manager) {
+        messages.push({ tone: 'danger', text: `${department.name} 的部门主管不存在` });
+      } else if (manager.enabled === false) {
+        messages.push({ tone: 'warning', text: `${department.name} 的部门主管 ${manager.name} 已停用` });
+      }
+    });
   });
 
   const unboundMembers = directory.members.filter((member) => !member.accountUsername && member.enabled !== false);
@@ -503,6 +521,115 @@ function ChartViewport({ children }: { children: React.ReactNode }) {
   );
 }
 
+function DepartmentManagerPicker({
+  department,
+  directory,
+  onChange,
+}: {
+  department: OrganizationDepartment;
+  directory: OrganizationDirectory;
+  onChange: (managerMemberIds: string[]) => void;
+}) {
+  const [keyword, setKeyword] = useState('');
+  const selectedIds = normalizeMemberIds(department.managerMemberIds);
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const normalizedKeyword = keyword.trim().toLowerCase();
+  const memberOptions = useMemo(() => (
+    directory.members
+      .filter((member) => member.enabled !== false)
+      .map((member) => {
+        const departmentName = getDepartmentName(directory, member.departmentId);
+        return {
+          member,
+          searchText: [member.name, departmentName, member.title, member.accountUsername].filter(Boolean).join(' ').toLowerCase(),
+          description: [departmentName, member.title, member.accountUsername ? `账号 ${member.accountUsername}` : '未绑定账号'].filter(Boolean).join(' / '),
+        };
+      })
+  ), [directory]);
+  const filteredOptions = useMemo(() => {
+    if (!normalizedKeyword) return memberOptions;
+    return memberOptions.filter((option) => option.searchText.includes(normalizedKeyword));
+  }, [memberOptions, normalizedKeyword]);
+  const selectedManagers = selectedIds
+    .map((memberId) => directory.members.find((member) => member.id === memberId))
+    .filter(Boolean) as OrganizationMember[];
+
+  const toggleManager = (memberId: string, checked: boolean) => {
+    if (checked) {
+      onChange(normalizeMemberIds([...selectedIds, memberId]));
+      return;
+    }
+
+    onChange(selectedIds.filter((selectedId) => selectedId !== memberId));
+  };
+
+  return (
+    <div className="space-y-2 lg:col-span-2">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[12px] font-black text-light-gray uppercase tracking-wider">部门主管</span>
+        <span className="text-[11px] font-bold text-medium-gray">已选 {selectedIds.length} 人</span>
+      </div>
+      <div className="relative">
+        <Search
+          aria-hidden="true"
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-light-gray"
+          size={15}
+          strokeWidth={2.5}
+        />
+        <input
+          className="input-field h-10 py-2 pl-9 pr-3 text-[13px]"
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
+          placeholder="搜索姓名、部门、岗位或账号"
+        />
+      </div>
+      {selectedManagers.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selectedManagers.map((member) => (
+            <button
+              key={member.id}
+              type="button"
+              onClick={() => toggleManager(member.id, false)}
+              className="rounded-full bg-[#e8f5e9] px-2.5 py-1 text-[11px] font-black text-[#2e7d32] hover:bg-[#d7edd9]"
+              title="点击取消部门主管"
+            >
+              {member.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="max-h-56 overflow-y-auto rounded-2xl border border-border-silver bg-white p-2">
+        {memberOptions.length === 0 ? (
+          <p className="px-3 py-6 text-center text-[13px] font-bold text-medium-gray">暂无启用成员</p>
+        ) : filteredOptions.length === 0 ? (
+          <p className="px-3 py-6 text-center text-[13px] font-bold text-medium-gray">未找到匹配成员</p>
+        ) : (
+          filteredOptions.map(({ member, description }) => (
+            <label
+              key={member.id}
+              className={cn(
+                "flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 transition-colors",
+                selectedIdSet.has(member.id) ? "bg-[#f1faee]" : "hover:bg-lightest-gray-background"
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={selectedIdSet.has(member.id)}
+                onChange={(event) => toggleManager(member.id, event.target.checked)}
+                className="accent-black"
+              />
+              <span className="min-w-0">
+                <span className="block truncate text-[13px] font-black text-midnight-graphite">{member.name}</span>
+                <span className="block truncate text-[11px] font-bold text-medium-gray">{description}</span>
+              </span>
+            </label>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ReportingMemberTree({ node, directory }: { node: ReportingMemberNode; directory: OrganizationDirectory; key?: React.Key }) {
   const member = node.member;
 
@@ -544,6 +671,7 @@ function ReportingChartCard({
   const warning = node.hasMissingParent || node.hasCycle;
   const hasChildren = node.children.length > 0;
   const isExpanded = expandedDepartmentIds.has(node.department.id);
+  const managerNames = getDepartmentManagerNames(directory, node.department);
 
   return (
     <div className="flex flex-col items-center shrink-0">
@@ -580,6 +708,20 @@ function ReportingChartCard({
         </div>
         <div className="space-y-2">
           <p className="text-[16px] font-black text-midnight-graphite truncate">{node.department.name}</p>
+          {managerNames.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {managerNames.slice(0, 3).map((managerName) => (
+                <span key={managerName} className="rounded-full bg-[#e8f5e9] px-2 py-0.5 text-[10px] font-black text-[#2e7d32]">
+                  主管 {managerName}
+                </span>
+              ))}
+              {managerNames.length > 3 && (
+                <span className="rounded-full bg-[#e8f5e9] px-2 py-0.5 text-[10px] font-black text-[#2e7d32]">
+                  +{managerNames.length - 3}
+                </span>
+              )}
+            </div>
+          )}
           <p className="text-[11px] font-bold text-light-gray truncate">
             已绑定 {node.boundCount} / 未绑定 {Math.max(0, node.memberCount - node.boundCount)}
           </p>
@@ -824,6 +966,10 @@ export default function OrganizationAdmin() {
   const removeMember = (member: OrganizationMember) => {
     setDirectory((current) => ({
       ...current,
+      departments: current.departments.map((department) => ({
+        ...department,
+        managerMemberIds: normalizeMemberIds(department.managerMemberIds).filter((memberId) => memberId !== member.id),
+      })),
       members: current.members
         .filter((item) => item.id !== member.id)
         .map((item) => item.supervisorId === member.id ? { ...item, supervisorId: undefined } : item),
@@ -1010,6 +1156,11 @@ export default function OrganizationAdmin() {
                     ))}
                   </select>
                 </label>
+                <DepartmentManagerPicker
+                  department={selectedDepartment}
+                  directory={directory}
+                  onChange={(managerMemberIds) => updateDepartment(selectedDepartment.id, { managerMemberIds })}
+                />
               </div>
             ) : (
               <div className="px-8 py-16 text-center text-[14px] font-bold text-medium-gray">
@@ -1051,7 +1202,14 @@ export default function OrganizationAdmin() {
                           <UserRound size={17} strokeWidth={2.4} />
                         </div>
                         <div className="min-w-0">
-                          <p className="text-[15px] font-black text-midnight-graphite truncate">{member.name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-[15px] font-black text-midnight-graphite truncate">{member.name}</p>
+                            {normalizeMemberIds(selectedDepartment?.managerMemberIds).includes(member.id) && (
+                              <span className="shrink-0 rounded-full bg-[#e8f5e9] px-2 py-0.5 text-[10px] font-black text-[#2e7d32]">
+                                部门主管
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[12px] font-bold text-medium-gray truncate">
                             {member.accountUsername ? `账号：${member.accountUsername}` : '未绑定登录账号'}
                           </p>

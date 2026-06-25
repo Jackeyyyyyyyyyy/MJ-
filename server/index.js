@@ -105,8 +105,9 @@ const WORKFLOW_CONDITION_FIELDS = new Set(['amount', 'currency', 'category', 'pr
 const WORKFLOW_CONDITION_OPERATORS = new Set(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq', 'contains', 'not_contains']);
 const NUMERIC_WORKFLOW_CONDITION_OPERATORS = new Set(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq']);
 const TEXT_WORKFLOW_CONDITION_OPERATORS = new Set(['eq', 'neq', 'contains', 'not_contains']);
-const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'specific_positions', 'form_member_field', 'submitter_manager', 'multi_supervisor']);
+const WORKFLOW_APPROVER_TYPES = new Set(['specific_members', 'specific_positions', 'form_member_field', 'initiator_self', 'initiator_select', 'department_manager', 'submitter_manager', 'multi_supervisor']);
 const WORKFLOW_APPROVAL_MODES = new Set(['one_of', 'all_of']);
+const WORKFLOW_EMPTY_APPROVER_ACTIONS = new Set(['auto_pass', 'auto_reject', 'transfer_admin', 'assign_members', 'block_submit']);
 const LEGACY_ROLE_GROUP_MEMBERS = {
   'role-board': ['qin-an-tang'],
   'role-gm': ['fan-lu'],
@@ -1932,8 +1933,21 @@ function createDefaultApprovalStep(index = 1) {
       memberIds: [],
     },
     approvalMode: 'one_of',
-    emptyApproverAction: 'block_submit',
+    emptyApproverAction: 'transfer_admin',
+    emptyApproverMemberIds: [],
   };
+}
+
+function normalizeWorkflowEmptyApproverAction(action) {
+  const normalizedAction = normalizeWorkflowText(action);
+  if (WORKFLOW_EMPTY_APPROVER_ACTIONS.has(normalizedAction)) return normalizedAction;
+  return 'transfer_admin';
+}
+
+function normalizeWorkflowMemberIds(memberIds) {
+  return Array.isArray(memberIds)
+    ? [...new Set(memberIds.map((memberId) => normalizeWorkflowText(memberId)).filter(Boolean))]
+    : [];
 }
 
 function createDefaultWorkflowBranch() {
@@ -1961,6 +1975,17 @@ function legacyRuleToApprovalStep(node, index = 0) {
     approverRule = { type: 'specific_positions', positionTitles: Array.isArray(rule.positionTitles) ? rule.positionTitles : [] };
   } else if (rule.type === 'form_member_field') {
     approverRule = { type: 'form_member_field', fieldName: normalizeWorkflowText(rule.fieldName) };
+  } else if (rule.type === 'initiator_self') {
+    approverRule = { type: 'initiator_self' };
+  } else if (rule.type === 'initiator_select') {
+    approverRule = { type: 'initiator_select', fieldName: normalizeWorkflowText(rule.fieldName) };
+  } else if (rule.type === 'department_manager') {
+    approverRule = {
+      type: 'department_manager',
+      departmentManagerLevel: Math.max(1, Number(rule.departmentManagerLevel) || 1),
+      departmentManagerFallbackToParent: rule.departmentManagerFallbackToParent !== false,
+      departmentManagerIncludeSelf: rule.departmentManagerIncludeSelf === true,
+    };
   } else if (rule.type === 'role') {
     approverRule = { type: 'specific_members', memberIds: getLegacyRoleGroupMemberIds(rule.roleGroupId) };
   } else if (rule.type === 'direct_supervisor') {
@@ -1978,43 +2003,73 @@ function legacyRuleToApprovalStep(node, index = 0) {
     name: node?.title || `审批节点 ${index + 1}`,
     approverRule,
     approvalMode: 'one_of',
-    emptyApproverAction: rule.emptyApproverAction === 'auto_pass' ? 'auto_pass' : 'block_submit',
+    emptyApproverAction: normalizeWorkflowEmptyApproverAction(rule.emptyApproverAction || node?.emptyApproverAction),
+    emptyApproverMemberIds: normalizeWorkflowMemberIds(rule.emptyApproverMemberIds || node?.emptyApproverMemberIds),
   };
 }
 
 function approvalStepToLegacyNode(step, index = 0) {
   const rule = step?.approverRule || {};
-  let legacyRule = { type: 'specified', memberIds: [], emptyApproverAction: step?.emptyApproverAction || 'block_submit' };
+  const emptyApproverAction = normalizeWorkflowEmptyApproverAction(step?.emptyApproverAction);
+  const emptyApproverMemberIds = normalizeWorkflowMemberIds(step?.emptyApproverMemberIds);
+  let legacyRule = { type: 'specified', memberIds: [], emptyApproverAction, emptyApproverMemberIds };
 
   if (rule.type === 'specific_members') {
     legacyRule = {
       type: 'specified',
       memberIds: Array.isArray(rule.memberIds) ? rule.memberIds : [],
-      emptyApproverAction: step?.emptyApproverAction || 'block_submit',
+      emptyApproverAction,
+      emptyApproverMemberIds,
     };
   } else if (rule.type === 'specific_positions') {
     legacyRule = {
       type: 'specific_positions',
       positionTitles: Array.isArray(rule.positionTitles) ? rule.positionTitles : [],
-      emptyApproverAction: step?.emptyApproverAction || 'block_submit',
+      emptyApproverAction,
+      emptyApproverMemberIds,
     };
   } else if (rule.type === 'form_member_field') {
     legacyRule = {
       type: 'form_member_field',
       fieldName: normalizeWorkflowText(rule.fieldName),
-      emptyApproverAction: step?.emptyApproverAction || 'block_submit',
+      emptyApproverAction,
+      emptyApproverMemberIds,
+    };
+  } else if (rule.type === 'initiator_self') {
+    legacyRule = {
+      type: 'initiator_self',
+      emptyApproverAction,
+      emptyApproverMemberIds,
+    };
+  } else if (rule.type === 'initiator_select') {
+    legacyRule = {
+      type: 'initiator_select',
+      fieldName: normalizeWorkflowText(rule.fieldName),
+      emptyApproverAction,
+      emptyApproverMemberIds,
+    };
+  } else if (rule.type === 'department_manager') {
+    legacyRule = {
+      type: 'department_manager',
+      departmentManagerLevel: Math.max(1, Number(rule.departmentManagerLevel) || 1),
+      departmentManagerFallbackToParent: rule.departmentManagerFallbackToParent !== false,
+      departmentManagerIncludeSelf: rule.departmentManagerIncludeSelf === true,
+      emptyApproverAction,
+      emptyApproverMemberIds,
     };
   } else if (rule.type === 'submitter_manager') {
     legacyRule = {
       type: 'direct_supervisor',
-      emptyApproverAction: step?.emptyApproverAction || 'block_submit',
+      emptyApproverAction,
+      emptyApproverMemberIds,
     };
   } else if (rule.type === 'multi_supervisor') {
     legacyRule = {
       type: 'multi_supervisor',
       supervisorDepth: Math.max(1, Number(rule.supervisorDepth) || 1),
       ...(rule.supervisorLevels ? { supervisorLevels: normalizeWorkflowText(rule.supervisorLevels) } : {}),
-      emptyApproverAction: step?.emptyApproverAction || 'block_submit',
+      emptyApproverAction,
+      emptyApproverMemberIds,
     };
   }
 
@@ -2026,11 +2081,19 @@ function approvalStepToLegacyNode(step, index = 0) {
       ? `\u8fde\u7eed\u5ba1\u6279\uff1a\u53d1\u8d77\u4eba\u7684\u7b2c ${getSupervisorLevels(rule).join('\u3001')} \u7ea7\u4e3b\u7ba1`
       : rule.type === 'specific_positions'
         ? `\u6307\u5b9a\u804c\u4f4d\uff1a${(Array.isArray(rule.positionTitles) ? rule.positionTitles : []).join('\u3001') || '\u672a\u9009\u62e9'}`
+      : rule.type === 'initiator_self'
+        ? '\u53d1\u8d77\u4eba\u81ea\u5df1'
+      : rule.type === 'initiator_select'
+        ? `\u53d1\u8d77\u4eba\u81ea\u9009\uff1a${normalizeWorkflowText(rule.fieldName) || '\u672a\u9009\u62e9'}`
+      : rule.type === 'department_manager'
+        ? '\u53d1\u8d77\u4eba\u90e8\u95e8\u4e3b\u7ba1'
       : rule.type === 'form_member_field'
         ? `\u8868\u5355\u4eba\u5458\uff1a${normalizeWorkflowText(rule.fieldName) || '\u672a\u9009\u62e9'}`
       : step?.approvalMode === 'all_of' ? '所有审批人都需通过' : '任一审批人通过即可',
     rule: legacyRule,
     approvalMode: step?.approvalMode === 'all_of' ? 'all_of' : 'one_of',
+    emptyApproverAction,
+    emptyApproverMemberIds,
   };
 }
 
@@ -2078,7 +2141,7 @@ function normalizeApprovalStep(step, index = 0) {
     roleGroupIds: _legacyRoleGroupIds,
     ...ruleWithoutRoleGroups
   } = rule;
-  const ruleType = rule.type === 'department_manager' || rule.type === 'submitter_manager'
+  const ruleType = rule.type === 'submitter_manager'
     ? 'multi_supervisor'
     : WORKFLOW_APPROVER_TYPES.has(rule.type) ? rule.type : 'specific_members';
   return {
@@ -2098,7 +2161,8 @@ function normalizeApprovalStep(step, index = 0) {
       departmentIds: Array.isArray(rule.departmentIds) ? rule.departmentIds : [],
     },
     approvalMode: WORKFLOW_APPROVAL_MODES.has(step?.approvalMode) ? step.approvalMode : 'one_of',
-    emptyApproverAction: step?.emptyApproverAction === 'auto_pass' ? 'auto_pass' : 'block_submit',
+    emptyApproverAction: normalizeWorkflowEmptyApproverAction(step?.emptyApproverAction),
+    emptyApproverMemberIds: normalizeWorkflowMemberIds(step?.emptyApproverMemberIds),
   };
 }
 
@@ -2108,11 +2172,13 @@ function normalizeWorkflowCondition(condition, index = 0) {
   const operator = WORKFLOW_CONDITION_OPERATORS.has(condition?.operator) && allowedOperators.has(condition.operator)
     ? condition.operator
     : isNumericWorkflowConditionField(field) ? 'lte' : 'eq';
+  const values = normalizeWorkflowConditionValues(condition?.values);
   return {
     id: normalizeWorkflowText(condition?.id) || createWorkflowId('cond'),
     field,
     operator,
     ...(condition?.value !== undefined && condition?.value !== null ? { value: String(condition.value) } : {}),
+    ...(values.length > 0 ? { values } : {}),
     ...(condition?.currencyValue ? { currencyValue: String(condition.currencyValue) } : {}),
     ...(Number.isFinite(Number(condition?.amountMin)) ? { amountMin: Number(condition.amountMin) } : {}),
     ...(Number.isFinite(Number(condition?.amountMax)) ? { amountMax: Number(condition.amountMax) } : {}),
@@ -2335,7 +2401,7 @@ function validateWorkflowDraftForPublish(draft) {
           } else if (['eq', 'neq'].includes(condition.operator) && !Number.isFinite(Number(condition.value))) {
             errors.push(`${branchName} 条件值必须填写有效数字`);
           }
-        } else if (!normalizeWorkflowText(condition.value)) {
+        } else if (getWorkflowConditionExpectedValues(condition).length === 0) {
           errors.push(`${branchName} 条件值不能为空`);
         }
       });
@@ -2350,6 +2416,14 @@ function validateWorkflowDraftForPublish(draft) {
         errors.push(`${stepLabel} 必须选择指定成员`);
       } else if (rule.type === 'specific_positions' && (!Array.isArray(rule.positionTitles) || rule.positionTitles.length === 0)) {
         errors.push(`${stepLabel} 必须选择指定职位`);
+      } else if (rule.type === 'initiator_select' && !normalizeWorkflowText(rule.fieldName)) {
+        errors.push(`${stepLabel} 必须选择发起人自选字段`);
+      }
+      if (
+        normalizeWorkflowEmptyApproverAction(step?.emptyApproverAction) === 'assign_members'
+        && normalizeWorkflowMemberIds(step?.emptyApproverMemberIds).length === 0
+      ) {
+        errors.push(`${stepLabel} 需要选择空审批人时的指定审批人`);
       }
     });
   });
@@ -2492,6 +2566,9 @@ function normalizeOrganizationDirectoryInput({ departments, members }) {
     id: normalizeWorkflowText(department?.id),
     name: normalizeWorkflowText(department?.name),
     ...(normalizeWorkflowText(department?.parentId) ? { parentId: normalizeWorkflowText(department.parentId) } : {}),
+    ...(normalizeWorkflowMemberIds(department?.managerMemberIds).length > 0
+      ? { managerMemberIds: normalizeWorkflowMemberIds(department.managerMemberIds) }
+      : {}),
   }));
   const normalizedMembers = members.map((member) => ({
     id: normalizeWorkflowText(member?.id),
@@ -2535,6 +2612,11 @@ function validateOrganizationDirectory(directory) {
       }
     }
 
+    (Array.isArray(department.managerMemberIds) ? department.managerMemberIds : []).forEach((managerMemberId) => {
+      if (!memberIds.has(managerMemberId)) {
+        throw createHttpError(`department manager does not exist: ${department.name}`, 400);
+      }
+    });
   });
 
   directory.members.forEach((member) => {
@@ -2584,6 +2666,9 @@ function getOrganizationSelectOptions(directory) {
       id: department.id,
       name: department.name,
       ...(department.parentId ? { parentId: department.parentId } : {}),
+      ...(Array.isArray(department.managerMemberIds) && department.managerMemberIds.length > 0
+        ? { managerMemberIds: department.managerMemberIds }
+        : {}),
     })),
     members: directory.members
       .filter((member) => member.enabled !== false)
@@ -2718,6 +2803,22 @@ function createHttpError(message, statusCode = 400) {
 
 function normalizeWorkflowText(value) {
   return String(value || '').trim();
+}
+
+function normalizeWorkflowConditionValues(values) {
+  const rawValues = Array.isArray(values)
+    ? values
+    : typeof values === 'string'
+      ? values.split(/[,\n，、]/)
+      : [];
+
+  return [...new Set(rawValues.map((value) => normalizeWorkflowText(value)).filter(Boolean))];
+}
+
+function getWorkflowConditionExpectedValues(condition) {
+  const values = normalizeWorkflowConditionValues(condition?.values);
+  if (values.length > 0) return values;
+  return normalizeWorkflowConditionValues(condition?.value);
 }
 
 function getPublishedVersion(template) {
@@ -2944,14 +3045,17 @@ function workflowConditionMatches(condition, context) {
     }
   }
 
-  const expected = normalizeComparableText(condition.value);
+  const expectedValues = getWorkflowConditionExpectedValues(condition)
+    .map(normalizeComparableText)
+    .filter(Boolean);
   const actual = normalizeComparableText(actualValue);
-  if (!expected || !actual) return false;
+  if (expectedValues.length === 0 || !actual) return false;
 
-  if (condition.operator === 'neq') return actual !== expected && !actual.includes(expected);
-  if (condition.operator === 'contains') return actual.includes(expected);
-  if (condition.operator === 'not_contains') return !actual.includes(expected);
-  if (condition.operator === 'eq') return actual === expected || actual.includes(expected);
+  const matchesExpected = expectedValues.some((expected) => actual === expected || actual.includes(expected));
+  if (condition.operator === 'neq') return !matchesExpected;
+  if (condition.operator === 'contains') return expectedValues.some((expected) => actual.includes(expected));
+  if (condition.operator === 'not_contains') return expectedValues.every((expected) => !actual.includes(expected));
+  if (condition.operator === 'eq') return matchesExpected;
 
   return false;
 }
@@ -3219,6 +3323,40 @@ function findMemberById(directory, memberId) {
   return (directory.members || []).find((member) => member.id === memberId && member.enabled !== false) || null;
 }
 
+function getDepartmentManagerLevel(rule) {
+  return Math.max(1, Math.min(20, Number(rule?.departmentManagerLevel) || 1));
+}
+
+function resolveDepartmentManagers(directory, departmentId, rule = {}, applicantMember = null) {
+  const departmentsById = new Map((directory.departments || []).map((department) => [department.id, department]));
+  const seen = new Set();
+  let current = departmentsById.get(departmentId) || null;
+  const targetLevel = getDepartmentManagerLevel(rule);
+  const shouldFallbackToParent = rule?.departmentManagerFallbackToParent !== false;
+  const shouldIncludeSelf = rule?.departmentManagerIncludeSelf === true;
+
+  for (let level = 1; level < targetLevel && current; level += 1) {
+    if (seen.has(current.id)) return [];
+    seen.add(current.id);
+    current = current.parentId ? departmentsById.get(current.parentId) || null : null;
+  }
+
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    const managers = (Array.isArray(current.managerMemberIds) ? current.managerMemberIds : [])
+      .map((memberId) => findMemberById(directory, memberId))
+      .filter(Boolean)
+      .filter((member) => shouldIncludeSelf || !applicantMember || member.id !== applicantMember.id)
+      .filter((member) => normalizeWorkflowText(member.accountUsername));
+
+    if (managers.length > 0) return uniqueMembers(managers);
+    if (!shouldFallbackToParent) break;
+    current = current.parentId ? departmentsById.get(current.parentId) || null : null;
+  }
+
+  return [];
+}
+
 function getDepartmentPathText(directory, departmentId) {
   const departments = Array.isArray(directory?.departments) ? directory.departments : [];
   const byId = new Map(departments.map((department) => [department.id, department]));
@@ -3399,6 +3537,16 @@ function resolveApproversForRule(rule, directory, applicantMember, businessData)
     const fieldName = normalizeWorkflowText(approverRule.fieldName);
     const fieldValue = fieldName ? findBusinessDataValue(businessData, [fieldName]) : undefined;
     members = [findMemberFromBusinessValue(directory, fieldValue)].filter(Boolean);
+  } else if (approverRule.type === 'initiator_self') {
+    members = [applicantMember].filter(Boolean);
+  } else if (approverRule.type === 'initiator_select') {
+    const fieldName = normalizeWorkflowText(approverRule.fieldName);
+    const fieldValue = fieldName
+      ? findBusinessDataValue(businessData, [fieldName])
+      : findBusinessDataValue(businessData, ['审批人', '自选审批人', '发起人自选审批人']);
+    members = [findMemberFromBusinessValue(directory, fieldValue)].filter(Boolean);
+  } else if (approverRule.type === 'department_manager') {
+    members = applicantMember ? resolveDepartmentManagers(directory, applicantMember.departmentId, approverRule, applicantMember) : [];
   } else if (approverRule.type === 'role') {
     members = getLegacyRoleGroupMemberIds(approverRule.roleGroupId).map((memberId) => findMemberById(directory, memberId)).filter(Boolean);
   } else if (approverRule.type === 'direct_supervisor') {
@@ -3419,6 +3567,59 @@ function resolveApproversForRule(rule, directory, applicantMember, businessData)
   }
 
   return uniqueMembers(members).filter((member) => normalizeWorkflowText(member.accountUsername));
+}
+
+function resolveAdminFallbackApprovers(directory) {
+  const members = [];
+  const superAdminMember = findMemberByAccount(directory, superAdminUsername);
+  if (superAdminMember) {
+    members.push(superAdminMember);
+  } else {
+    members.push({
+      id: superAdmin.id,
+      name: superAdmin.name,
+      accountUsername: superAdmin.username,
+      enabled: true,
+    });
+  }
+
+  getLegacyRoleGroupMemberIds('role-admin').forEach((memberId) => {
+    members.push(findMemberById(directory, memberId));
+  });
+
+  return uniqueMembers(members).filter((member) => normalizeWorkflowText(member.accountUsername));
+}
+
+function getNodeEmptyApproverAction(node, rule) {
+  return normalizeWorkflowEmptyApproverAction(rule?.emptyApproverAction || node?.emptyApproverAction);
+}
+
+function getNodeEmptyApproverMemberIds(node, rule) {
+  return normalizeWorkflowMemberIds(rule?.emptyApproverMemberIds || node?.emptyApproverMemberIds);
+}
+
+function resolveEmptyApproverFallback(node, directory) {
+  const rule = node?.rule || {};
+  const action = getNodeEmptyApproverAction(node, rule);
+
+  if (action === 'assign_members') {
+    return {
+      action,
+      approvers: getNodeEmptyApproverMemberIds(node, rule)
+        .map((memberId) => findMemberById(directory, memberId))
+        .filter(Boolean)
+        .filter((member) => normalizeWorkflowText(member.accountUsername)),
+    };
+  }
+
+  if (action === 'transfer_admin') {
+    return {
+      action,
+      approvers: resolveAdminFallbackApprovers(directory),
+    };
+  }
+
+  return { action, approvers: [] };
 }
 
 function resolveCcRecipientsForRule(ccRule, directory) {
@@ -3566,44 +3767,82 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
   }
 
   const steps = [];
+  let autoRejectedReason = '';
 
-  nodes.forEach((node) => {
-    if (node?.type === 'processor') {
-      steps.push(createProcessorWorkflowStep(node, steps.length, processors, version.processorRule));
-      return;
+  const addEmptyApproverResolutionStep = (node) => {
+    const { action, approvers: fallbackApprovers } = resolveEmptyApproverFallback(node, directory);
+    const stepName = node.title || steps.length + 1;
+
+    if (action === 'auto_pass') {
+      steps.push(createWorkflowStep(node, steps.length, [], STEP_SKIPPED, '审批人为空，系统已自动通过该节点。'));
+      return true;
     }
 
-    if (node?.type !== 'approver') return;
+    if (action === 'auto_reject') {
+      autoRejectedReason = `审批人为空，系统已自动拒绝：${stepName}`;
+      steps.push(createWorkflowStep(node, steps.length, [], STEP_REJECTED, autoRejectedReason));
+      return true;
+    }
+
+    if (fallbackApprovers.length > 0) {
+      const comment = action === 'transfer_admin'
+        ? '审批人为空，已自动转交管理员审批。'
+        : '审批人为空，已转交指定人员审批。';
+      steps.push(createWorkflowStep(node, steps.length, fallbackApprovers, STEP_NOT_STARTED, comment));
+      return true;
+    }
+
+    throw createHttpError(`No approver can be resolved for workflow step: ${stepName}.`, 400);
+  };
+
+  for (const node of nodes) {
+    if (autoRejectedReason) break;
+
+    if (node?.type === 'processor') {
+      steps.push(createProcessorWorkflowStep(node, steps.length, processors, version.processorRule));
+      continue;
+    }
+
+    if (node?.type !== 'approver') continue;
 
     const rule = node.rule || {};
     const supervisorSteps = createSupervisorChainWorkflowSteps(node, steps.length, directory, applicantMember);
     if (supervisorSteps) {
       if (supervisorSteps.length === 0) {
-        if (rule.emptyApproverAction === 'auto_pass') {
-          steps.push(createWorkflowStep(node, steps.length, [], STEP_SKIPPED, 'No approver was resolved; step was skipped automatically.'));
-          return;
-        }
-
-        throw createHttpError(`No approver can be resolved for workflow step: ${node.title || steps.length + 1}.`, 400);
+        addEmptyApproverResolutionStep(node);
+        continue;
       }
 
       steps.push(...supervisorSteps);
-      return;
+      continue;
     }
 
     const approvers = resolveApproversForRule(rule, directory, applicantMember, businessData);
 
     if (approvers.length === 0) {
-      if (rule.emptyApproverAction === 'auto_pass') {
-        steps.push(createWorkflowStep(node, steps.length, [], STEP_SKIPPED, 'No approver was resolved; step was skipped automatically.'));
-        return;
-      }
-
-      throw createHttpError(`No approver can be resolved for workflow step: ${node.title || steps.length + 1}.`, 400);
+      addEmptyApproverResolutionStep(node);
+      continue;
     }
 
     steps.push(createWorkflowStep(node, steps.length, approvers));
-  });
+  }
+
+  if (autoRejectedReason) {
+    return {
+      instance: {
+        workflowId: template.id,
+        workflowName: version.basic?.name || template.name,
+        workflowVersion: Number(version.version || template.currentVersion || 1),
+        currentStepIndex: -1,
+        steps,
+      },
+      ccRecipients,
+      processors: [],
+      processorTaskName: undefined,
+      initialStatus: STATUS_REJECTED,
+      initialRejectReason: autoRejectedReason,
+    };
+  }
 
   const firstPendingIndex = steps.findIndex((step) => step.status === STEP_NOT_STARTED);
   if (firstPendingIndex >= 0) {
@@ -4299,6 +4538,302 @@ function sanitizeForAi(value) {
 function limitText(value, maxLength = 5000) {
   const text = String(value || '').trim();
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+const aiFormFillKinds = new Set([
+  'text',
+  'multiline',
+  'number',
+  'money',
+  'date',
+  'datetime',
+  'select',
+  'member',
+  'department',
+  'detail',
+  'duration',
+  'file',
+  'upload',
+]);
+
+function parseAiJsonObject(rawText) {
+  const text = String(rawText || '').trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const source = fenced ? fenced[1] : text;
+  const start = source.indexOf('{');
+  const end = source.lastIndexOf('}');
+
+  if (start >= 0 && end > start) {
+    return JSON.parse(source.slice(start, end + 1));
+  }
+
+  throw new Error('AI returned invalid JSON');
+}
+
+function normalizeAiFormFillOptions(options) {
+  return [...new Set((Array.isArray(options) ? options : [])
+    .map((option) => normalizeWorkflowText(option))
+    .filter(Boolean))]
+    .slice(0, 120);
+}
+
+function normalizeAiFormFillFields(fields) {
+  return (Array.isArray(fields) ? fields : [])
+    .map((field) => {
+      const name = normalizeWorkflowText(field?.name);
+      if (!name) return null;
+      const kind = aiFormFillKinds.has(field?.kind) ? field.kind : 'text';
+      const columns = Array.isArray(field?.columns)
+        ? field.columns
+          .map((column) => {
+            const key = normalizeWorkflowText(column?.key || column?.label);
+            const label = normalizeWorkflowText(column?.label || key);
+            if (!key || !label) return null;
+            return {
+              key,
+              label,
+              type: normalizeWorkflowText(column?.type || 'text'),
+              options: normalizeAiFormFillOptions(column?.options),
+              unit: column?.unit === 'days' ? 'days' : column?.unit === 'hours' ? 'hours' : undefined,
+            };
+          })
+          .filter(Boolean)
+          .slice(0, 40)
+        : undefined;
+
+      return {
+        name,
+        kind,
+        required: Boolean(field?.required),
+        options: normalizeAiFormFillOptions(field?.options),
+        columns,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 100);
+}
+
+function normalizeAiFormFillImage(image) {
+  if (!image) return null;
+
+  const name = normalizeWorkflowText(image?.name).slice(0, 180);
+  const type = normalizeWorkflowText(image?.type || 'image/png');
+  const data = String(image?.data || '');
+  const size = Number(image?.size);
+
+  if (!data.startsWith('data:image/')) {
+    throw createHttpError('图片格式不正确，请上传图片截图', 400);
+  }
+
+  const base64Text = data.split(',')[1] || '';
+  const byteLength = Buffer.byteLength(base64Text, 'base64');
+  const declaredSize = Number.isFinite(size) && size > 0 ? size : byteLength;
+  if (declaredSize > 6 * 1024 * 1024 || byteLength > 8 * 1024 * 1024) {
+    throw createHttpError('图片太大，请上传 6MB 以内的截图', 413);
+  }
+
+  return {
+    name: name || 'form-image.png',
+    type,
+    size: declaredSize,
+    data,
+  };
+}
+
+function normalizeAiFormOptionValue(value, options) {
+  const text = normalizeWorkflowText(value);
+  if (!text || !Array.isArray(options) || options.length === 0) return text;
+
+  const exact = options.find((option) => option === text);
+  if (exact) return exact;
+
+  const lowerText = text.toLowerCase();
+  const fuzzy = options.find((option) => {
+    const lowerOption = option.toLowerCase();
+    return lowerOption.includes(lowerText) || lowerText.includes(lowerOption);
+  });
+  return fuzzy || text;
+}
+
+function normalizeAiFormFillCell(value, column) {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) return value.map((item) => normalizeWorkflowText(item)).filter(Boolean).join('、');
+  if (typeof value === 'object') return normalizeWorkflowText(value.text || value.value || JSON.stringify(sanitizeForAi(value)));
+  return normalizeAiFormOptionValue(value, column?.options || []);
+}
+
+function normalizeAiFormFillValue(value, field) {
+  if (value === null || value === undefined) return undefined;
+
+  if (field.kind === 'upload') {
+    return undefined;
+  }
+
+  if (field.kind === 'detail') {
+    const columns = Array.isArray(field.columns) ? field.columns : [];
+    const rows = Array.isArray(value) ? value : [value];
+    const normalizedRows = rows
+      .filter((row) => row && typeof row === 'object' && !Array.isArray(row))
+      .map((row) => {
+        if (columns.length === 0) return sanitizeForAi(row);
+        return Object.fromEntries(columns.map((column) => [
+          column.key,
+          normalizeAiFormFillCell(row[column.key] ?? row[column.label], column),
+        ]));
+      })
+      .filter((row) => Object.values(row).some((cell) => normalizeWorkflowText(cell)));
+
+    return normalizedRows.length > 0 ? normalizedRows : undefined;
+  }
+
+  if (field.kind === 'money') {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return {
+        currency: normalizeWorkflowText(value.currency || value.currencyCode || 'CNY') || 'CNY',
+        amount: normalizeWorkflowText(value.amount ?? value.value ?? value.money),
+      };
+    }
+    return {
+      currency: 'CNY',
+      amount: normalizeWorkflowText(value),
+    };
+  }
+
+  if (field.kind === 'file') {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return normalizeWorkflowText(value.text || value.remark || value.note || value.value);
+    }
+    return normalizeWorkflowText(value);
+  }
+
+  if (field.kind === 'select' || field.kind === 'member' || field.kind === 'department') {
+    return normalizeAiFormOptionValue(value, field.options || []);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeWorkflowText(item)).filter(Boolean).join('、');
+  }
+
+  if (typeof value === 'object') {
+    return normalizeWorkflowText(value.text || value.value || JSON.stringify(sanitizeForAi(value)));
+  }
+
+  return normalizeWorkflowText(value);
+}
+
+function filterAiFormFillValues(values, fields) {
+  if (!values || typeof values !== 'object' || Array.isArray(values)) return {};
+  const fieldMap = new Map(fields.map((field) => [field.name, field]));
+  const normalized = {};
+
+  Object.entries(values).forEach(([name, value]) => {
+    const field = fieldMap.get(name);
+    if (!field) return;
+    const normalizedValue = normalizeAiFormFillValue(value, field);
+    if (normalizedValue === undefined) return;
+    normalized[name] = normalizedValue;
+  });
+
+  return normalized;
+}
+
+function parseAiFormFillResponse(rawText, fields) {
+  const parsed = parseAiJsonObject(rawText);
+  const values = parsed?.values && typeof parsed.values === 'object' ? parsed.values : parsed;
+  const warnings = Array.isArray(parsed?.warnings)
+    ? parsed.warnings.map((warning) => normalizeWorkflowText(warning)).filter(Boolean).slice(0, 5)
+    : [];
+
+  return {
+    values: filterAiFormFillValues(values, fields),
+    summary: normalizeWorkflowText(parsed?.summary).slice(0, 240),
+    warnings,
+    rawText: String(rawText || '').slice(0, 2000),
+  };
+}
+
+function buildAiFormFillPrompt({ moduleName, approvalTypeName, text, fields }) {
+  return [
+    '你是审批表单填写助手。请根据用户提供的文字或截图，识别信息并填写到审批表单字段。',
+    '只返回紧凑 JSON，不要解释，不要 Markdown。',
+    'JSON 格式：{"values":{"字段名":"值"},"summary":"识别到了什么","warnings":["不确定项"]}。',
+    '只能使用字段 schema 中出现的字段名；没有把握的字段直接省略。',
+    'select/member/department 字段必须优先使用 options 里的原始文字。',
+    'date 使用 YYYY-MM-DD；datetime 使用 YYYY-MM-DDTHH:mm；money 使用 {"currency":"CNY","amount":"123.45"}。',
+    'detail 字段返回数组，每行对象用 columns.key 作为键。',
+    'file 字段只填写备注文字；upload 字段不能生成真实附件，请省略。',
+    `表单：${moduleName} / ${approvalTypeName}`,
+    `字段 schema：${JSON.stringify(fields)}`,
+    text ? `用户文字：${limitText(text, 6000)}` : '用户文字：无，优先读取截图。',
+  ].join('\n');
+}
+
+async function fillApprovalFormWithAi({ moduleName, approvalTypeName, text, image, fields }) {
+  if (!isAiConfigured()) {
+    throw createHttpError('AI填表单未启用，请先配置 OPENAI_API_KEY、OPENAI_API_BASE 和 OPENAI_MODEL', 503);
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY.trim();
+  const apiBase = process.env.OPENAI_API_BASE.trim();
+  const model = process.env.OPENAI_MODEL.trim();
+  const prompt = buildAiFormFillPrompt({ moduleName, approvalTypeName, text, fields });
+  const controller = new AbortController();
+  const configuredTimeout = Number(process.env.AI_REQUEST_TIMEOUT_MS);
+  const timeoutMs =
+    Number.isFinite(configuredTimeout) && configuredTimeout > 0
+      ? configuredTimeout
+      : 12000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  const userContent = image
+    ? [
+        { type: 'text', text: limitText(prompt, 12000) },
+        { type: 'image_url', image_url: { url: image.data } },
+      ]
+    : limitText(prompt, 12000);
+
+  try {
+    const response = await fetch(`${apiBase.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: 'You extract approval form data. Return valid JSON only.',
+          },
+          {
+            role: 'user',
+            content: userContent,
+          },
+        ],
+        temperature: 0,
+        max_tokens: 1400,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`AI form fill request failed: ${response.status}`);
+    }
+
+    const body = await response.json();
+    const message = body?.choices?.[0]?.message?.content;
+    const parsed = parseAiFormFillResponse(message, fields);
+    return {
+      ...parsed,
+      summary: parsed.summary || `已识别 ${Object.keys(parsed.values).length} 个字段`,
+    };
+  } catch (error) {
+    if (error?.statusCode) throw error;
+    throw createHttpError(error instanceof Error ? error.message : 'AI填表单失败，请稍后再试', 502);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function normalizeAiSuggestionText(rawText) {
@@ -5188,6 +5723,34 @@ app.patch('/api/ai-prompts', authenticate, requireRoles('developer'), async (req
   }
 });
 
+app.post('/api/ai-form-fill', authenticate, requireRoles('employee', 'boss'), async (req, res, next) => {
+  try {
+    const moduleName = normalizeWorkflowText(req.body?.moduleName);
+    const approvalTypeName = normalizeWorkflowText(req.body?.approvalTypeName);
+    const text = normalizeWorkflowText(req.body?.text);
+    const image = normalizeAiFormFillImage(req.body?.image);
+    const fields = normalizeAiFormFillFields(req.body?.fields);
+
+    if (!moduleName || !approvalTypeName || fields.length === 0) {
+      throw createHttpError('AI填表单缺少表单信息', 400);
+    }
+
+    if (!text && !image) {
+      throw createHttpError('请先输入文字或上传图片', 400);
+    }
+
+    res.json(await fillApprovalFormWithAi({
+      moduleName,
+      approvalTypeName,
+      text,
+      image,
+      fields,
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/ai-assistant/overview', authenticate, requireRoles('boss'), async (req, res, next) => {
   try {
     const records = await readRecords();
@@ -5792,9 +6355,16 @@ app.post('/api/records', authenticate, requireRoles('employee', 'boss'), async (
       createdAt: now,
       updatedAt: now,
       ...([STATUS_APPROVED, STATUS_PROCESSING].includes(workflow.initialStatus) ? { approvedAt: now } : {}),
+      ...(workflow.initialStatus === STATUS_REJECTED ? {
+        rejectedAt: now,
+        rejectReason: workflow.initialRejectReason || '审批人为空，系统自动拒绝',
+      } : {}),
       logs: [
         createLog('\u53d1\u8d77\u7533\u8bf7', applicant, '\u63d0\u4ea4\u4e86\u5ba1\u6279\u5355'),
         createLog('\u5339\u914d\u5ba1\u6279\u6d41', 'system', `Matched workflow: ${workflow.instance.workflowName} v${workflow.instance.workflowVersion}`),
+        ...(workflow.initialStatus === STATUS_REJECTED
+          ? [createLog('自动拒绝', 'system', workflow.initialRejectReason || '审批人为空，系统自动拒绝')]
+          : []),
         ...(workflow.initialStatus === STATUS_PROCESSING
           ? [createLog('进入办理', 'system', `流程到达${workflow.processorTaskName || '办理任务'}，等待办理人：${workflow.processors.map((processor) => processor.name).join('、')}`)]
           : []),

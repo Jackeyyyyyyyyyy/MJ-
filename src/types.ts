@@ -22,17 +22,20 @@ export type ApproverRuleType =
   | 'specific_members'
   | 'specific_positions'
   | 'form_member_field'
+  | 'initiator_self'
+  | 'initiator_select'
+  | 'department_manager'
   | 'submitter_manager'
   | 'specified'
   | 'direct_supervisor'
   | 'nth_supervisor'
-  | 'multi_supervisor'
-  | 'initiator_select';
+  | 'multi_supervisor';
 
 export interface OrganizationDepartment {
   id: string;
   name: string;
   parentId?: string;
+  managerMemberIds?: string[];
 }
 
 export interface OrganizationMember {
@@ -56,6 +59,7 @@ export interface OrganizationSelectOptions {
     id: string;
     name: string;
     parentId?: string;
+    managerMemberIds?: string[];
   }>;
   members: Array<{
     id: string;
@@ -76,7 +80,11 @@ export interface ApproverRule {
   supervisorLevel?: number;
   supervisorDepth?: number;
   supervisorLevels?: string;
-  emptyApproverAction?: 'auto_pass' | 'block_submit';
+  departmentManagerLevel?: number;
+  departmentManagerFallbackToParent?: boolean;
+  departmentManagerIncludeSelf?: boolean;
+  emptyApproverAction?: EmptyApproverAction;
+  emptyApproverMemberIds?: string[];
 }
 
 export type WorkflowTemplateStatus = 'draft' | 'published' | 'disabled';
@@ -110,6 +118,7 @@ export interface WorkflowCondition {
   field: WorkflowConditionField;
   operator: WorkflowConditionOperator;
   value?: string;
+  values?: string[];
   currencyValue?: string;
   amountMin?: number;
   amountMax?: number;
@@ -118,12 +127,20 @@ export interface WorkflowCondition {
 
 export type ApprovalMode = 'one_of' | 'all_of';
 
+export type EmptyApproverAction =
+  | 'auto_pass'
+  | 'auto_reject'
+  | 'transfer_admin'
+  | 'assign_members'
+  | 'block_submit';
+
 export interface ApprovalStep {
   id: string;
   name: string;
   approverRule: ApproverRule;
   approvalMode: ApprovalMode;
-  emptyApproverAction: 'auto_pass' | 'block_submit';
+  emptyApproverAction: EmptyApproverAction;
+  emptyApproverMemberIds?: string[];
 }
 
 export interface WorkflowBranch {
@@ -221,7 +238,8 @@ export interface WorkflowNode {
   aiBranchRule?: AiBranchRule;
   rule?: ApproverRule;
   approvalMode?: ApprovalMode;
-  emptyApproverAction?: 'auto_pass' | 'block_submit';
+  emptyApproverAction?: EmptyApproverAction;
+  emptyApproverMemberIds?: string[];
   ccRule?: CcRule;
   conditions?: Array<{
     id: string;
@@ -360,6 +378,57 @@ export interface ApprovalType {
   visibleToUsers?: boolean;
   commonFields: string[];
   notes?: string;
+}
+
+export type AiFormFillFieldKind =
+  | 'text'
+  | 'multiline'
+  | 'number'
+  | 'money'
+  | 'date'
+  | 'datetime'
+  | 'select'
+  | 'member'
+  | 'department'
+  | 'detail'
+  | 'duration'
+  | 'file'
+  | 'upload';
+
+export interface AiFormFillField {
+  name: string;
+  kind: AiFormFillFieldKind;
+  required?: boolean;
+  options?: string[];
+  columns?: Array<{
+    key: string;
+    label: string;
+    type?: string;
+    options?: string[];
+    unit?: 'hours' | 'days';
+  }>;
+}
+
+export interface AiFormFillImageInput {
+  name: string;
+  type: string;
+  size: number;
+  data: string;
+}
+
+export interface AiFormFillInput {
+  moduleName: string;
+  approvalTypeName: string;
+  text?: string;
+  image?: AiFormFillImageInput | null;
+  fields: AiFormFillField[];
+}
+
+export interface AiFormFillResponse {
+  values: Record<string, unknown>;
+  summary?: string;
+  warnings?: string[];
+  rawText?: string;
 }
 
 export interface Module {

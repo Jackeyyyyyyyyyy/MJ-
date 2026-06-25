@@ -4,6 +4,8 @@ import {
   AiAssistantOverview,
   AiAssistantPromptConfig,
   AiBranchDecisionLog,
+  AiFormFillInput,
+  AiFormFillResponse,
   AiPromptConfig,
   ApprovalAttachment,
   ApprovalNotification,
@@ -252,6 +254,13 @@ export const storage = {
       method: 'PATCH',
       body: JSON.stringify({ moduleName, approvalTypeName, prompt }),
     }, { skipImpersonation: true });
+  },
+
+  fillApprovalFormWithAi(input: AiFormFillInput): Promise<AiFormFillResponse> {
+    return request<AiFormFillResponse>('/ai-form-fill', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
   },
 
   getAiAssistantOverview(): Promise<AiAssistantOverview> {

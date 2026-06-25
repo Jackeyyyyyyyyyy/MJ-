@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlignLeft, Asterisk, Building2, Calculator, Calendar, ChevronDown, Clock3, DollarSign, Edit3, Eye, EyeOff, ListChecks, Loader2, Lock, Paperclip, Plus, RotateCcw, Save, Search, Table2, Trash2, Upload, UserRound, X } from 'lucide-react';
+import { AlignLeft, Asterisk, Building2, Calendar, ChevronDown, Clock3, DollarSign, Edit3, Eye, EyeOff, ListChecks, Loader2, Lock, Paperclip, Plus, RotateCcw, Save, Search, Table2, Trash2, Upload, UserRound, X } from 'lucide-react';
 import { approvalSchema, replaceApprovalSchema } from '../approvalSchema';
 import { storage } from '../storage';
 import { ApprovalType, Module } from '../types';
@@ -1329,38 +1329,6 @@ export default function BusinessFormAdmin() {
             </div>
           </details>
 
-          <details className="group rounded-2xl border border-[#d8ead2] bg-[#f8fdf6]">
-            <FieldSectionHeader
-              icon={<Calculator size={15} strokeWidth={2.8} />}
-              title="自动时长字段"
-              count={selectedDurationFields.length}
-            />
-            <div className="p-4 pt-0 [&>.space-y-3>.min-w-0>div:first-child]:hidden [&>.space-y-3>.min-w-0>p]:mt-0">
-            <div className="space-y-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-[13px] font-black text-midnight-graphite">
-                  <Calculator size={15} strokeWidth={2.8} />
-                  自动时长字段
-                </div>
-                <p className="mt-1 text-[12px] font-semibold text-medium-gray">
-                  每行一条规则，格式：时长字段=开始字段&gt;结束字段|hours。适合请假、外出、加班这类按开始/结束自动算小时数的表单。
-                </p>
-              </div>
-              <textarea
-                value={durationRuleText}
-                onChange={(event) => setDurationRuleText(event.target.value)}
-                placeholder={'时长=开始时间>结束时间|hours\n加班时长=开始时间>结束时间|hours'}
-                className="min-h-[96px] w-full resize-y rounded-xl border border-border-silver bg-white px-3 py-2 text-[12px] font-semibold text-midnight-graphite outline-none transition-colors focus:border-emerald-400"
-              />
-              {durationRuleText.trim() && selectedDurationFields.length === 0 && (
-                <div className="rounded-xl bg-amber-50 px-3 py-2 text-[12px] font-bold text-amber-700">
-                  当前规则没有命中业务字段，请确认等号左侧、开始字段、结束字段都已经写在业务字段列表里。
-                </div>
-              )}
-            </div>
-          </div>
-          </details>
-
           <details className="group rounded-2xl border border-[#d8e7f8] bg-[#f7fbff]">
             <FieldSectionHeader
               icon={<Upload size={15} strokeWidth={2.8} />}
@@ -1468,7 +1436,6 @@ export default function BusinessFormAdmin() {
                 const isSelectedDateField = selectedDateFields.includes(field);
                 const isSelectedDateTimeField = selectedDateTimeFields.includes(field);
                 const isSelectedOptionalField = selectedOptionalFields.includes(field);
-                const isSelectedDurationField = selectedDurationFields.some((item) => item.field === field);
                 const fieldKindLabel = isSelectedAmountField
                   ? '金额+币种'
                   : isSelectedFileField
@@ -1479,8 +1446,6 @@ export default function BusinessFormAdmin() {
                     ? '日期/时间'
                     : isSelectedDateTimeField
                     ? '日期时间'
-                    : isSelectedDurationField
-                    ? '自动时长'
                     : isCurrencyOnlyField(field)
                     ? getFieldKindLabel(field)
                     : '';
@@ -1500,8 +1465,6 @@ export default function BusinessFormAdmin() {
                           ? "bg-violet-50 text-violet-700"
                           : isSelectedDateTimeField
                           ? "bg-blue-50 text-blue-700"
-                          : isSelectedDurationField
-                          ? "bg-lime-50 text-lime-700"
                           : isCurrencyOnlyField(field)
                           ? "bg-amber-50 text-amber-700"
                           : "bg-lightest-gray-background text-midnight-graphite",

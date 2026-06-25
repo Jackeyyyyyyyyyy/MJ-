@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, ChevronRight, Upload, Calendar, Clock3, Calculator, DollarSign, FileText, Plus, AlignLeft, Building2, ListChecks, Table2, UserRound } from 'lucide-react';
+import { X, ChevronRight, Upload, Calendar, Clock3, Calculator, DollarSign, FileText, Plus, AlignLeft, Building2, ListChecks, Table2, UserRound, Sparkles, ImagePlus, ChevronUp, ChevronDown, Loader2 } from 'lucide-react';
 import { getVisibleApprovalModules } from '../approvalSchema';
 import { storage } from '../storage';
 import { auth } from '../auth';
 import { cn } from '../lib/utils';
-import { ApprovalAttachment, Module, ApprovalType, OrganizationSelectOptions } from '../types';
+import { AiFormFillField, ApprovalAttachment, Module, ApprovalType, OrganizationSelectOptions } from '../types';
 
 interface BatchModifyDetailRow {
   [key: string]: string;
@@ -103,6 +103,26 @@ interface CreateApprovalModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void | Promise<void>;
+}
+
+type AiFillMode = 'text' | 'image';
+type AiFillMessageType = 'idle' | 'success' | 'error';
+
+interface AiFormFillPanelProps {
+  isOpen: boolean;
+  mode: AiFillMode;
+  text: string;
+  imageFile: File | null;
+  imagePreview: string;
+  message: string;
+  messageType: AiFillMessageType;
+  isLoading: boolean;
+  onToggle: () => void;
+  onModeChange: (mode: AiFillMode) => void;
+  onTextChange: (text: string) => void;
+  onImageChange: (files: FileList | null) => void;
+  onClearImage: () => void;
+  onSubmit: () => void;
 }
 
 const batchModifyDetailColumns: Array<{ key: keyof BatchModifyDetailRow; label: string; placeholder: string; type?: string }> = [
@@ -414,6 +434,290 @@ function getMemberOptionLabel(member: OrganizationSelectOptions['members'][numbe
   return detail ? `${member.name} - ${detail}` : member.name;
 }
 
+type SearchableSingleSelectOption = {
+  key: string;
+  value: string;
+  label: string;
+  searchText?: string;
+};
+
+function SearchableSingleSelect({
+  value,
+  options,
+  placeholder,
+  emptyText,
+  onChange,
+  icon,
+  hasError,
+  inputClassName,
+}: {
+  value: string;
+  options: SearchableSingleSelectOption[];
+  placeholder: string;
+  emptyText: string;
+  onChange: (value: string) => void;
+  icon: React.ReactNode;
+  hasError?: boolean;
+  inputClassName?: string;
+}) {
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const [isOpen, setIsOpen] = React.useState(false);
+  const selectedOption = React.useMemo(
+    () => options.find((option) => option.value === value) || null,
+    [options, value],
+  );
+  const [query, setQuery] = React.useState(selectedOption?.label || '');
+
+  React.useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const closeOnOutsidePress = (event: MouseEvent | TouchEvent) => {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      setIsOpen(false);
+      setQuery(selectedOption?.label || '');
+    };
+
+    document.addEventListener('mousedown', closeOnOutsidePress);
+    document.addEventListener('touchstart', closeOnOutsidePress);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsidePress);
+      document.removeEventListener('touchstart', closeOnOutsidePress);
+    };
+  }, [isOpen, selectedOption]);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      setQuery(selectedOption?.label || '');
+    }
+  }, [isOpen, selectedOption]);
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleOptions = React.useMemo(() => {
+    const matchedOptions = normalizedQuery
+      ? options.filter((option) => `${option.label} ${option.searchText || ''}`.toLowerCase().includes(normalizedQuery))
+      : options;
+
+    return matchedOptions.slice(0, 80);
+  }, [normalizedQuery, options]);
+
+  const handleInputChange = (nextQuery: string) => {
+    setQuery(nextQuery);
+    setIsOpen(true);
+
+    if (!nextQuery.trim()) {
+      onChange('');
+      return;
+    }
+
+    if (value && nextQuery !== selectedOption?.label) {
+      onChange('');
+    }
+  };
+
+  const selectOption = (option: SearchableSingleSelectOption) => {
+    onChange(option.value);
+    setQuery(option.label);
+    setIsOpen(false);
+  };
+
+  return (
+    <div ref={rootRef} className="relative">
+      <input
+        type="search"
+        autoComplete="off"
+        className={cn(
+          "input-field border-b border-border-silver pr-11 focus:border-interactive-blue transition-colors",
+          !value && "text-light-gray",
+          hasError && "border-rose-500",
+          inputClassName,
+        )}
+        placeholder={placeholder}
+        value={isOpen ? query : selectedOption?.label || ''}
+        onFocus={(event) => {
+          setQuery(selectedOption?.label || '');
+          setIsOpen(true);
+          event.currentTarget.select();
+        }}
+        onChange={(event) => handleInputChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            setIsOpen(false);
+            setQuery(selectedOption?.label || '');
+          }
+
+          if (event.key === 'Enter' && isOpen && visibleOptions[0]) {
+            event.preventDefault();
+            selectOption(visibleOptions[0]);
+          }
+        }}
+      />
+      {value ? (
+        <button
+          type="button"
+          onClick={() => {
+            onChange('');
+            setQuery('');
+            setIsOpen(false);
+          }}
+          className="absolute right-3 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-light-gray transition-colors hover:bg-lightest-gray-background hover:text-rose-500"
+          aria-label="清空选择"
+        >
+          <X size={14} strokeWidth={2.6} />
+        </button>
+      ) : (
+        <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-light-silver">
+          {icon}
+        </span>
+      )}
+      {isOpen && (
+        <div className="absolute left-0 right-0 top-full z-[120] mt-2 max-h-72 overflow-y-auto rounded-2xl border border-border-silver bg-white py-2 shadow-2xl">
+          {visibleOptions.length > 0 ? visibleOptions.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              onClick={() => selectOption(option)}
+              className={cn(
+                "block w-full px-4 py-2.5 text-left text-[13px] font-semibold leading-5 transition-colors hover:bg-[#e7f1ff] hover:text-interactive-blue",
+                option.value === value ? "bg-[#e7f1ff] text-interactive-blue" : "text-midnight-graphite",
+              )}
+            >
+              {option.label}
+            </button>
+          )) : (
+            <div className="px-4 py-3 text-[13px] font-semibold text-light-gray">{emptyText}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AiFormFillPanel({
+  isOpen,
+  mode,
+  text,
+  imageFile,
+  imagePreview,
+  message,
+  messageType,
+  isLoading,
+  onToggle,
+  onModeChange,
+  onTextChange,
+  onImageChange,
+  onClearImage,
+  onSubmit,
+}: AiFormFillPanelProps) {
+  return (
+    <div className="rounded-[24px] border border-[#dfe7ff] bg-gradient-to-r from-[#fbf2ff] via-[#f4f7ff] to-[#eff8ff] p-4 shadow-sm sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="inline-flex w-fit rounded-xl bg-white/70 p-1 shadow-sm">
+          <button
+            type="button"
+            onClick={() => onModeChange('text')}
+            className={cn(
+              "h-10 rounded-lg px-4 text-[14px] font-bold transition-all",
+              mode === 'text' ? "bg-white text-midnight-graphite shadow-sm" : "text-medium-gray hover:text-midnight-graphite",
+            )}
+          >
+            文本填单
+          </button>
+          <button
+            type="button"
+            onClick={() => onModeChange('image')}
+            className={cn(
+              "h-10 rounded-lg px-4 text-[14px] font-bold transition-all",
+              mode === 'image' ? "bg-white text-midnight-graphite shadow-sm" : "text-medium-gray hover:text-midnight-graphite",
+            )}
+          >
+            图片填单
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={onToggle}
+          className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full px-3 text-[13px] font-bold text-medium-gray transition-colors hover:bg-white/70 hover:text-midnight-graphite"
+        >
+          {isOpen ? <ChevronUp size={16} strokeWidth={2.6} /> : <ChevronDown size={16} strokeWidth={2.6} />}
+          {isOpen ? '收起' : '展开'}
+        </button>
+      </div>
+
+      {isOpen && (
+        <div className="mt-4 rounded-2xl border border-white/70 bg-white p-4 shadow-sm">
+          {mode === 'text' ? (
+            <textarea
+              value={text}
+              onChange={(event) => onTextChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+                  event.preventDefault();
+                  onSubmit();
+                }
+              }}
+              className="min-h-[118px] w-full resize-y rounded-xl border border-transparent bg-canvas-white px-4 py-3 text-[15px] font-semibold leading-7 text-midnight-graphite outline-none transition-colors placeholder:text-light-gray focus:border-interactive-blue"
+              placeholder="粘贴或输入内容到此处，AI将自动识别信息并填入表单"
+            />
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+              <label className="flex min-h-[118px] cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-[#bfd3ff] bg-canvas-white px-4 py-5 text-center transition-colors hover:border-interactive-blue">
+                <ImagePlus size={24} strokeWidth={2.4} className="mb-2 text-interactive-blue" />
+                <span className="text-[14px] font-bold text-midnight-graphite">
+                  {imageFile ? imageFile.name : '选择图片'}
+                </span>
+                <span className="mt-1 text-[12px] font-semibold text-light-gray">
+                  截图、拍照都可以
+                </span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={(event) => {
+                    onImageChange(event.currentTarget.files);
+                    event.currentTarget.value = '';
+                  }}
+                />
+              </label>
+              {imagePreview && (
+                <div className="relative h-[118px] w-full overflow-hidden rounded-xl border border-border-silver bg-white sm:w-[150px]">
+                  <img src={imagePreview} alt="AI填单图片预览" className="h-full w-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={onClearImage}
+                    className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-medium-gray shadow-sm transition-colors hover:text-rose-500"
+                    aria-label="移除图片"
+                  >
+                    <X size={14} strokeWidth={2.6} />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className={cn(
+              "min-h-5 text-[12px] font-semibold",
+              messageType === 'error' ? "text-rose-500" : messageType === 'success' ? "text-emerald-600" : "text-light-gray",
+            )}>
+              {message}
+            </p>
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={onSubmit}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#c68bff] to-[#72a8ff] px-5 text-[14px] font-bold text-white shadow-sm transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isLoading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} strokeWidth={2.5} />}
+              {isLoading ? '识别中' : 'AI识别填写'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function isMoneyInputValue(value: unknown): value is MoneyInputValue {
   return !!value
     && typeof value === 'object'
@@ -480,6 +784,33 @@ function createEmptyFileFieldValue(): FileFieldValue {
   return { text: '', attachments: [] };
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function toAiFilledString(value: unknown) {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean).join('、');
+  }
+  if (isPlainRecord(value)) {
+    return String(value.text || value.value || value.name || '').trim();
+  }
+  return String(value).trim();
+}
+
+function normalizeAiOptionFromList(value: unknown, options: string[]) {
+  const text = toAiFilledString(value);
+  if (!text || options.length === 0) return text;
+  const exact = options.find((option) => option === text);
+  if (exact) return exact;
+  const normalizedText = text.toLowerCase();
+  return options.find((option) => {
+    const normalizedOption = option.toLowerCase();
+    return normalizedOption.includes(normalizedText) || normalizedText.includes(normalizedOption);
+  }) || text;
+}
+
 function isBlankOptionalValue(value: unknown): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value === 'string') return value.trim() === '';
@@ -504,9 +835,28 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [uploadingFields, setUploadingFields] = useState<Record<string, boolean>>({});
   const [organizationOptions, setOrganizationOptions] = useState<OrganizationSelectOptions>(emptyOrganizationOptions);
+  const [aiPanelOpen, setAiPanelOpen] = useState(true);
+  const [aiFillMode, setAiFillMode] = useState<AiFillMode>('text');
+  const [aiFillText, setAiFillText] = useState('');
+  const [aiImageFile, setAiImageFile] = useState<File | null>(null);
+  const [aiImagePreview, setAiImagePreview] = useState('');
+  const [aiFillMessage, setAiFillMessage] = useState('');
+  const [aiFillMessageType, setAiFillMessageType] = useState<AiFillMessageType>('idle');
+  const [isAiFilling, setIsAiFilling] = useState(false);
 
   const user = auth.getCurrentUser();
   const visibleModules = getVisibleApprovalModules();
+
+  const resetAiFillState = () => {
+    setAiPanelOpen(true);
+    setAiFillMode('text');
+    setAiFillText('');
+    setAiImageFile(null);
+    setAiImagePreview('');
+    setAiFillMessage('');
+    setAiFillMessageType('idle');
+    setIsAiFilling(false);
+  };
 
   React.useEffect(() => {
     if (!isOpen) return undefined;
@@ -528,6 +878,14 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       isCancelled = true;
     };
   }, [isOpen]);
+
+  React.useEffect(() => {
+    return () => {
+      if (aiImagePreview) {
+        URL.revokeObjectURL(aiImagePreview);
+      }
+    };
+  }, [aiImagePreview]);
 
   const handleModuleSelect = (module: Module) => {
     setSelectedModule(module);
@@ -561,6 +919,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       }
     });
     setFormData(initialData);
+    resetAiFillState();
     setStep(3);
   };
 
@@ -850,6 +1209,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     setSelectedType(null);
     setFormData({});
     setErrors({});
+    resetAiFillState();
     onClose();
   };
 
@@ -1416,6 +1776,247 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     };
   };
 
+  const getAiFieldKind = (field: string): AiFormFillField['kind'] => {
+    if (isUploadOnlyField(selectedType, field)) return 'upload';
+    if (isConfiguredFileField(selectedType, field)) return 'file';
+    if (isStructuredDetailField(field)) return 'detail';
+    if (getConfiguredDurationRule(selectedType, field)) return 'duration';
+    if (isConfiguredMoneyField(selectedType, field)) return 'money';
+    if (isConfiguredDateTimeField(selectedType, field)) return 'datetime';
+    if (isConfiguredDateField(selectedType, field)) return 'date';
+    if (getConfiguredSelectOptions(selectedType, field).length > 0) return 'select';
+    if (isConfiguredMemberField(selectedType, field)) return 'member';
+    if (isConfiguredDepartmentField(selectedType, field)) return 'department';
+    if (isConfiguredMultilineField(selectedType, field)) return 'multiline';
+    if (isConfiguredNumericField(selectedType, field)) return 'number';
+    return 'text';
+  };
+
+  const getAiFieldOptions = (field: string, kind: AiFormFillField['kind']) => {
+    if (kind === 'select') return getConfiguredSelectOptions(selectedType, field);
+    if (kind === 'member') return organizationOptions.members.map((member) => member.name);
+    if (kind === 'department') return organizationOptions.departments.map((department) => department.name);
+    return [];
+  };
+
+  const buildAiFormFillFields = (): AiFormFillField[] => {
+    if (!selectedType) return [];
+
+    return selectedType.businessFields.map((field) => {
+      const kind = getAiFieldKind(field);
+      const columns = kind === 'detail'
+        ? getStructuredDetailColumns(field).map((column) => ({
+            key: String(column.key),
+            label: column.label,
+            type: column.type,
+            options: column.options,
+            unit: column.unit,
+          }))
+        : undefined;
+
+      return {
+        name: field,
+        kind,
+        required: !isConfiguredOptionalField(selectedType, field),
+        options: getAiFieldOptions(field, kind),
+        columns,
+      };
+    });
+  };
+
+  const normalizeAiDetailCell = (
+    value: unknown,
+    column: ReturnType<typeof getStructuredDetailColumns>[number],
+  ) => {
+    const options = column.type === 'member'
+      ? organizationOptions.members.map((member) => getMemberOptionLabel(member))
+      : column.type === 'department'
+        ? organizationOptions.departments.map((department) => department.name)
+        : (column.options || []);
+
+    return normalizeAiOptionFromList(value, options);
+  };
+
+  const normalizeAiStructuredDetails = (field: string, value: unknown) => {
+    const columns = getStructuredDetailColumns(field);
+    const rows = Array.isArray(value) ? value : [value];
+    const normalizedRows = rows
+      .filter(isPlainRecord)
+      .map((row) => {
+        const nextRow = createEmptyStructuredDetail(field) as Record<string, string>;
+        columns.forEach((column) => {
+          nextRow[String(column.key)] = normalizeAiDetailCell(
+            row[String(column.key)] ?? row[column.label],
+            column,
+          );
+        });
+        return fillStructuredDetailDuration(nextRow, columns);
+      })
+      .filter((row) => Object.values(row).some((cell) => String(cell || '').trim()));
+
+    return normalizedRows.length > 0 ? normalizedRows : undefined;
+  };
+
+  const normalizeAiFilledValue = (field: string, value: unknown) => {
+    if (value === null || value === undefined || isUploadOnlyField(selectedType, field)) return undefined;
+
+    if (isStructuredDetailField(field)) {
+      return normalizeAiStructuredDetails(field, value);
+    }
+
+    if (isConfiguredFileField(selectedType, field)) {
+      const currentValue = toFileFieldValue(formData[field]);
+      return {
+        ...currentValue,
+        text: toAiFilledString(value),
+      };
+    }
+
+    if (isConfiguredMoneyField(selectedType, field)) {
+      const currentValue = toMoneyInputValue(formData[field]);
+      if (isPlainRecord(value)) {
+        return {
+          currency: String(value.currency || currentValue.currency || 'CNY'),
+          amount: toAiFilledString(value.amount ?? value.value ?? value.money),
+        };
+      }
+
+      return {
+        ...currentValue,
+        amount: toAiFilledString(value),
+      };
+    }
+
+    const selectOptions = getConfiguredSelectOptions(selectedType, field);
+    if (selectOptions.length > 0) return normalizeAiOptionFromList(value, selectOptions);
+
+    if (isConfiguredMemberField(selectedType, field)) {
+      return normalizeAiOptionFromList(value, organizationOptions.members.map((member) => member.name));
+    }
+
+    if (isConfiguredDepartmentField(selectedType, field)) {
+      return normalizeAiOptionFromList(value, organizationOptions.departments.map((department) => department.name));
+    }
+
+    if (isPlainRecord(value) && !isProjectCargoChangeField(field)) {
+      return toAiFilledString(value);
+    }
+
+    return value;
+  };
+
+  const applyAiFilledValues = (values: Record<string, unknown>) => {
+    if (!selectedType) return 0;
+    const nextData = { ...formData };
+    const filledFields: string[] = [];
+
+    selectedType.businessFields.forEach((field) => {
+      if (!Object.prototype.hasOwnProperty.call(values, field)) return;
+      const normalizedValue = normalizeAiFilledValue(field, values[field]);
+      if (normalizedValue === undefined) return;
+      nextData[field] = normalizedValue;
+      filledFields.push(field);
+    });
+
+    selectedType.durationFields?.forEach((rule) => {
+      nextData[rule.field] = calculateDurationValue(
+        nextData[rule.startField],
+        nextData[rule.endField],
+        rule.unit || 'hours',
+      );
+    });
+
+    if (filledFields.length > 0) {
+      setFormData(nextData);
+      setErrors((previousErrors) => {
+        const nextErrors = { ...previousErrors };
+        filledFields.forEach((field) => delete nextErrors[field]);
+        return nextErrors;
+      });
+    }
+
+    return filledFields.length;
+  };
+
+  const handleAiImageChange = (files: FileList | null) => {
+    const file = files?.[0] || null;
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setAiFillMessage('请选择图片文件');
+      setAiFillMessageType('error');
+      return;
+    }
+
+    if (file.size > 6 * 1024 * 1024) {
+      setAiFillMessage('图片太大，请换 6MB 以内的截图');
+      setAiFillMessageType('error');
+      return;
+    }
+
+    setAiImageFile(file);
+    setAiImagePreview(URL.createObjectURL(file));
+    setAiFillMessage(file.name);
+    setAiFillMessageType('idle');
+  };
+
+  const clearAiImage = () => {
+    setAiImageFile(null);
+    setAiImagePreview('');
+    setAiFillMessage('');
+    setAiFillMessageType('idle');
+  };
+
+  const handleAiFill = async () => {
+    if (!selectedModule || !selectedType || isAiFilling) return;
+
+    const text = aiFillText.trim();
+    if (aiFillMode === 'text' && !text) {
+      setAiFillMessage('先输入要识别的内容');
+      setAiFillMessageType('error');
+      return;
+    }
+
+    if (aiFillMode === 'image' && !aiImageFile) {
+      setAiFillMessage('先选择一张图片');
+      setAiFillMessageType('error');
+      return;
+    }
+
+    setIsAiFilling(true);
+    setAiFillMessage('正在识别表单内容');
+    setAiFillMessageType('idle');
+
+    try {
+      const image = aiFillMode === 'image' && aiImageFile
+        ? {
+            name: aiImageFile.name,
+            type: aiImageFile.type || 'image/png',
+            size: aiImageFile.size,
+            data: await readFileAsDataUrl(aiImageFile),
+          }
+        : null;
+      const response = await storage.fillApprovalFormWithAi({
+        moduleName: selectedModule.name,
+        approvalTypeName: selectedType.name,
+        text,
+        image,
+        fields: buildAiFormFillFields(),
+      });
+      const filledCount = applyAiFilledValues(response.values || {});
+      const warningText = response.warnings?.length ? `；${response.warnings.join('；')}` : '';
+      setAiFillMessage(filledCount > 0
+        ? `${response.summary || `已填写 ${filledCount} 个字段`}${warningText}`
+        : '没有识别到能填写的字段');
+      setAiFillMessageType(filledCount > 0 ? 'success' : 'error');
+    } catch (error) {
+      setAiFillMessage(error instanceof Error ? error.message : 'AI识别失败，请稍后再试');
+      setAiFillMessageType('error');
+    } finally {
+      setIsAiFilling(false);
+    }
+  };
+
   const renderStructuredDetailCell = (
     field: string,
     rowIndex: number,
@@ -1442,17 +2043,27 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     if (column.type === 'member') {
+      const memberOptions = organizationOptions.members.map((member) => {
+        const label = getMemberOptionLabel(member);
+
+        return {
+          key: member.id,
+          value: label,
+          label,
+          searchText: [member.name, member.departmentName, member.title].filter(Boolean).join(' '),
+        };
+      });
+
       return (
-        <select
+        <SearchableSingleSelect
           value={value}
-          onChange={(event) => updateStructuredDetail(field, rowIndex, String(column.key), event.target.value)}
-          className={commonClassName}
-        >
-          <option value="">{organizationOptions.members.length > 0 ? '请选择人员' : '暂无人员'}</option>
-          {organizationOptions.members.map((member) => (
-            <option key={member.id} value={getMemberOptionLabel(member)}>{getMemberOptionLabel(member)}</option>
-          ))}
-        </select>
+          options={memberOptions}
+          placeholder={organizationOptions.members.length > 0 ? '搜索人员' : '暂无人员'}
+          emptyText="没有找到人员"
+          onChange={(nextValue) => updateStructuredDetail(field, rowIndex, String(column.key), nextValue)}
+          icon={<UserRound size={14} strokeWidth={2.5} />}
+          inputClassName={commonClassName}
+        />
       );
     }
 
@@ -1600,24 +2211,23 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     if (isMemberField) {
+      const memberOptions = organizationOptions.members.map((member) => ({
+        key: member.id,
+        value: member.name,
+        label: getMemberOptionLabel(member),
+        searchText: [member.name, member.departmentName, member.title].filter(Boolean).join(' '),
+      }));
+
       return (
-        <div className="relative">
-          <select
-            className={cn(
-              "input-field border-b border-border-silver pr-11 focus:border-interactive-blue transition-colors",
-              !formData[field] && "text-light-gray",
-              errors[field] && "border-rose-500"
-            )}
-            value={formData[field]}
-            onChange={(event) => handleInputChange(field, event.target.value)}
-          >
-            <option value="">{organizationOptions.members.length > 0 ? `请选择${field}` : '暂无可选人员'}</option>
-            {organizationOptions.members.map((member) => (
-              <option key={member.id} value={member.name}>{getMemberOptionLabel(member)}</option>
-            ))}
-          </select>
-          <UserRound className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none" />
-        </div>
+        <SearchableSingleSelect
+          value={String(formData[field] || '')}
+          options={memberOptions}
+          placeholder={organizationOptions.members.length > 0 ? `搜索${field}` : '暂无可选人员'}
+          emptyText="没有找到人员"
+          onChange={(nextValue) => handleInputChange(field, nextValue)}
+          icon={<UserRound size={16} strokeWidth={2.5} />}
+          hasError={Boolean(errors[field])}
+        />
       );
     }
 
@@ -1674,7 +2284,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
               "input-field border-b border-border-silver focus:border-interactive-blue transition-colors",
               errors[field] && "border-rose-500"
             )}
-            placeholder={`输入${field}`}
+            placeholder="输入备注"
             value={fileValue.text}
             onChange={(event) => handleInputChange(field, {
               ...fileValue,
@@ -1825,28 +2435,27 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     if (isMemberField) {
-      return (
-        <div className="relative">
-          <select
-            className={cn(
-              "input-field border-b border-border-silver focus:border-interactive-blue transition-colors",
-              !formData[field] && "text-light-gray",
-              errors[field] && "border-rose-500"
-            )}
-            value={formData[field] || ''}
-            onChange={(event) => handleInputChange(field, event.target.value)}
-          >
-            <option value="">{organizationOptions.members.length > 0 ? `请选择${field}` : '暂无人员可选'}</option>
-            {organizationOptions.members.map((member) => {
-              const label = getMemberOptionLabel(member);
+      const memberOptions = organizationOptions.members.map((member) => {
+        const label = getMemberOptionLabel(member);
 
-              return (
-                <option key={member.id} value={label}>{label}</option>
-              );
-            })}
-          </select>
-          <UserRound className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none" />
-        </div>
+        return {
+          key: member.id,
+          value: label,
+          label,
+          searchText: [member.name, member.departmentName, member.title].filter(Boolean).join(' '),
+        };
+      });
+
+      return (
+        <SearchableSingleSelect
+          value={String(formData[field] || '')}
+          options={memberOptions}
+          placeholder={organizationOptions.members.length > 0 ? `搜索${field}` : '暂无人员可选'}
+          emptyText="没有找到人员"
+          onChange={(nextValue) => handleInputChange(field, nextValue)}
+          icon={<UserRound size={16} strokeWidth={2.5} />}
+          hasError={Boolean(errors[field])}
+        />
       );
     }
 
@@ -2017,6 +2626,31 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
                     </p>
                   </div>
                   
+                  <AiFormFillPanel
+                    isOpen={aiPanelOpen}
+                    mode={aiFillMode}
+                    text={aiFillText}
+                    imageFile={aiImageFile}
+                    imagePreview={aiImagePreview}
+                    message={aiFillMessage}
+                    messageType={aiFillMessageType}
+                    isLoading={isAiFilling}
+                    onToggle={() => setAiPanelOpen((current) => !current)}
+                    onModeChange={setAiFillMode}
+                    onTextChange={(nextText) => {
+                      setAiFillText(nextText);
+                      if (aiFillMessageType === 'error') {
+                        setAiFillMessage('');
+                        setAiFillMessageType('idle');
+                      }
+                    }}
+                    onImageChange={handleAiImageChange}
+                    onClearImage={clearAiImage}
+                    onSubmit={() => {
+                      void handleAiFill();
+                    }}
+                  />
+
                   <div className="grid grid-cols-1 gap-10">
                     {selectedType.businessFields.map(field => (
                       <div key={field} className="space-y-3">
