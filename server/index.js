@@ -5148,7 +5148,7 @@ const workflowEfficiencyRangeDays = {
 
 function normalizeWorkflowEfficiencyRange(value) {
   const range = normalizeWorkflowText(value);
-  return ['7d', '30d', '90d', 'all'].includes(range) ? range : 'all';
+  return ['7d', '30d', '90d'].includes(range) ? range : '7d';
 }
 
 function roundMetricValue(value, precision = 0) {
@@ -5209,13 +5209,6 @@ function getRecordFinalTime(record) {
   }
 
   return 0;
-}
-
-function getRecordRelevantTime(record) {
-  return parseTimestamp(record?.createdAt) ||
-    getRecordFinalTime(record) ||
-    parseTimestamp(record?.updatedAt) ||
-    getLatestRecordLogTime(record);
 }
 
 function getRecordCompletedStepCount(record) {
@@ -5289,7 +5282,7 @@ function aggregateWorkflowEfficiencyWindow(records, startTime, endTime) {
   return {
     flowAvg: finalizedCount > 0 ? durationHours / finalizedCount : 0,
     nodeAvg: totalCompletedSteps > 0 ? durationHours / totalCompletedSteps : 0,
-    volume: createdCount,
+    volume: touchedCount,
     users: users.size,
     finalizedCount,
     createdCount,
@@ -5318,28 +5311,24 @@ function getMetricChangePercent(value, previousValue, hasData, previousHasData) 
   return roundMetricValue(((value - previousValue) / previousValue) * 100, 1);
 }
 
-function buildWorkflowEfficiencySummary(template, records, timeZone = 'UTC', rangeInput = 'all') {
+function getWorkflowEfficiencyRangeLabel(range, prefix) {
+  const days = workflowEfficiencyRangeDays[range] || workflowEfficiencyRangeDays['7d'];
+  return `${prefix}${days}天`;
+}
+
+function buildWorkflowEfficiencySummary(template, records, timeZone = 'UTC', rangeInput = '7d') {
   const localTimeZone = normalizeTimeZone(timeZone);
   const range = normalizeWorkflowEfficiencyRange(rangeInput);
   const scope = getWorkflowTemplateEfficiencyScope(template);
   const scopedRecords = records.filter((record) => recordMatchesWorkflowScope(record, scope));
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
-  const earliestRecordTime = scopedRecords
-    .map(getRecordRelevantTime)
-    .filter(Boolean)
-    .reduce((earliest, time) => Math.min(earliest, time), Number.POSITIVE_INFINITY);
-  const hasHistoricalRecords = Number.isFinite(earliestRecordTime);
-  const currentStart = range === 'all'
-    ? (hasHistoricalRecords ? Math.min(earliestRecordTime, now - dayMs * 6) : now - dayMs * 6)
-    : now - dayMs * workflowEfficiencyRangeDays[range];
-  const periodMs = Math.max(dayMs, now - currentStart);
-  const previousStart = range === 'all' ? currentStart : currentStart - periodMs;
-  const previousEnd = range === 'all' ? currentStart : currentStart;
+  const periodMs = dayMs * workflowEfficiencyRangeDays[range];
+  const currentStart = now - periodMs;
+  const previousStart = currentStart - periodMs;
+  const previousEnd = currentStart;
   const currentAggregate = aggregateWorkflowEfficiencyWindow(scopedRecords, currentStart, now);
-  const previousAggregate = range === 'all'
-    ? aggregateWorkflowEfficiencyWindow([], previousStart, previousEnd)
-    : aggregateWorkflowEfficiencyWindow(scopedRecords, previousStart, previousEnd);
+  const previousAggregate = aggregateWorkflowEfficiencyWindow(scopedRecords, previousStart, previousEnd);
 
   const metrics = workflowEfficiencyMetricDefinitions.map((definition) => {
     const value = roundMetricValue(currentAggregate[definition.key], definition.precision);
@@ -5358,8 +5347,8 @@ function buildWorkflowEfficiencySummary(template, records, timeZone = 'UTC', ran
   });
 
   const bucketCount = 7;
-  const currentBucketMs = Math.max(dayMs, Math.ceil((now - currentStart) / bucketCount));
-  const previousBucketMs = Math.max(dayMs, Math.ceil((previousEnd - previousStart) / bucketCount));
+  const currentBucketMs = Math.max(dayMs, Math.ceil(periodMs / bucketCount));
+  const previousBucketMs = Math.max(dayMs, Math.ceil(periodMs / bucketCount));
 
   const trend = workflowEfficiencyMetricDefinitions.reduce((result, definition) => {
     result[definition.key] = Array.from({ length: bucketCount }, (_, index) => {
@@ -5368,9 +5357,7 @@ function buildWorkflowEfficiencySummary(template, records, timeZone = 'UTC', ran
       const previousBucketStart = previousStart + previousBucketMs * index;
       const previousBucketEnd = index === bucketCount - 1 ? previousEnd : Math.min(previousEnd, previousBucketStart + previousBucketMs);
       const currentDay = aggregateWorkflowEfficiencyWindow(scopedRecords, currentBucketStart, currentBucketEnd);
-      const previousDay = range === 'all'
-        ? aggregateWorkflowEfficiencyWindow([], previousBucketStart, previousBucketEnd)
-        : aggregateWorkflowEfficiencyWindow(scopedRecords, previousBucketStart, previousBucketEnd);
+      const previousDay = aggregateWorkflowEfficiencyWindow(scopedRecords, previousBucketStart, previousBucketEnd);
 
       return {
         label: formatEfficiencyDateLabel(currentBucketStart, localTimeZone),
@@ -5387,8 +5374,8 @@ function buildWorkflowEfficiencySummary(template, records, timeZone = 'UTC', ran
     deltaPercent: metrics.find((metric) => metric.key === 'flowAvg')?.changePercent || 0,
     recordCount: scopedRecords.length,
     completedRecordCount: scopedRecords.filter((record) => getRecordFinalTime(record) > 0).length,
-    currentPeriodLabel: range === 'all' ? '全部历史' : formatEfficiencyPeriodLabel(currentStart, now, localTimeZone),
-    previousPeriodLabel: range === 'all' ? '无对比周期' : formatEfficiencyPeriodLabel(previousStart, currentStart, localTimeZone),
+    currentPeriodLabel: getWorkflowEfficiencyRangeLabel(range, '近'),
+    previousPeriodLabel: getWorkflowEfficiencyRangeLabel(range, '前'),
     trend,
   };
 }

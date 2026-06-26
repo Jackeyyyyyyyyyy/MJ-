@@ -310,7 +310,7 @@ export const storage = {
     return request<WorkflowTemplate[]>('/workflow-templates', undefined, { skipImpersonation: true });
   },
 
-  getWorkflowEfficiencySummary(id: string, range: WorkflowEfficiencyRange = 'all'): Promise<WorkflowEfficiencySummary> {
+  getWorkflowEfficiencySummary(id: string, range: WorkflowEfficiencyRange = '7d'): Promise<WorkflowEfficiencySummary> {
     return request<WorkflowEfficiencySummary>(
       `/workflow-templates/${encodeURIComponent(id)}/efficiency?range=${encodeURIComponent(range)}`,
       undefined,

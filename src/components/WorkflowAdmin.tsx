@@ -123,10 +123,9 @@ const workflowCurrencyOptions = ['CNY', 'USD', 'EUR', 'HKD', 'JPY', 'GBP'];
 const duplicateWorkflowTemplateMessage = 'workflow template already exists for this organization and approval type';
 let defaultWorkflowTemplateSyncPromise: Promise<WorkflowTemplate[]> | null = null;
 const workflowEfficiencyRangeOptions: Array<{ value: WorkflowEfficiencyRange; label: string }> = [
-  { value: 'all', label: '全部历史' },
-  { value: '90d', label: '近90天' },
-  { value: '30d', label: '近30天' },
   { value: '7d', label: '近7天' },
+  { value: '30d', label: '近30天' },
+  { value: '90d', label: '近90天' },
 ];
 
 function getBusinessScopeOptions(): BusinessScopeOption[] {
@@ -2441,7 +2440,7 @@ function WorkflowEfficiencyOverview({
   const [summary, setSummary] = React.useState<WorkflowEfficiencySummary | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState('');
-  const [range, setRange] = React.useState<WorkflowEfficiencyRange>('all');
+  const [range, setRange] = React.useState<WorkflowEfficiencyRange>('7d');
   const [activeMetricKey, setActiveMetricKey] = React.useState<WorkflowEfficiencyMetricKey>('flowAvg');
   const [showDetails, setShowDetails] = React.useState(false);
 
@@ -2584,7 +2583,7 @@ function WorkflowEfficiencyOverview({
             <span className="h-2.5 w-2.5 rounded-full bg-[#1593f4]" />
             {summary?.currentPeriodLabel || '当前周期'}
           </span>
-          {summary?.previousPeriodLabel && summary.previousPeriodLabel !== '无对比周期' && (
+          {summary?.previousPeriodLabel && (
             <span className="inline-flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-full bg-[#14b8a6]" />
               {summary.previousPeriodLabel}
@@ -2609,7 +2608,7 @@ function WorkflowEfficiencyOverview({
                   <text x="12" y={tick.y + 5} fill="#8b8f98" fontSize="13" fontWeight="700">{tick.label}</text>
                 </g>
               ))}
-              {summary?.previousPeriodLabel !== '无对比周期' && chartData.previousPath && (
+              {chartData.previousPath && (
                 <path d={chartData.previousPath} fill="none" stroke="#14b8a6" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />
               )}
               {chartData.currentPath && <path d={chartData.currentPath} fill="none" stroke="#1593f4" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />}

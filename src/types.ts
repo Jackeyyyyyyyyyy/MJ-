@@ -305,7 +305,7 @@ export interface WorkflowTemplateInput {
 }
 
 export type WorkflowEfficiencyMetricKey = 'flowAvg' | 'nodeAvg' | 'volume' | 'users';
-export type WorkflowEfficiencyRange = '7d' | '30d' | '90d' | 'all';
+export type WorkflowEfficiencyRange = '7d' | '30d' | '90d';
 
 export interface WorkflowEfficiencyMetric {
   key: WorkflowEfficiencyMetricKey;
