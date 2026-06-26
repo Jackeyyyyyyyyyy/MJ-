@@ -45,6 +45,7 @@ import {
   WorkflowEfficiencyMetric,
   WorkflowEfficiencyMetricKey,
   WorkflowEfficiencyPoint,
+  WorkflowEfficiencyRange,
   WorkflowEfficiencySummary,
   WorkflowNode,
   WorkflowTemplate,
@@ -121,6 +122,12 @@ const emptyApproverActionOptions: Array<{ value: EmptyApproverAction; label: str
 const workflowCurrencyOptions = ['CNY', 'USD', 'EUR', 'HKD', 'JPY', 'GBP'];
 const duplicateWorkflowTemplateMessage = 'workflow template already exists for this organization and approval type';
 let defaultWorkflowTemplateSyncPromise: Promise<WorkflowTemplate[]> | null = null;
+const workflowEfficiencyRangeOptions: Array<{ value: WorkflowEfficiencyRange; label: string }> = [
+  { value: 'all', label: '全部历史' },
+  { value: '90d', label: '近90天' },
+  { value: '30d', label: '近30天' },
+  { value: '7d', label: '近7天' },
+];
 
 function getBusinessScopeOptions(): BusinessScopeOption[] {
   return approvalSchema.modules.flatMap((module) => (
@@ -319,9 +326,8 @@ function getWorkflowMeta(moduleName?: string, version?: number) {
 }
 
 function formatEfficiencyValue(metric: WorkflowEfficiencyMetric, value = metric.value) {
-  const isTimeMetric = metric.key === 'flowAvg' || metric.key === 'nodeAvg';
   const hasValue = value === metric.value ? metric.hasData : metric.previousHasData;
-  if (isTimeMetric && !hasValue) return '暂无';
+  if (!hasValue) return '暂无';
 
   return value.toLocaleString('zh-CN', {
     minimumFractionDigits: metric.precision,
@@ -2407,21 +2413,22 @@ function isTimeEfficiencyMetric(metric: Pick<WorkflowEfficiencyMetric, 'key'>) {
   return metric.key === 'flowAvg' || metric.key === 'nodeAvg';
 }
 
-function getEfficiencyNotice(metric: WorkflowEfficiencyMetric) {
+function getEfficiencyNotice(summary: WorkflowEfficiencySummary, metric: WorkflowEfficiencyMetric) {
   const metricName = isTimeEfficiencyMetric(metric) ? '平均完成耗时' : metric.label;
   const previousText = `${formatEfficiencyValue(metric, metric.previousValue)}${metric.unit && (!isTimeEfficiencyMetric(metric) || metric.previousHasData) ? metric.unit : ''}`;
+  const periodLabel = summary.currentPeriodLabel;
 
   if (!metric.hasData) {
-    return `近7天${metricName}暂无真实数据，上周期 ${previousText}`;
+    return `${periodLabel}${metricName}暂无真实数据${summary.recordCount === 0 ? '，当前审批流还没有匹配的审批单' : ''}`;
   }
 
   if (!metric.previousHasData) {
-    return `近7天${metricName} ${formatEfficiencyValue(metric)}${metric.unit}，上周期暂无真实数据`;
+    return `${periodLabel}${metricName} ${formatEfficiencyValue(metric)}${metric.unit}，${summary.previousPeriodLabel}暂无对比数据`;
   }
 
   const changePercent = Math.abs(metric.changePercent);
   const direction = metric.changePercent > 0 ? (isTimeEfficiencyMetric(metric) ? '增加' : '提升') : metric.changePercent < 0 ? '下降' : '持平';
-  return `近7天${metricName}${direction} ${changePercent.toLocaleString('zh-CN', { maximumFractionDigits: 1 })}%，上周期 ${previousText}`;
+  return `${periodLabel}${metricName}${direction} ${changePercent.toLocaleString('zh-CN', { maximumFractionDigits: 1 })}%，${summary.previousPeriodLabel} ${previousText}`;
 }
 
 function WorkflowEfficiencyOverview({
@@ -2434,6 +2441,7 @@ function WorkflowEfficiencyOverview({
   const [summary, setSummary] = React.useState<WorkflowEfficiencySummary | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState('');
+  const [range, setRange] = React.useState<WorkflowEfficiencyRange>('all');
   const [activeMetricKey, setActiveMetricKey] = React.useState<WorkflowEfficiencyMetricKey>('flowAvg');
   const [showDetails, setShowDetails] = React.useState(false);
 
@@ -2444,7 +2452,7 @@ function WorkflowEfficiencyOverview({
     setIsLoading(true);
     setError('');
 
-    storage.getWorkflowEfficiencySummary(template.id)
+    storage.getWorkflowEfficiencySummary(template.id, range)
       .then((nextSummary) => {
         if (!active) return;
         setSummary(nextSummary);
@@ -2461,26 +2469,42 @@ function WorkflowEfficiencyOverview({
     return () => {
       active = false;
     };
-  }, [template.id]);
+  }, [template.id, range]);
 
   const activeMetric = summary?.metrics.find((metric) => metric.key === activeMetricKey) || summary?.metrics[0] || null;
   const chartData = getEfficiencyChartData(activeMetric && summary ? summary.trend[activeMetric.key] || [] : []);
-  const noticeText = activeMetric ? getEfficiencyNotice(activeMetric) : '正在读取真实审批数据';
+  const noticeText = summary && activeMetric ? getEfficiencyNotice(summary, activeMetric) : '正在读取真实审批数据';
 
   return (
     <section className="overflow-hidden rounded-xl border border-border-silver bg-white shadow-sm">
-      <div className="flex flex-col gap-3 px-5 pt-5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 px-5 pt-5 lg:flex-row lg:items-center lg:justify-between">
         <h2 className="text-[18px] font-black text-midnight-graphite">效率总览</h2>
-        <button
-          type="button"
-          onClick={() => setShowDetails((current) => !current)}
-          aria-expanded={showDetails}
-          className="inline-flex items-center gap-1 text-[12px] font-bold text-medium-gray transition-colors hover:text-interactive-blue"
-        >
-          <span>快速提升流程效率？</span>
-          <span>查看详情</span>
-          <ChevronRight className={cn("transition-transform", showDetails && "rotate-90")} size={14} strokeWidth={2.8} />
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-full bg-lightest-gray-background p-1">
+            {workflowEfficiencyRangeOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setRange(option.value)}
+                className={cn(
+                  "h-8 rounded-full px-3 text-[12px] font-black transition-colors",
+                  range === option.value ? "bg-white text-midnight-graphite shadow-sm" : "text-medium-gray hover:text-midnight-graphite",
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowDetails((current) => !current)}
+            aria-expanded={showDetails}
+            className="inline-flex items-center gap-1 text-[12px] font-bold text-medium-gray transition-colors hover:text-interactive-blue"
+          >
+            <span>查看详情</span>
+            <ChevronRight className={cn("transition-transform", showDetails && "rotate-90")} size={14} strokeWidth={2.8} />
+          </button>
+        </div>
       </div>
 
       <div className="no-scrollbar mt-4 flex gap-3 overflow-x-auto px-5 pb-1 lg:grid lg:grid-cols-4 lg:overflow-visible">
@@ -2542,7 +2566,7 @@ function WorkflowEfficiencyOverview({
             <p className="mt-1 text-midnight-graphite">
               {isTimeEfficiencyMetric(activeMetric)
                 ? '耗时指标只统计已完成、已批准或已拒绝的审批单。'
-                : '单量和使用人数按近7天创建或参与的审批单聚合。'}
+                : `${summary.currentPeriodLabel}内创建或参与过的审批单会进入统计。`}
             </p>
           </div>
           <div>
@@ -2558,12 +2582,14 @@ function WorkflowEfficiencyOverview({
         <div className="flex items-center justify-center gap-16 text-[13px] font-bold text-medium-gray">
           <span className="inline-flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-[#1593f4]" />
-            近7天
+            {summary?.currentPeriodLabel || '当前周期'}
           </span>
-          <span className="inline-flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#14b8a6]" />
-            上周期
-          </span>
+          {summary?.previousPeriodLabel && summary.previousPeriodLabel !== '无对比周期' && (
+            <span className="inline-flex items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full bg-[#14b8a6]" />
+              {summary.previousPeriodLabel}
+            </span>
+          )}
         </div>
 
         <div className="mt-5 h-[260px] w-full">
@@ -2583,7 +2609,9 @@ function WorkflowEfficiencyOverview({
                   <text x="12" y={tick.y + 5} fill="#8b8f98" fontSize="13" fontWeight="700">{tick.label}</text>
                 </g>
               ))}
-              {chartData.previousPath && <path d={chartData.previousPath} fill="none" stroke="#14b8a6" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />}
+              {summary?.previousPeriodLabel !== '无对比周期' && chartData.previousPath && (
+                <path d={chartData.previousPath} fill="none" stroke="#14b8a6" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />
+              )}
               {chartData.currentPath && <path d={chartData.currentPath} fill="none" stroke="#1593f4" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />}
               {chartData.xLabels.map((label) => (
                 <text key={`${label.index}-${label.label}`} x={label.x} y="250" fill="#8b8f98" fontSize="13" fontWeight="700" textAnchor="middle">
