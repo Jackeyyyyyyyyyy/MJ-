@@ -5218,8 +5218,11 @@ function getRecordCompletedStepCount(record) {
   const completedCount = steps.filter((step) => (
     [STEP_APPROVED, STEP_REJECTED, STEP_SKIPPED].includes(step?.status)
   )).length;
+  const activeCount = steps.filter((step) => (
+    [STEP_APPROVED, STEP_REJECTED, STEP_SKIPPED, STEP_PENDING].includes(step?.status)
+  )).length;
 
-  return Math.max(1, completedCount || steps.length);
+  return Math.max(1, isWorkflowClosed(record) ? (completedCount || steps.length) : (activeCount || 1));
 }
 
 function addWorkflowUser(userSet, ...values) {
@@ -5250,10 +5253,23 @@ function isTimeInRange(time, startTime, endTime) {
   return time >= startTime && time < endTime;
 }
 
+function isRecordActiveInWindow(record, startTime, endTime) {
+  const createdTime = parseTimestamp(record?.createdAt);
+  if (!createdTime || createdTime >= endTime) return false;
+
+  const finalTime = getRecordFinalTime(record);
+  return !finalTime || finalTime >= startTime;
+}
+
+function getRecordMeasuredEndTime(record, windowEndTime) {
+  const finalTime = getRecordFinalTime(record);
+  return finalTime && finalTime < windowEndTime ? finalTime : windowEndTime;
+}
+
 function aggregateWorkflowEfficiencyWindow(records, startTime, endTime) {
   const users = new Set();
   let createdCount = 0;
-  let finalizedCount = 0;
+  let measuredCount = 0;
   let totalDurationMs = 0;
   let totalCompletedSteps = 0;
   let touchedCount = 0;
@@ -5262,17 +5278,20 @@ function aggregateWorkflowEfficiencyWindow(records, startTime, endTime) {
     const createdTime = parseTimestamp(record?.createdAt);
     const finalTime = getRecordFinalTime(record);
     const createdInWindow = isTimeInRange(createdTime, startTime, endTime);
-    const finalizedInWindow = isTimeInRange(finalTime, startTime, endTime);
+    const activeInWindow = isRecordActiveInWindow(record, startTime, endTime);
 
     if (createdInWindow) createdCount += 1;
-    if (createdInWindow || finalizedInWindow) {
+    if (activeInWindow) {
       touchedCount += 1;
       collectWorkflowRecordUsers(record, users);
     }
 
-    if (finalizedInWindow && createdTime > 0 && finalTime >= createdTime) {
-      finalizedCount += 1;
-      totalDurationMs += finalTime - createdTime;
+    if (activeInWindow && createdTime > 0) {
+      const measuredEndTime = getRecordMeasuredEndTime(record, endTime);
+      if (measuredEndTime >= createdTime) {
+        measuredCount += 1;
+        totalDurationMs += measuredEndTime - createdTime;
+      }
       totalCompletedSteps += getRecordCompletedStepCount(record);
     }
   });
@@ -5280,11 +5299,11 @@ function aggregateWorkflowEfficiencyWindow(records, startTime, endTime) {
   const durationHours = totalDurationMs / 3600000;
 
   return {
-    flowAvg: finalizedCount > 0 ? durationHours / finalizedCount : 0,
+    flowAvg: measuredCount > 0 ? durationHours / measuredCount : 0,
     nodeAvg: totalCompletedSteps > 0 ? durationHours / totalCompletedSteps : 0,
     volume: touchedCount,
     users: users.size,
-    finalizedCount,
+    finalizedCount: measuredCount,
     createdCount,
     touchedCount,
   };
