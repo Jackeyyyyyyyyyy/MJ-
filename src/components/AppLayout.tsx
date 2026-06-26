@@ -17,6 +17,7 @@ interface AppLayoutProps {
   onOpenAccountAdmin: () => void;
   onOpenAiAssistant: () => void;
   onOpenOrganizationAdmin: () => void;
+  onOpenStatsAdmin: () => void;
   onOpenWorkflowAdmin: () => void;
   onOpenBusinessFormAdmin: () => void;
   onOpenAiBranchLogs: () => void;
@@ -228,6 +229,7 @@ export default function AppLayout({
   onOpenAccountAdmin,
   onOpenAiAssistant,
   onOpenOrganizationAdmin,
+  onOpenStatsAdmin,
   onOpenWorkflowAdmin,
   onOpenBusinessFormAdmin,
   onOpenAiBranchLogs,
@@ -297,6 +299,10 @@ export default function AppLayout({
         }}
         onOpenOrganizationAdmin={() => {
           onOpenOrganizationAdmin();
+          setIsSidebarOpen(false);
+        }}
+        onOpenStatsAdmin={() => {
+          onOpenStatsAdmin();
           setIsSidebarOpen(false);
         }}
         onOpenWorkflowAdmin={() => {

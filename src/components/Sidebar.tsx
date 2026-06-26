@@ -4,6 +4,7 @@ import { AdminView, Role } from '../types';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import {
+  BarChart3,
   Bot,
   Building2,
   ChevronDown,
@@ -29,6 +30,7 @@ interface SidebarProps {
   onOpenAccountAdmin?: () => void;
   onOpenAiAssistant?: () => void;
   onOpenOrganizationAdmin?: () => void;
+  onOpenStatsAdmin?: () => void;
   onOpenWorkflowAdmin?: () => void;
   onOpenBusinessFormAdmin?: () => void;
   onOpenAiBranchLogs?: () => void;
@@ -47,6 +49,7 @@ export default function Sidebar({
   onOpenAccountAdmin,
   onOpenAiAssistant,
   onOpenOrganizationAdmin,
+  onOpenStatsAdmin,
   onOpenWorkflowAdmin,
   onOpenBusinessFormAdmin,
   onOpenAiBranchLogs,
@@ -86,6 +89,12 @@ export default function Sidebar({
             label: '组织架构',
             icon: Building2,
             onClick: onOpenOrganizationAdmin,
+          },
+          {
+            id: 'stats' as AdminView,
+            label: '统计',
+            icon: BarChart3,
+            onClick: onOpenStatsAdmin,
           },
           {
             id: 'workflows' as AdminView,

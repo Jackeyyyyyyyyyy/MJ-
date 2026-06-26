@@ -16,7 +16,7 @@ export enum ApprovalStatus {
 
 export type Role = 'employee' | 'boss' | 'developer';
 
-export type AdminView = 'accounts' | 'ai-assistant' | 'organization' | 'workflows' | 'business-forms' | 'ai-branch-logs';
+export type AdminView = 'accounts' | 'ai-assistant' | 'organization' | 'stats' | 'workflows' | 'business-forms' | 'ai-branch-logs';
 
 export type ApproverRuleType =
   | 'specific_members'

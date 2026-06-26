@@ -5,6 +5,7 @@ import WorkHome, { WorkTab } from './components/WorkHome';
 import AccountPermissionAdmin from './components/AccountPermissionAdmin';
 import OrganizationAdmin from './components/OrganizationAdmin';
 import WorkflowAdmin from './components/WorkflowAdmin';
+import WorkflowStatsAdmin from './components/WorkflowStatsAdmin';
 import BusinessFormAdmin from './components/BusinessFormAdmin';
 import AiBranchLogs from './components/AiBranchLogs';
 import ApprovalTable from './components/ApprovalTable';
@@ -24,7 +25,7 @@ type AppRoute =
   | { kind: 'admin'; view: AdminView }
   | { kind: 'module'; moduleName: string; typeName: string };
 
-const adminRouteViews: AdminView[] = ['accounts', 'ai-assistant', 'organization', 'workflows', 'business-forms', 'ai-branch-logs'];
+const adminRouteViews: AdminView[] = ['accounts', 'ai-assistant', 'organization', 'stats', 'workflows', 'business-forms', 'ai-branch-logs'];
 const workRouteTabs: WorkTab[] = ['requests', 'approvals', 'processing', 'cc', 'global'];
 
 function decodeRoutePart(part?: string) {
@@ -209,6 +210,11 @@ function MainApp() {
   const handleOpenOrganizationAdmin = () => {
     applyRoute({ kind: 'admin', view: 'organization' });
     pushRoute({ kind: 'admin', view: 'organization' });
+  };
+
+  const handleOpenStatsAdmin = () => {
+    applyRoute({ kind: 'admin', view: 'stats' });
+    pushRoute({ kind: 'admin', view: 'stats' });
   };
 
   const handleOpenWorkflowAdmin = () => {
@@ -449,6 +455,10 @@ function MainApp() {
       return <OrganizationAdmin />;
     }
 
+    if (activeAdminView === 'stats' && isSuperAdminPerspective) {
+      return <WorkflowStatsAdmin />;
+    }
+
     if (activeAdminView === 'workflows' && isSuperAdminPerspective) {
       return <WorkflowAdmin />;
     }
@@ -524,6 +534,7 @@ function MainApp() {
       onOpenAccountAdmin={handleOpenAccountAdmin}
       onOpenAiAssistant={handleOpenAiAssistant}
       onOpenOrganizationAdmin={handleOpenOrganizationAdmin}
+      onOpenStatsAdmin={handleOpenStatsAdmin}
       onOpenWorkflowAdmin={handleOpenWorkflowAdmin}
       onOpenBusinessFormAdmin={handleOpenBusinessFormAdmin}
       onOpenAiBranchLogs={handleOpenAiBranchLogs}
