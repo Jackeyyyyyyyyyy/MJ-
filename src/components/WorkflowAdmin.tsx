@@ -7,9 +7,12 @@ import {
   Building2,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   CircleHelp,
   Crosshair,
   GitBranch,
+  Lightbulb,
   Maximize2,
   Minimize2,
   Minus,
@@ -39,6 +42,10 @@ import {
   WorkflowCondition,
   WorkflowConditionField,
   WorkflowConditionOperator,
+  WorkflowEfficiencyMetric,
+  WorkflowEfficiencyMetricKey,
+  WorkflowEfficiencyPoint,
+  WorkflowEfficiencySummary,
   WorkflowNode,
   WorkflowTemplate,
   WorkflowVersion,
@@ -108,6 +115,7 @@ const identityConditionOperators = new Set<WorkflowConditionOperator>(['eq', 'ne
 const emptyApproverActionOptions: Array<{ value: EmptyApproverAction; label: string }> = [
   { value: 'auto_pass', label: '自动通过' },
   { value: 'auto_reject', label: '自动拒绝' },
+  { value: 'transfer_admin', label: '管理员审批' },
   { value: 'assign_members', label: '指定人员审批' },
 ];
 const workflowCurrencyOptions = ['CNY', 'USD', 'EUR', 'HKD', 'JPY', 'GBP'];
@@ -308,6 +316,17 @@ function getWorkflowTitle(moduleName?: string, approvalTypeName?: string) {
 
 function getWorkflowMeta(moduleName?: string, version?: number) {
   return [moduleName, `v${version || 1}`].filter(Boolean).join(' · ');
+}
+
+function formatEfficiencyValue(metric: WorkflowEfficiencyMetric, value = metric.value) {
+  const isTimeMetric = metric.key === 'flowAvg' || metric.key === 'nodeAvg';
+  const hasValue = value === metric.value ? metric.hasData : metric.previousHasData;
+  if (isTimeMetric && !hasValue) return '暂无';
+
+  return value.toLocaleString('zh-CN', {
+    minimumFractionDigits: metric.precision,
+    maximumFractionDigits: metric.precision,
+  });
 }
 
 function getTemplateOptionLabel(template: WorkflowTemplate) {
@@ -1189,8 +1208,12 @@ function normalizeDraftForEditor(draft: WorkflowVersion): WorkflowVersion {
 
 function prepareDraftForSave(draft: WorkflowVersion): WorkflowVersion {
   const nextDraft = normalizeDraftForEditor(draft);
-  const flowNodes = flowNodesFromDraft(nextDraft);
   const scope = getBusinessScopeByNames(nextDraft.basic.moduleName, nextDraft.basic.approvalTypeName);
+  const defaultConditionField = getFallbackConditionField(scope);
+  const flowNodes = enforceFlowConditionFallbackBranches(
+    flowNodesFromDraft(nextDraft),
+    defaultConditionField || `${SUBMITTER_FIELD_PREFIX}department`,
+  );
   const generatedName = getGeneratedWorkflowName(scope || {
     approvalTypeName: nextDraft.basic.approvalTypeName || '通用审批',
   });
@@ -1263,8 +1286,11 @@ function validateDraft(draft: WorkflowVersion | null): ValidationState {
   const branches = draft.branches || [];
   const aiBranchIds = collectAiConditionBranchIds(flowNodesFromDraft(draft));
   const canUseRuleConditions = getConditionFieldOptions(draft).length > 0;
-  if (!branches.some((branch) => branch.isDefault)) {
-    addValidationError(state, 'branches', '必须包含 default branch');
+  const defaultBranches = branches.filter((branch) => branch.isDefault);
+  if (defaultBranches.length === 0) {
+    addValidationError(state, 'branches', '条件分支必须设置一个兜底分支');
+  } else if (defaultBranches.length > 1) {
+    addValidationError(state, 'branches', '条件分支只能设置一个兜底分支');
   }
 
   branches.forEach((branch, branchIndex) => {
@@ -2325,6 +2351,253 @@ function FlowNode({
   );
 }
 
+function getEfficiencyChartData(points: WorkflowEfficiencyPoint[]) {
+  const width = 620;
+  const height = 260;
+  const padding = { left: 56, right: 18, top: 18, bottom: 36 };
+  if (points.length === 0) {
+    return {
+      width,
+      height,
+      currentPath: '',
+      previousPath: '',
+      ticks: [],
+      xLabels: [],
+    };
+  }
+
+  const values = points.flatMap((point) => [point.current, point.previous]);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const range = Math.max(1, maxValue - minValue);
+  const chartMin = Math.max(0, minValue - range * 0.18);
+  const chartMax = maxValue + range * 0.16;
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const toX = (index: number) => padding.left + (chartWidth / Math.max(1, points.length - 1)) * index;
+  const toY = (value: number) => padding.top + (chartMax - value) / (chartMax - chartMin) * chartHeight;
+  const linePath = (key: 'current' | 'previous') => points
+    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${toX(index).toFixed(2)} ${toY(point[key]).toFixed(2)}`)
+    .join(' ');
+  const tickValues = Array.from({ length: 4 }, (_, index) => chartMin + (chartMax - chartMin) * (index / 3)).reverse();
+
+  return {
+    width,
+    height,
+    currentPath: linePath('current'),
+    previousPath: linePath('previous'),
+    ticks: tickValues.map((value) => ({
+      value,
+      y: toY(value),
+      label: Math.round(value).toLocaleString('zh-CN'),
+    })),
+    xLabels: [...new Set([
+      0,
+      Math.floor((points.length - 1) / 2),
+      points.length - 1,
+    ])].map((index) => ({
+      index,
+      x: toX(index),
+      label: points[index]?.label || '',
+    })),
+  };
+}
+
+function isTimeEfficiencyMetric(metric: Pick<WorkflowEfficiencyMetric, 'key'>) {
+  return metric.key === 'flowAvg' || metric.key === 'nodeAvg';
+}
+
+function getEfficiencyNotice(metric: WorkflowEfficiencyMetric) {
+  const metricName = isTimeEfficiencyMetric(metric) ? '平均完成耗时' : metric.label;
+  const previousText = `${formatEfficiencyValue(metric, metric.previousValue)}${metric.unit && (!isTimeEfficiencyMetric(metric) || metric.previousHasData) ? metric.unit : ''}`;
+
+  if (!metric.hasData) {
+    return `近7天${metricName}暂无真实数据，上周期 ${previousText}`;
+  }
+
+  if (!metric.previousHasData) {
+    return `近7天${metricName} ${formatEfficiencyValue(metric)}${metric.unit}，上周期暂无真实数据`;
+  }
+
+  const changePercent = Math.abs(metric.changePercent);
+  const direction = metric.changePercent > 0 ? (isTimeEfficiencyMetric(metric) ? '增加' : '提升') : metric.changePercent < 0 ? '下降' : '持平';
+  return `近7天${metricName}${direction} ${changePercent.toLocaleString('zh-CN', { maximumFractionDigits: 1 })}%，上周期 ${previousText}`;
+}
+
+function WorkflowEfficiencyOverview({
+  template,
+  draft,
+}: {
+  template: WorkflowTemplate;
+  draft: WorkflowVersion;
+}) {
+  const [summary, setSummary] = React.useState<WorkflowEfficiencySummary | null>(null);
+  const [isLoading, setIsLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [activeMetricKey, setActiveMetricKey] = React.useState<WorkflowEfficiencyMetricKey>('flowAvg');
+  const [showDetails, setShowDetails] = React.useState(false);
+
+  React.useEffect(() => {
+    let active = true;
+    setActiveMetricKey('flowAvg');
+    setShowDetails(false);
+    setIsLoading(true);
+    setError('');
+
+    storage.getWorkflowEfficiencySummary(template.id)
+      .then((nextSummary) => {
+        if (!active) return;
+        setSummary(nextSummary);
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setSummary(null);
+        setError(requestError instanceof Error ? requestError.message : '效率统计读取失败');
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [template.id]);
+
+  const activeMetric = summary?.metrics.find((metric) => metric.key === activeMetricKey) || summary?.metrics[0] || null;
+  const chartData = getEfficiencyChartData(activeMetric && summary ? summary.trend[activeMetric.key] || [] : []);
+  const noticeText = activeMetric ? getEfficiencyNotice(activeMetric) : '正在读取真实审批数据';
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-border-silver bg-white shadow-sm">
+      <div className="flex flex-col gap-3 px-5 pt-5 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-[18px] font-black text-midnight-graphite">效率总览</h2>
+        <button
+          type="button"
+          onClick={() => setShowDetails((current) => !current)}
+          aria-expanded={showDetails}
+          className="inline-flex items-center gap-1 text-[12px] font-bold text-medium-gray transition-colors hover:text-interactive-blue"
+        >
+          <span>快速提升流程效率？</span>
+          <span>查看详情</span>
+          <ChevronRight className={cn("transition-transform", showDetails && "rotate-90")} size={14} strokeWidth={2.8} />
+        </button>
+      </div>
+
+      <div className="no-scrollbar mt-4 flex gap-3 overflow-x-auto px-5 pb-1 lg:grid lg:grid-cols-4 lg:overflow-visible">
+        {summary?.metrics.map((metric) => {
+          const active = metric.key === activeMetric?.key;
+          const showUnit = metric.unit && (!isTimeEfficiencyMetric(metric) || metric.hasData);
+          return (
+            <button
+              key={metric.key}
+              type="button"
+              onClick={() => setActiveMetricKey(metric.key)}
+              className={cn(
+                "relative min-w-[160px] rounded-xl border px-4 py-3 text-left transition-all",
+                active
+                  ? "border-[#1593f4] bg-[#1593f4] text-white shadow-[0_12px_24px_rgba(21,147,244,0.28)] after:absolute after:-bottom-2 after:left-1/2 after:h-0 after:w-0 after:-translate-x-1/2 after:border-x-[8px] after:border-t-[9px] after:border-x-transparent after:border-t-[#1593f4]"
+                  : "border-border-silver bg-white text-midnight-graphite hover:border-[#b7d9ff] hover:shadow-sm",
+              )}
+            >
+              <span className={cn("block text-[13px] font-bold", active ? "text-white/85" : "text-medium-gray")}>
+                {metric.label}
+              </span>
+              <span className="mt-2 flex items-end gap-1">
+                <span className="text-[26px] font-black leading-none tracking-tight">
+                  {formatEfficiencyValue(metric)}
+                </span>
+                {showUnit && <span className={cn("text-[13px] font-bold", active ? "text-white/90" : "text-midnight-graphite")}>{metric.unit}</span>}
+              </span>
+            </button>
+          );
+        }) || Array.from({ length: 4 }, (_, index) => (
+          <div key={index} className="min-w-[160px] rounded-xl border border-border-silver bg-white px-4 py-3">
+            <div className="h-4 w-20 rounded bg-lightest-gray-background" />
+            <div className="mt-3 h-7 w-24 rounded bg-lightest-gray-background" />
+          </div>
+        ))}
+      </div>
+
+      <div className="mx-5 mt-5 flex items-center gap-3 rounded-xl bg-[#f5f6f8] px-4 py-3 text-[14px] font-bold text-midnight-graphite">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-sm">
+          <Lightbulb size={17} strokeWidth={2.6} />
+        </span>
+        <p className="min-w-0">
+          {error ? '效率统计读取失败，请稍后重试' : noticeText}
+        </p>
+      </div>
+
+      {showDetails && summary && activeMetric && (
+        <div className="mx-5 mt-4 grid gap-3 rounded-xl border border-[#dbeafe] bg-[#f8fbff] p-4 text-[12px] font-bold text-medium-gray md:grid-cols-3">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-interactive-blue">关键观察</p>
+            <p className="mt-1 text-midnight-graphite">
+              {activeMetric.hasData
+                ? `${activeMetric.label}来自 ${summary.currentPeriodLabel} 的真实审批记录。`
+                : `${summary.currentPeriodLabel} 暂无可统计的真实记录。`}
+            </p>
+          </div>
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-interactive-blue">优化方向</p>
+            <p className="mt-1 text-midnight-graphite">
+              {isTimeEfficiencyMetric(activeMetric)
+                ? '耗时指标只统计已完成、已批准或已拒绝的审批单。'
+                : '单量和使用人数按近7天创建或参与的审批单聚合。'}
+            </p>
+          </div>
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-interactive-blue">当前流程</p>
+            <p className="mt-1 text-midnight-graphite">
+              {getWorkflowTitle(draft.basic.moduleName, draft.basic.approvalTypeName)} · 共 {summary.recordCount} 条历史记录
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="px-5 pb-5 pt-6">
+        <div className="flex items-center justify-center gap-16 text-[13px] font-bold text-medium-gray">
+          <span className="inline-flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-[#1593f4]" />
+            近7天
+          </span>
+          <span className="inline-flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-[#14b8a6]" />
+            上周期
+          </span>
+        </div>
+
+        <div className="mt-5 h-[260px] w-full">
+          {isLoading || !activeMetric ? (
+            <div className="flex h-full items-center justify-center rounded-xl bg-lightest-gray-background text-[13px] font-bold text-medium-gray">
+              正在读取真实统计...
+            </div>
+          ) : error ? (
+            <div className="flex h-full items-center justify-center rounded-xl bg-lightest-gray-background text-[13px] font-bold text-medium-gray">
+              暂时无法读取效率统计
+            </div>
+          ) : (
+            <svg className="h-full w-full overflow-visible" viewBox={`0 0 ${chartData.width} ${chartData.height}`} role="img" aria-label={`${activeMetric.label}趋势图`}>
+              {chartData.ticks.map((tick, index) => (
+                <g key={`${tick.label}-${index}`}>
+                  <line x1="56" x2="602" y1={tick.y} y2={tick.y} stroke="#e4e7ec" strokeDasharray="4 5" />
+                  <text x="12" y={tick.y + 5} fill="#8b8f98" fontSize="13" fontWeight="700">{tick.label}</text>
+                </g>
+              ))}
+              {chartData.previousPath && <path d={chartData.previousPath} fill="none" stroke="#14b8a6" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />}
+              {chartData.currentPath && <path d={chartData.currentPath} fill="none" stroke="#1593f4" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />}
+              {chartData.xLabels.map((label) => (
+                <text key={`${label.index}-${label.label}`} x={label.x} y="250" fill="#8b8f98" fontSize="13" fontWeight="700" textAnchor="middle">
+                  {label.label}
+                </text>
+              ))}
+            </svg>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 type FlowInsertKind = 'approval' | 'condition' | 'ai-condition' | 'cc' | 'processor';
 const FLOW_BRANCH_COUNT_OPTIONS = [2, 3, 4, 5, 6];
 
@@ -2403,6 +2676,127 @@ function createConditionBranch(
 function createConditionBranches(isAiCondition: boolean, branchCount: number, field: WorkflowConditionField) {
   const totalCount = clampFlowBranchCount(branchCount);
   return Array.from({ length: totalCount }, (_, index) => createConditionBranch(isAiCondition, index, totalCount, field));
+}
+
+function isDefaultBranchTitle(title?: string) {
+  const normalizedTitle = String(title || '').trim();
+  return !normalizedTitle || normalizedTitle === '其余情况' || normalizedTitle === '默认条件' || normalizedTitle === 'Default Branch';
+}
+
+function getConfiguredBranchTitle(branch: WorkflowConditionBranch, index: number, isAiCondition: boolean) {
+  if (isAiCondition) return branch.title || getAiBranchTitle(index);
+  return isDefaultBranchTitle(branch.title) ? `条件 ${index + 1}` : branch.title;
+}
+
+function makeFlowBranchConfigured(
+  branch: WorkflowConditionBranch,
+  index: number,
+  field: WorkflowConditionField,
+  isAiCondition: boolean,
+): WorkflowConditionBranch {
+  const workflowConditions = isAiCondition
+    ? []
+    : (branch.workflowConditions?.length ? branch.workflowConditions : [defaultCondition(field)]);
+
+  return {
+    ...branch,
+    title: getConfiguredBranchTitle(branch, index, isAiCondition),
+    expression: isAiCondition ? getAiBranchSelectionExpression(index) : getFlowBranchExpression(workflowConditions),
+    priority: index + 1,
+    isDefault: false,
+    workflowConditions,
+  };
+}
+
+function makeFlowBranchDefault(
+  branch: WorkflowConditionBranch,
+  index: number,
+  isAiCondition: boolean,
+): WorkflowConditionBranch {
+  return {
+    ...branch,
+    title: isAiCondition ? getAiBranchTitle(index) : '其余情况',
+    expression: isAiCondition ? getAiBranchSelectionExpression(index, true) : '',
+    aiDescription: isAiCondition ? normalizeAiBranchDescriptionText(branch.aiDescription, index, true) : branch.aiDescription,
+    priority: 999,
+    isDefault: true,
+    workflowConditions: [],
+  };
+}
+
+function reconcileFlowConditionBranches(
+  branches: WorkflowConditionBranch[] = [],
+  branchId: string,
+  patch: Partial<WorkflowConditionBranch>,
+  field: WorkflowConditionField,
+  isAiCondition: boolean,
+) {
+  const patchChangesDefaultState = patch.isDefault !== undefined;
+  let nextBranches = branches.map((branch, index) => {
+    if (branch.id !== branchId) {
+      if (patch.isDefault === true && branch.isDefault) {
+        return makeFlowBranchConfigured(branch, index, field, isAiCondition);
+      }
+      return branch;
+    }
+
+    const patchedBranch = { ...branch, ...patch };
+    if (patch.isDefault === true) return makeFlowBranchDefault(patchedBranch, index, isAiCondition);
+    if (patch.isDefault === false) return makeFlowBranchConfigured(patchedBranch, index, field, isAiCondition);
+    return patchedBranch;
+  });
+
+  if (patchChangesDefaultState && !nextBranches.some((branch) => branch.isDefault) && nextBranches.length > 0) {
+    const fallbackIndex = Math.max(
+      0,
+      nextBranches.reduce((matchedIndex, branch, index) => (
+        branch.id === branchId ? matchedIndex : index
+      ), -1),
+    );
+    nextBranches = nextBranches.map((branch, index) => (
+      index === fallbackIndex ? makeFlowBranchDefault(branch, index, isAiCondition) : branch
+    ));
+  }
+
+  if (!patchChangesDefaultState) return nextBranches;
+
+  const regularBranches = nextBranches.filter((branch) => !branch.isDefault);
+  const defaultBranches = nextBranches.filter((branch) => branch.isDefault);
+  return [...regularBranches, ...defaultBranches];
+}
+
+function enforceFlowConditionFallbackBranches(
+  nodes: WorkflowNode[] = [],
+  field: WorkflowConditionField,
+): WorkflowNode[] {
+  return nodes.map((node) => {
+    if (node.type !== 'condition') return node;
+
+    const isAiCondition = node.conditionMode === 'ai';
+    const branches = node.conditions || [];
+    const defaultIndex = branches.findIndex((branch) => branch.isDefault);
+    const fallbackIndex = defaultIndex >= 0 ? defaultIndex : Math.max(0, branches.length - 1);
+
+    return {
+      ...node,
+      conditions: branches.map((branch, index) => {
+        const branchWithSyncedNodes = {
+          ...branch,
+          nodes: enforceFlowConditionFallbackBranches(branch.nodes || [], field),
+        };
+
+        if (index === fallbackIndex) {
+          return makeFlowBranchDefault(branchWithSyncedNodes, index, isAiCondition);
+        }
+
+        if (branch.isDefault) {
+          return makeFlowBranchConfigured(branchWithSyncedNodes, index, field, isAiCondition);
+        }
+
+        return branchWithSyncedNodes;
+      }),
+    };
+  });
 }
 
 function resizeConditionBranches(
@@ -2825,6 +3219,25 @@ function WorkflowFlowDesigner({
     });
   };
 
+  const handleCanvasWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+
+    if (event.ctrlKey || event.metaKey) {
+      const zoomMultiplier = Math.exp(-event.deltaY * 0.002);
+      zoomWorkflowCanvas(canvasView.scale * zoomMultiplier, event.clientX, event.clientY);
+      return;
+    }
+
+    const deltaX = event.deltaX || (event.shiftKey ? event.deltaY : 0);
+    const deltaY = event.shiftKey ? 0 : event.deltaY;
+
+    setCanvasView((current) => ({
+      ...current,
+      x: current.x - deltaX,
+      y: current.y - deltaY,
+    }));
+  };
+
   const handleCanvasPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
 
@@ -2922,10 +3335,7 @@ function WorkflowFlowDesigner({
           onPointerMove={handleCanvasPointerMove}
           onPointerUp={stopCanvasPan}
           onPointerCancel={stopCanvasPan}
-          onWheel={(event) => {
-            event.preventDefault();
-            zoomWorkflowCanvas(canvasView.scale * (event.deltaY > 0 ? 0.9 : 1.1), event.clientX, event.clientY);
-          }}
+          onWheel={handleCanvasWheel}
           className={cn(
             "workflow-canvas-frame relative min-h-[680px] overflow-hidden bg-[#f7f8fa] cursor-grab select-none touch-none",
             isPanning && "cursor-grabbing"
@@ -3262,16 +3672,14 @@ function ConditionValueControl({
 
   if (kind === 'member') {
     return (
-      <select
-        className="input-field text-[13px]"
+      <SearchableSingleSelect
         value={condition.value || ''}
-        onChange={(event) => onUpdateCondition(branchId, condition.id, { value: event.target.value })}
-      >
-        <option value="">请选择{getConditionFieldLabel(condition.field)}</option>
-        {memberOptions.map((option) => (
-          <option key={option.value} value={option.value}>{option.label}</option>
-        ))}
-      </select>
+        options={memberOptions}
+        onChange={(value) => onUpdateCondition(branchId, condition.id, { value })}
+        placeholder={`请选择${getConditionFieldLabel(condition.field)}`}
+        searchPlaceholder={`搜索${getConditionFieldLabel(condition.field)}姓名或账号`}
+        emptyText="暂无成员"
+      />
     );
   }
 
@@ -3391,27 +3799,25 @@ function FlowConditionBranchEditor({
     conditions,
     approvalSteps: [],
   };
+  const fallbackField = fieldOptions[0]?.value || `${SUBMITTER_FIELD_PREFIX}department`;
+  const setBranchConfigEnabled = (enabled: boolean) => {
+    if (enabled && !isAiCondition && !fieldOptions.length) {
+      window.alert('当前业务表单没有可用条件字段，不能配置条件。');
+      return;
+    }
 
-  if (branch.isDefault) {
-    const aiDescription = normalizeAiBranchDescriptionText(branch.aiDescription, index, branch.isDefault);
+    const workflowConditions = enabled && !isAiCondition
+      ? (conditions.length > 0 ? conditions : [defaultCondition(fallbackField)])
+      : [];
 
-    return (
-      <div className="rounded-2xl border border-border-silver bg-white px-4 py-3">
-        <p className="text-[13px] font-black text-midnight-graphite">{branch.title || '其余情况'}</p>
-        <p className="mt-1 text-[11px] font-bold text-medium-gray">
-          {isAiCondition ? 'AI 会按这条分支说明判断是否进入；未命中其他分支或判断失败时，也会进入这里。' : '其他条件都不命中时，自动进入这条分支。'}
-        </p>
-        {isAiCondition && (
-          <textarea
-            className="input-field mt-3 min-h-[76px] resize-none text-[13px]"
-            value={aiDescription}
-            onChange={(event) => onUpdateFlowBranch(nodeId, branch.id, { aiDescription: event.target.value })}
-            placeholder={`写给 AI 看的 ${branch.title || '这个分支'}说明，例如：不符合其他分支，但符合补充规则时选择这里`}
-          />
-        )}
-      </div>
-    );
-  }
+    onUpdateFlowBranch(nodeId, branch.id, {
+      isDefault: !enabled,
+      workflowConditions,
+      expression: enabled ? getFlowBranchExpression(workflowConditions) : '',
+      title: enabled ? getConfiguredBranchTitle(branch, index, Boolean(isAiCondition)) : '其余情况',
+    });
+  };
+  const aiDescription = normalizeAiBranchDescriptionText(branch.aiDescription, index, branch.isDefault);
 
   return (
     <div className="space-y-3 rounded-2xl border border-border-silver bg-white p-4">
@@ -3420,14 +3826,15 @@ function FlowConditionBranchEditor({
           <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">分支名称</span>
           <input
             className="input-field text-[14px]"
-            value={branch.title || `条件 ${index + 1}`}
+            value={branch.isDefault ? '其余情况' : (branch.title || `条件 ${index + 1}`)}
+            readOnly={branch.isDefault && !isAiCondition}
             onChange={(event) => onUpdateFlowBranch(nodeId, branch.id, { title: event.target.value })}
           />
         </label>
         <button
           type="button"
           onClick={() => onAddFlowBranchCondition(nodeId, branch.id)}
-          disabled={!fieldOptions.length}
+          disabled={!fieldOptions.length || branch.isDefault}
           className={cn(
             "mt-6 h-9 shrink-0 rounded-full bg-black px-3 text-[12px] font-black text-white disabled:cursor-not-allowed disabled:opacity-40",
             isAiCondition && "hidden",
@@ -3437,7 +3844,36 @@ function FlowConditionBranchEditor({
         </button>
       </div>
 
-      {isAiCondition ? (
+      {!isAiCondition && (
+        <label className={cn(
+          "flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 text-[13px] font-black transition-colors",
+          branch.isDefault
+            ? "border-[#b7d9ff] bg-[#f2f8ff] text-interactive-blue"
+            : "border-border-silver bg-white text-midnight-graphite hover:border-light-silver",
+        )}>
+          <input
+            type="checkbox"
+            checked={Boolean(branch.isDefault)}
+            onChange={(event) => setBranchConfigEnabled(!event.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-interactive-blue"
+          />
+          <span className="min-w-0">
+            <span className="block">设为兜底分支（必选一个）</span>
+            <span className={cn(
+              "mt-0.5 block text-[11px] font-bold leading-4",
+              branch.isDefault ? "text-interactive-blue/75" : "text-light-gray",
+            )}>
+              未命中其他条件时进入；取消当前兜底会自动让另一条分支接住。
+            </span>
+          </span>
+        </label>
+      )}
+
+      {branch.isDefault ? (
+        <div className="rounded-xl bg-lightest-gray-background px-3 py-2 text-[12px] font-bold leading-5 text-medium-gray">
+          {isAiCondition ? 'AI 会按这条分支说明判断是否进入；未命中其他分支或判断失败时，也会进入这里。' : '其他条件都不命中时，自动进入这条分支。'}
+        </div>
+      ) : isAiCondition ? (
         <label className="block space-y-2">
           <span className="text-[12px] font-black uppercase tracking-wider text-light-gray">写给 AI 看的分支说明</span>
           <textarea
@@ -3448,27 +3884,35 @@ function FlowConditionBranchEditor({
           />
         </label>
       ) : (
-      <div className="space-y-3">
-        {!fieldOptions.length && (
-          <div className="rounded-xl bg-[#fff7e6] px-3 py-2 text-[12px] font-bold text-[#9a5b00]">
-            当前业务表单没有可用条件字段，不能配置条件分化。
-          </div>
-        )}
-        {conditions.map((condition, conditionIndex) => (
-          <React.Fragment key={condition.id}>
-            <ConditionEditor
-              branch={editorBranch}
-              condition={condition}
-              index={conditionIndex}
-              fieldOptions={fieldOptions}
-              memberOptions={memberOptions}
-              departmentOptions={departmentOptions}
-              onRemoveCondition={(branchId, conditionId) => onRemoveFlowBranchCondition(nodeId, branchId, conditionId)}
-              onUpdateCondition={(branchId, conditionId, patch) => onUpdateFlowBranchCondition(nodeId, branchId, conditionId, patch)}
-            />
-          </React.Fragment>
-        ))}
-      </div>
+        <div className="space-y-3">
+          {!fieldOptions.length && (
+            <div className="rounded-xl bg-[#fff7e6] px-3 py-2 text-[12px] font-bold text-[#9a5b00]">
+              当前业务表单没有可用条件字段，不能配置条件分化。
+            </div>
+          )}
+          {conditions.map((condition, conditionIndex) => (
+            <React.Fragment key={condition.id}>
+              <ConditionEditor
+                branch={editorBranch}
+                condition={condition}
+                index={conditionIndex}
+                fieldOptions={fieldOptions}
+                memberOptions={memberOptions}
+                departmentOptions={departmentOptions}
+                onRemoveCondition={(branchId, conditionId) => onRemoveFlowBranchCondition(nodeId, branchId, conditionId)}
+                onUpdateCondition={(branchId, conditionId, patch) => onUpdateFlowBranchCondition(nodeId, branchId, conditionId, patch)}
+              />
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+      {branch.isDefault && isAiCondition && (
+        <textarea
+          className="input-field min-h-[76px] resize-none text-[13px]"
+          value={aiDescription}
+          onChange={(event) => onUpdateFlowBranch(nodeId, branch.id, { aiDescription: event.target.value })}
+          placeholder={`写给 AI 看的 ${branch.title || '这个分支'}说明，例如：不符合其他分支，但符合补充规则时选择这里`}
+        />
       )}
     </div>
   );
@@ -4546,6 +4990,139 @@ function MultiSelect({
   );
 }
 
+function SearchableSingleSelect({
+  value,
+  options,
+  onChange,
+  placeholder,
+  searchPlaceholder = '搜索名称或账号',
+  emptyText,
+}: {
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+  placeholder: string;
+  searchPlaceholder?: string;
+  emptyText: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [keyword, setKeyword] = useState('');
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const normalizedKeyword = keyword.trim().toLowerCase();
+  const selectedOption = useMemo(
+    () => options.find((option) => option.value === value) || null,
+    [options, value],
+  );
+  const filteredOptions = useMemo(() => {
+    if (!normalizedKeyword) return options;
+    return options.filter((option) => (
+      option.label.toLowerCase().includes(normalizedKeyword)
+      || option.value.toLowerCase().includes(normalizedKeyword)
+    ));
+  }, [normalizedKeyword, options]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const focusFrame = window.requestAnimationFrame(() => inputRef.current?.focus());
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [isOpen]);
+
+  const selectValue = (nextValue: string) => {
+    onChange(nextValue);
+    setIsOpen(false);
+    setKeyword('');
+  };
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        className={cn(
+          "flex h-10 w-full items-center justify-between gap-3 rounded-md border bg-white px-3 text-left text-[13px] font-medium outline-none transition-all",
+          isOpen ? "border-interactive-blue ring-2 ring-sky-blue-highlight" : "border-[#d7d7dc] hover:border-light-silver",
+          selectedOption ? "text-midnight-graphite" : "text-light-gray",
+        )}
+      >
+        <span className="min-w-0 truncate">{selectedOption?.label || placeholder}</span>
+        <ChevronDown className={cn("shrink-0 text-medium-gray transition-transform", isOpen && "rotate-180")} size={14} strokeWidth={2.6} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden rounded-xl border border-border-silver bg-white p-2 shadow-xl shadow-black/10">
+          <div className="relative rounded-md bg-lightest-gray-background">
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-light-gray"
+              size={14}
+              strokeWidth={2.4}
+            />
+            <input
+              ref={inputRef}
+              className="h-9 w-full rounded-md bg-transparent py-2 pl-9 pr-3 text-[13px] font-medium text-midnight-graphite outline-none placeholder:text-light-gray focus:ring-2 focus:ring-sky-blue-highlight"
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              placeholder={searchPlaceholder}
+            />
+          </div>
+
+          <div className="mt-2 max-h-[220px] overflow-y-auto rounded-md">
+            {options.length === 0 ? (
+              <div className="px-3 py-5 text-center text-[12px] font-medium text-light-gray">{emptyText}</div>
+            ) : filteredOptions.length === 0 ? (
+              <div className="px-3 py-5 text-center text-[12px] font-medium text-light-gray">未找到匹配项</div>
+            ) : (
+              filteredOptions.map((option) => {
+                const isSelected = option.value === value;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => selectValue(option.value)}
+                    className={cn(
+                      "flex min-h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] font-medium transition-colors",
+                      isSelected ? "bg-[#e7f1ff] text-interactive-blue" : "text-midnight-graphite hover:bg-lightest-gray-background",
+                    )}
+                  >
+                    <span className="min-w-0 truncate">{option.label}</span>
+                    {isSelected && <Check size={14} strokeWidth={3} className="shrink-0" />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] font-semibold text-light-gray">
+            <span>{normalizedKeyword ? `找到 ${filteredOptions.length} 项` : `共 ${options.length} 项`}</span>
+            {value && (
+              <button
+                type="button"
+                onClick={() => selectValue('')}
+                className="text-interactive-blue hover:text-midnight-graphite"
+              >
+                清空
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EmptyApproverActionControl({
   step,
   memberOptions,
@@ -4599,6 +5176,11 @@ function EmptyApproverActionControl({
           emptyText="暂无成员"
           searchPlaceholder="搜索指定审批人"
         />
+      )}
+      {selectedAction === 'transfer_admin' && (
+        <div className="rounded-md bg-lightest-gray-background px-3 py-2 text-[12px] font-semibold leading-5 text-medium-gray">
+          将转给组织架构中已勾选“管理员”的成员审批。
+        </div>
       )}
     </div>
   );
@@ -5223,6 +5805,28 @@ export default function WorkflowAdmin() {
     };
   });
 
+  const updateFlowBranchGroupInTree = (
+    nodes: WorkflowNode[],
+    nodeId: string,
+    updater: (branches: WorkflowConditionBranch[], isAiCondition: boolean) => WorkflowConditionBranch[],
+  ): WorkflowNode[] => nodes.map((node) => {
+    if (node.type === 'condition' && node.id === nodeId) {
+      return {
+        ...node,
+        conditions: updater(node.conditions || [], node.conditionMode === 'ai'),
+      };
+    }
+
+    if (node.type !== 'condition') return node;
+    return {
+      ...node,
+      conditions: (node.conditions || []).map((condition) => ({
+        ...condition,
+        nodes: updateFlowBranchGroupInTree(condition.nodes || [], nodeId, updater),
+      })),
+    };
+  });
+
   const removeFlowNodeFromTree = (nodes: WorkflowNode[], nodeId: string): WorkflowNode[] => nodes
     .filter((node) => node.id !== nodeId)
     .map((node) => {
@@ -5236,13 +5840,18 @@ export default function WorkflowAdmin() {
       };
     });
 
-  const syncFlowDraft = (current: WorkflowVersion, nextNodes: WorkflowNode[]): WorkflowVersion => ({
-    ...current,
-    flowMode: 'flexible',
-    nodes: [startFlowNode(), ...nextNodes],
-    branches: branchesFromFlowNodes(nextNodes),
-    ccRule: collectFlowCcRule(nextNodes) || defaultCcRule(),
-  });
+  const syncFlowDraft = (current: WorkflowVersion, nextNodes: WorkflowNode[]): WorkflowVersion => {
+    const defaultField = conditionFieldOptionsForDraft[0]?.value || `${SUBMITTER_FIELD_PREFIX}department`;
+    const enforcedNodes = enforceFlowConditionFallbackBranches(nextNodes, defaultField);
+
+    return {
+      ...current,
+      flowMode: 'flexible',
+      nodes: [startFlowNode(), ...enforcedNodes],
+      branches: branchesFromFlowNodes(enforcedNodes),
+      ccRule: collectFlowCcRule(enforcedNodes) || defaultCcRule(),
+    };
+  };
 
   const insertFlowNode = (path: string[], index: number, kind: FlowInsertKind, branchCount?: number) => {
     if (kind === 'condition' && conditionFieldOptionsForDraft.length === 0) {
@@ -5294,10 +5903,10 @@ export default function WorkflowAdmin() {
   const updateFlowBranch = (nodeId: string, branchId: string, patch: Partial<WorkflowConditionBranch>) => {
     patchDraft((current) => {
       const currentNodes = flowNodesFromDraft({ ...current, flowMode: 'flexible' });
-      const nextNodes = updateFlowBranchInTree(currentNodes, nodeId, branchId, (branch) => ({
-        ...branch,
-        ...patch,
-      }));
+      const defaultField = conditionFieldOptionsForDraft[0]?.value || `${SUBMITTER_FIELD_PREFIX}department`;
+      const nextNodes = updateFlowBranchGroupInTree(currentNodes, nodeId, (branches, isAiCondition) => (
+        reconcileFlowConditionBranches(branches, branchId, patch, defaultField, isAiCondition)
+      ));
       return syncFlowDraft(current, nextNodes);
     });
   };
@@ -5628,6 +6237,11 @@ export default function WorkflowAdmin() {
               )}
             </section>
 
+
+            <WorkflowEfficiencyOverview
+              template={selectedTemplate}
+              draft={draft}
+            />
 
             <WorkflowFlowDesigner
               draft={draft}

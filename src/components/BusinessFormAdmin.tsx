@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlignLeft, Asterisk, Building2, Calendar, ChevronDown, Clock3, DollarSign, Edit3, Eye, EyeOff, ListChecks, Loader2, Lock, Paperclip, Plus, RotateCcw, Save, Search, Table2, Trash2, Upload, UserRound, X } from 'lucide-react';
+import { AlignLeft, Asterisk, Building2, Calendar, ChevronDown, Clock3, DollarSign, Edit3, Eye, EyeOff, ListChecks, Loader2, Lock, Paperclip, Plus, RotateCcw, Save, Search, Table2, Trash2, UserRound, X } from 'lucide-react';
 import { approvalSchema, replaceApprovalSchema } from '../approvalSchema';
 import { storage } from '../storage';
 import { ApprovalType, Module } from '../types';
@@ -62,12 +62,6 @@ function getInitialAmountFields(type: ApprovalType) {
 
 function getInitialFileFields(type: ApprovalType) {
   const configuredFields = Array.isArray(type.fileFields) ? type.fileFields : [];
-  const businessFieldSet = new Set(type.businessFields);
-  return configuredFields.filter((field) => businessFieldSet.has(field));
-}
-
-function getInitialAttachmentFields(type: ApprovalType) {
-  const configuredFields = Array.isArray(type.attachmentFields) ? type.attachmentFields : [];
   const businessFieldSet = new Set(type.businessFields);
   return configuredFields.filter((field) => businessFieldSet.has(field));
 }
@@ -241,7 +235,6 @@ export default function BusinessFormAdmin() {
   const [fieldText, setFieldText] = React.useState('');
   const [amountFields, setAmountFields] = React.useState<string[]>([]);
   const [fileFields, setFileFields] = React.useState<string[]>([]);
-  const [attachmentFields, setAttachmentFields] = React.useState<string[]>([]);
   const [dateFields, setDateFields] = React.useState<string[]>([]);
   const [dateTimeFields, setDateTimeFields] = React.useState<string[]>([]);
   const [optionalFields, setOptionalFields] = React.useState<string[]>([]);
@@ -267,10 +260,6 @@ export default function BusinessFormAdmin() {
   const selectedFileFields = React.useMemo(
     () => fileFields.filter((field) => businessFields.includes(field)),
     [fileFields, businessFields],
-  );
-  const selectedAttachmentFields = React.useMemo(
-    () => attachmentFields.filter((field) => businessFields.includes(field)),
-    [attachmentFields, businessFields],
   );
   const selectedDateFields = React.useMemo(
     () => dateFields.filter((field) => businessFields.includes(field)),
@@ -355,7 +344,6 @@ export default function BusinessFormAdmin() {
         : [...current, field]
     ));
     setFileFields((current) => current.filter((item) => item !== field));
-    setAttachmentFields((current) => current.filter((item) => item !== field));
     setDateFields((current) => current.filter((item) => item !== field));
     setDateTimeFields((current) => current.filter((item) => item !== field));
     setMultilineFields((current) => current.filter((item) => item !== field));
@@ -380,32 +368,6 @@ export default function BusinessFormAdmin() {
         : [...current, field]
     ));
     setAmountFields((current) => current.filter((item) => item !== field));
-    setAttachmentFields((current) => current.filter((item) => item !== field));
-    setDateFields((current) => current.filter((item) => item !== field));
-    setDateTimeFields((current) => current.filter((item) => item !== field));
-    setMultilineFields((current) => current.filter((item) => item !== field));
-    setMemberFields((current) => current.filter((item) => item !== field));
-    setDepartmentFields((current) => current.filter((item) => item !== field));
-    setSelectFieldOptions((current) => {
-      const next = { ...current };
-      delete next[field];
-      return next;
-    });
-    setDetailFieldColumns((current) => {
-      const next = { ...current };
-      delete next[field];
-      return next;
-    });
-  };
-
-  const toggleAttachmentField = (field: string) => {
-    setAttachmentFields((current) => (
-      current.includes(field)
-        ? current.filter((item) => item !== field)
-        : [...current, field]
-    ));
-    setAmountFields((current) => current.filter((item) => item !== field));
-    setFileFields((current) => current.filter((item) => item !== field));
     setDateFields((current) => current.filter((item) => item !== field));
     setDateTimeFields((current) => current.filter((item) => item !== field));
     setMultilineFields((current) => current.filter((item) => item !== field));
@@ -431,7 +393,6 @@ export default function BusinessFormAdmin() {
     ));
     setAmountFields((current) => current.filter((item) => item !== field));
     setFileFields((current) => current.filter((item) => item !== field));
-    setAttachmentFields((current) => current.filter((item) => item !== field));
     setDateTimeFields((current) => current.filter((item) => item !== field));
     setMultilineFields((current) => current.filter((item) => item !== field));
     setMemberFields((current) => current.filter((item) => item !== field));
@@ -456,7 +417,6 @@ export default function BusinessFormAdmin() {
     ));
     setAmountFields((current) => current.filter((item) => item !== field));
     setFileFields((current) => current.filter((item) => item !== field));
-    setAttachmentFields((current) => current.filter((item) => item !== field));
     setDateFields((current) => current.filter((item) => item !== field));
     setMultilineFields((current) => current.filter((item) => item !== field));
     setMemberFields((current) => current.filter((item) => item !== field));
@@ -501,7 +461,6 @@ export default function BusinessFormAdmin() {
     ));
     setAmountFields((current) => current.filter((item) => item !== field));
     setFileFields((current) => current.filter((item) => item !== field));
-    setAttachmentFields((current) => current.filter((item) => item !== field));
     setDateFields((current) => current.filter((item) => item !== field));
     setDateTimeFields((current) => current.filter((item) => item !== field));
     setMemberFields((current) => current.filter((item) => item !== field));
@@ -526,7 +485,6 @@ export default function BusinessFormAdmin() {
     ));
     setAmountFields((current) => current.filter((item) => item !== field));
     setFileFields((current) => current.filter((item) => item !== field));
-    setAttachmentFields((current) => current.filter((item) => item !== field));
     setDateFields((current) => current.filter((item) => item !== field));
     setDateTimeFields((current) => current.filter((item) => item !== field));
     setMultilineFields((current) => current.filter((item) => item !== field));
@@ -551,7 +509,6 @@ export default function BusinessFormAdmin() {
     ));
     setAmountFields((current) => current.filter((item) => item !== field));
     setFileFields((current) => current.filter((item) => item !== field));
-    setAttachmentFields((current) => current.filter((item) => item !== field));
     setDateFields((current) => current.filter((item) => item !== field));
     setDateTimeFields((current) => current.filter((item) => item !== field));
     setMultilineFields((current) => current.filter((item) => item !== field));
@@ -576,7 +533,6 @@ export default function BusinessFormAdmin() {
     if (value.trim()) {
       setAmountFields((current) => current.filter((item) => item !== field));
       setFileFields((current) => current.filter((item) => item !== field));
-      setAttachmentFields((current) => current.filter((item) => item !== field));
       setDateFields((current) => current.filter((item) => item !== field));
       setDateTimeFields((current) => current.filter((item) => item !== field));
       setMultilineFields((current) => current.filter((item) => item !== field));
@@ -598,7 +554,6 @@ export default function BusinessFormAdmin() {
     if (value.trim()) {
       setAmountFields((current) => current.filter((item) => item !== field));
       setFileFields((current) => current.filter((item) => item !== field));
-      setAttachmentFields((current) => current.filter((item) => item !== field));
       setDateFields((current) => current.filter((item) => item !== field));
       setDateTimeFields((current) => current.filter((item) => item !== field));
       setMultilineFields((current) => current.filter((item) => item !== field));
@@ -618,7 +573,6 @@ export default function BusinessFormAdmin() {
     setFieldText('');
     setAmountFields([]);
     setFileFields([]);
-    setAttachmentFields([]);
     setDateFields([]);
     setDateTimeFields([]);
     setOptionalFields([]);
@@ -643,7 +597,6 @@ export default function BusinessFormAdmin() {
     setFieldText(getFieldText(type));
     setAmountFields(getInitialAmountFields(type));
     setFileFields(getInitialFileFields(type));
-    setAttachmentFields(getInitialAttachmentFields(type));
     setDateFields(getInitialDateFields(type));
     setDateTimeFields(getInitialDateTimeFields(type));
     setOptionalFields(getInitialOptionalFields(type));
@@ -712,7 +665,7 @@ export default function BusinessFormAdmin() {
             businessFields,
             amountFields: selectedAmountFields,
             fileFields: selectedFileFields,
-            attachmentFields: selectedAttachmentFields,
+            attachmentFields: [],
             dateFields: selectedDateFields,
             dateTimeFields: selectedDateTimeFields,
             optionalFields: selectedOptionalFields,
@@ -729,7 +682,7 @@ export default function BusinessFormAdmin() {
             businessFields,
             amountFields: selectedAmountFields,
             fileFields: selectedFileFields,
-            attachmentFields: selectedAttachmentFields,
+            attachmentFields: [],
             dateFields: selectedDateFields,
             dateTimeFields: selectedDateTimeFields,
             optionalFields: selectedOptionalFields,
@@ -1329,49 +1282,6 @@ export default function BusinessFormAdmin() {
             </div>
           </details>
 
-          <details className="group rounded-2xl border border-[#d8e7f8] bg-[#f7fbff]">
-            <FieldSectionHeader
-              icon={<Upload size={15} strokeWidth={2.8} />}
-              title="上传字段"
-              count={selectedAttachmentFields.length}
-            />
-            <div className="p-4 pt-0">
-            <div className="space-y-3">
-              {businessFields.length > 0 ? (
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {businessFields.map((field) => {
-                    const checked = selectedAttachmentFields.includes(field);
-
-                    return (
-                      <label
-                        key={field}
-                        className={cn(
-                          'flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border bg-white px-3 py-2 text-[12px] font-black transition-colors',
-                          checked
-                            ? 'border-sky-500 text-sky-700 shadow-sm'
-                            : 'border-border-silver text-midnight-graphite hover:border-sky-200',
-                        )}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleAttachmentField(field)}
-                          className="h-4 w-4 accent-sky-600"
-                        />
-                        <span className="min-w-0 truncate">{field}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-xl bg-white px-3 py-2 text-[12px] font-bold text-light-gray">
-                  先填写业务字段，再选择上传字段。
-                </div>
-              )}
-            </div>
-            </div>
-          </details>
-
           <details className="group rounded-2xl border border-[#cfeadc] bg-[#f8fdfb]">
             <FieldSectionHeader
               icon={<Paperclip size={15} strokeWidth={2.8} />}
@@ -1428,7 +1338,6 @@ export default function BusinessFormAdmin() {
               {businessFields.map((field) => {
                 const isSelectedAmountField = selectedAmountFields.includes(field);
                 const isSelectedFileField = selectedFileFields.includes(field);
-                const isSelectedAttachmentField = selectedAttachmentFields.includes(field);
                 const isSelectedDateField = selectedDateFields.includes(field);
                 const isSelectedDateTimeField = selectedDateTimeFields.includes(field);
                 const isSelectedOptionalField = selectedOptionalFields.includes(field);
@@ -1436,8 +1345,6 @@ export default function BusinessFormAdmin() {
                   ? '金额+币种'
                   : isSelectedFileField
                     ? '填空+附件'
-                    : isSelectedAttachmentField
-                    ? '上传'
                     : isSelectedDateField
                     ? '日期/时间'
                     : isSelectedDateTimeField
@@ -1455,8 +1362,6 @@ export default function BusinessFormAdmin() {
                         ? "bg-[#e7f1ff] text-interactive-blue"
                         : isSelectedFileField
                           ? "bg-emerald-50 text-emerald-700"
-                        : isSelectedAttachmentField
-                          ? "bg-sky-50 text-sky-700"
                           : isSelectedDateField
                           ? "bg-violet-50 text-violet-700"
                           : isSelectedDateTimeField

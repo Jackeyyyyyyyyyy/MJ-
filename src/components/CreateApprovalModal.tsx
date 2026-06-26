@@ -434,6 +434,19 @@ function getMemberOptionLabel(member: OrganizationSelectOptions['members'][numbe
   return detail ? `${member.name} - ${detail}` : member.name;
 }
 
+function getMemberSearchText(member: OrganizationSelectOptions['members'][number]) {
+  return [member.id, member.name, member.departmentName, member.title].filter(Boolean).join(' ');
+}
+
+function getMemberSelectOptions(members: OrganizationSelectOptions['members']) {
+  return members.map((member) => ({
+    key: member.id,
+    value: member.name,
+    label: getMemberOptionLabel(member),
+    searchText: getMemberSearchText(member),
+  }));
+}
+
 type SearchableSingleSelectOption = {
   key: string;
   value: string;
@@ -466,6 +479,7 @@ function SearchableSingleSelect({
     () => options.find((option) => option.value === value) || null,
     [options, value],
   );
+  const selectedLabel = selectedOption?.label || value;
   const [query, setQuery] = React.useState(selectedOption?.label || '');
 
   React.useEffect(() => {
@@ -494,7 +508,7 @@ function SearchableSingleSelect({
   const normalizedQuery = query.trim().toLowerCase();
   const visibleOptions = React.useMemo(() => {
     const matchedOptions = normalizedQuery
-      ? options.filter((option) => `${option.label} ${option.searchText || ''}`.toLowerCase().includes(normalizedQuery))
+      ? options.filter((option) => `${option.label} ${option.value} ${option.key} ${option.searchText || ''}`.toLowerCase().includes(normalizedQuery))
       : options;
 
     return matchedOptions.slice(0, 80);
@@ -532,7 +546,7 @@ function SearchableSingleSelect({
           inputClassName,
         )}
         placeholder={placeholder}
-        value={isOpen ? query : selectedOption?.label || ''}
+        value={isOpen ? query : selectedLabel}
         onFocus={(event) => {
           setQuery(selectedOption?.label || '');
           setIsOpen(true);
@@ -624,13 +638,12 @@ function AiFormFillPanel({
           </button>
           <button
             type="button"
-            onClick={() => onModeChange('image')}
-            className={cn(
-              "h-10 rounded-lg px-4 text-[14px] font-bold transition-all",
-              mode === 'image' ? "bg-white text-midnight-graphite shadow-sm" : "text-medium-gray hover:text-midnight-graphite",
-            )}
+            disabled
+            title="图片 AI 识别开发中"
+            className="inline-flex h-10 cursor-not-allowed items-center gap-1.5 rounded-lg bg-[#e5e5e8] px-4 text-[14px] font-bold text-light-silver opacity-80"
           >
             图片填单
+            <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-black text-light-silver">开发中</span>
           </button>
         </div>
 
@@ -809,6 +822,32 @@ function normalizeAiOptionFromList(value: unknown, options: string[]) {
     const normalizedOption = option.toLowerCase();
     return normalizedOption.includes(normalizedText) || normalizedText.includes(normalizedOption);
   }) || text;
+}
+
+function normalizeAiMemberValue(value: unknown, members: OrganizationSelectOptions['members']) {
+  const text = toAiFilledString(value);
+  if (!text || members.length === 0) return text;
+
+  const normalizedText = text.toLowerCase();
+  const findMatch = (matcher: (candidate: string) => boolean) => members.find((member) => {
+    const candidates = [
+      member.id,
+      member.name,
+      getMemberOptionLabel(member),
+      member.departmentName,
+      member.title,
+    ].map((item) => String(item || '').trim().toLowerCase()).filter(Boolean);
+    return candidates.some(matcher);
+  });
+
+  const exact = findMatch((candidate) => candidate === normalizedText);
+  if (exact) return exact.name;
+
+  const partial = findMatch((candidate) => (
+    candidate.includes(normalizedText) || normalizedText.includes(candidate)
+  ));
+
+  return partial?.name || text;
 }
 
 function isBlankOptionalValue(value: unknown): boolean {
@@ -1794,7 +1833,12 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
 
   const getAiFieldOptions = (field: string, kind: AiFormFillField['kind']) => {
     if (kind === 'select') return getConfiguredSelectOptions(selectedType, field);
-    if (kind === 'member') return organizationOptions.members.map((member) => member.name);
+    if (kind === 'member') {
+      return [...new Set(organizationOptions.members.flatMap((member) => [
+        member.name,
+        getMemberOptionLabel(member),
+      ]).filter(Boolean))];
+    }
     if (kind === 'department') return organizationOptions.departments.map((department) => department.name);
     return [];
   };
@@ -1828,9 +1872,9 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     value: unknown,
     column: ReturnType<typeof getStructuredDetailColumns>[number],
   ) => {
-    const options = column.type === 'member'
-      ? organizationOptions.members.map((member) => getMemberOptionLabel(member))
-      : column.type === 'department'
+    if (column.type === 'member') return normalizeAiMemberValue(value, organizationOptions.members);
+
+    const options = column.type === 'department'
         ? organizationOptions.departments.map((department) => department.name)
         : (column.options || []);
 
@@ -1891,7 +1935,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     if (selectOptions.length > 0) return normalizeAiOptionFromList(value, selectOptions);
 
     if (isConfiguredMemberField(selectedType, field)) {
-      return normalizeAiOptionFromList(value, organizationOptions.members.map((member) => member.name));
+      return normalizeAiMemberValue(value, organizationOptions.members);
     }
 
     if (isConfiguredDepartmentField(selectedType, field)) {
@@ -1939,24 +1983,8 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   };
 
   const handleAiImageChange = (files: FileList | null) => {
-    const file = files?.[0] || null;
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      setAiFillMessage('请选择图片文件');
-      setAiFillMessageType('error');
-      return;
-    }
-
-    if (file.size > 6 * 1024 * 1024) {
-      setAiFillMessage('图片太大，请换 6MB 以内的截图');
-      setAiFillMessageType('error');
-      return;
-    }
-
-    setAiImageFile(file);
-    setAiImagePreview(URL.createObjectURL(file));
-    setAiFillMessage(file.name);
+    void files;
+    setAiFillMessage('图片 AI 识别开发中');
     setAiFillMessageType('idle');
   };
 
@@ -1971,6 +1999,12 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     if (!selectedModule || !selectedType || isAiFilling) return;
 
     const text = aiFillText.trim();
+    if (aiFillMode === 'image') {
+      setAiFillMessage('图片 AI 识别开发中');
+      setAiFillMessageType('idle');
+      return;
+    }
+
     if (aiFillMode === 'text' && !text) {
       setAiFillMessage('先输入要识别的内容');
       setAiFillMessageType('error');
@@ -2043,16 +2077,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     if (column.type === 'member') {
-      const memberOptions = organizationOptions.members.map((member) => {
-        const label = getMemberOptionLabel(member);
-
-        return {
-          key: member.id,
-          value: label,
-          label,
-          searchText: [member.name, member.departmentName, member.title].filter(Boolean).join(' '),
-        };
-      });
+      const memberOptions = getMemberSelectOptions(organizationOptions.members);
 
       return (
         <SearchableSingleSelect
@@ -2211,12 +2236,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     if (isMemberField) {
-      const memberOptions = organizationOptions.members.map((member) => ({
-        key: member.id,
-        value: member.name,
-        label: getMemberOptionLabel(member),
-        searchText: [member.name, member.departmentName, member.title].filter(Boolean).join(' '),
-      }));
+      const memberOptions = getMemberSelectOptions(organizationOptions.members);
 
       return (
         <SearchableSingleSelect
@@ -2435,16 +2455,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     if (isMemberField) {
-      const memberOptions = organizationOptions.members.map((member) => {
-        const label = getMemberOptionLabel(member);
-
-        return {
-          key: member.id,
-          value: label,
-          label,
-          searchText: [member.name, member.departmentName, member.title].filter(Boolean).join(' '),
-        };
-      });
+      const memberOptions = getMemberSelectOptions(organizationOptions.members);
 
       return (
         <SearchableSingleSelect

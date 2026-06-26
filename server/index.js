@@ -2349,7 +2349,7 @@ function validateWorkflowDraftForPublish(draft) {
   const name = normalizeWorkflowText(draft?.basic?.name);
   const submitPermission = draft?.submitPermission || {};
   const branches = Array.isArray(draft?.branches) ? draft.branches : [];
-  const defaultBranch = branches.find((branch) => branch?.isDefault);
+  const defaultBranches = branches.filter((branch) => branch?.isDefault);
   const aiBranchIds = new Set();
   const collectAiBranchIds = (nodes = []) => {
     (Array.isArray(nodes) ? nodes : []).forEach((node) => {
@@ -2371,7 +2371,8 @@ function validateWorkflowDraftForPublish(draft) {
     (permissionType === 'members' && Array.isArray(submitPermission.memberIds) && submitPermission.memberIds.length > 0) ||
     (permissionType === 'departments' && Array.isArray(submitPermission.departmentIds) && submitPermission.departmentIds.length > 0);
   if (!hasSubmitScope) errors.push('至少配置一个提交权限范围');
-  if (!defaultBranch) errors.push('必须包含 default branch');
+  if (defaultBranches.length === 0) errors.push('条件分支必须设置一个兜底分支');
+  if (defaultBranches.length > 1) errors.push('条件分支只能设置一个兜底分支');
   if (containsProcessorFlowNode(draft?.nodes || []) && !hasProcessorRule(draft?.processorRule)) {
     errors.push('办理任务必须选择办理成员或办理部门');
   }
@@ -2577,6 +2578,7 @@ function normalizeOrganizationDirectoryInput({ departments, members }) {
     departmentId: normalizeWorkflowText(member?.departmentId),
     title: normalizeOrganizationMemberTitle(member),
     ...(normalizeWorkflowText(member?.supervisorId) ? { supervisorId: normalizeWorkflowText(member.supervisorId) } : {}),
+    ...(member?.isAdmin === true ? { isAdmin: true } : {}),
     enabled: member?.enabled !== false,
   }));
 
@@ -3570,6 +3572,13 @@ function resolveApproversForRule(rule, directory, applicantMember, businessData)
 }
 
 function resolveAdminFallbackApprovers(directory) {
+  const configuredAdmins = (directory.members || []).filter((member) => (
+    member?.isAdmin === true
+    && member.enabled !== false
+    && normalizeWorkflowText(member.accountUsername)
+  ));
+  if (configuredAdmins.length > 0) return uniqueMembers(configuredAdmins);
+
   const members = [];
   const superAdminMember = findMemberByAccount(directory, superAdminUsername);
   if (superAdminMember) {
@@ -5122,8 +5131,221 @@ function buildOverview(records, timeZone = 'UTC') {
       .map(([name, count]) => ({ name, count }))
       .sort((left, right) => right.count - left.count)
       .slice(0, 5),
+    };
+}
+
+const workflowEfficiencyMetricDefinitions = [
+  { key: 'flowAvg', label: '流程平均耗时', unit: '小时', precision: 2 },
+  { key: 'nodeAvg', label: '节点平均耗时', unit: '小时', precision: 2 },
+  { key: 'volume', label: '审批单量', unit: '', precision: 0 },
+  { key: 'users', label: '审批使用人数', unit: '', precision: 0 },
+];
+
+function roundMetricValue(value, precision = 0) {
+  const factor = 10 ** precision;
+  return Math.round((Number(value) || 0) * factor) / factor;
+}
+
+function parseTimestamp(value) {
+  const time = Date.parse(value || '');
+  return Number.isFinite(time) ? time : 0;
+}
+
+function getWorkflowTemplateEfficiencyScope(template) {
+  const version = template?.publishedVersion || template?.draft || {};
+  return {
+    moduleName: normalizeWorkflowText(template?.moduleName || version?.basic?.moduleName),
+    approvalTypeName: normalizeWorkflowText(template?.approvalTypeName || version?.basic?.approvalTypeName),
   };
 }
+
+function recordMatchesWorkflowScope(record, scope) {
+  return normalizeWorkflowText(record?.moduleName) === scope.moduleName &&
+    normalizeWorkflowText(record?.approvalTypeName) === scope.approvalTypeName;
+}
+
+function getLatestRecordLogTime(record) {
+  return (Array.isArray(record?.logs) ? record.logs : []).reduce((latest, log) => {
+    const time = parseTimestamp(log?.time);
+    return time > latest ? time : latest;
+  }, 0);
+}
+
+function getRecordFinalTime(record) {
+  if (!isWorkflowClosed(record)) return 0;
+
+  const status = record?.status;
+  if (status === STATUS_COMPLETED) {
+    return parseTimestamp(record?.processedAt) ||
+      getLatestRecordLogTime(record) ||
+      parseTimestamp(record?.updatedAt) ||
+      parseTimestamp(record?.approvedAt);
+  }
+
+  if (status === STATUS_APPROVED) {
+    return parseTimestamp(record?.approvedAt) ||
+      getLatestRecordLogTime(record) ||
+      parseTimestamp(record?.updatedAt);
+  }
+
+  if (status === STATUS_REJECTED) {
+    return parseTimestamp(record?.rejectedAt) ||
+      getLatestRecordLogTime(record) ||
+      parseTimestamp(record?.updatedAt);
+  }
+
+  return 0;
+}
+
+function getRecordCompletedStepCount(record) {
+  const steps = Array.isArray(record?.workflowInstance?.steps) ? record.workflowInstance.steps : [];
+  if (steps.length === 0) return 1;
+
+  const completedCount = steps.filter((step) => (
+    [STEP_APPROVED, STEP_REJECTED, STEP_SKIPPED].includes(step?.status)
+  )).length;
+
+  return Math.max(1, completedCount || steps.length);
+}
+
+function addWorkflowUser(userSet, ...values) {
+  values.forEach((value) => {
+    const text = normalizeWorkflowText(value);
+    if (text) userSet.add(text.toLowerCase());
+  });
+}
+
+function collectWorkflowRecordUsers(record, userSet) {
+  addWorkflowUser(userSet, record?.applicantUsername, record?.applicant, record?.approver, record?.processedByAccountUsername, record?.processedBy);
+
+  (Array.isArray(record?.workflowInstance?.steps) ? record.workflowInstance.steps : []).forEach((step) => {
+    (Array.isArray(step?.approvers) ? step.approvers : []).forEach((approver) => {
+      addWorkflowUser(userSet, approver?.accountUsername, approver?.memberId, approver?.name);
+    });
+    (Array.isArray(step?.processors) ? step.processors : []).forEach((processor) => {
+      addWorkflowUser(userSet, processor?.accountUsername, processor?.memberId, processor?.name);
+    });
+  });
+
+  (Array.isArray(record?.ccRecipients) ? record.ccRecipients : []).forEach((recipient) => {
+    addWorkflowUser(userSet, recipient?.accountUsername, recipient?.memberId, recipient?.name);
+  });
+}
+
+function isTimeInRange(time, startTime, endTime) {
+  return time >= startTime && time < endTime;
+}
+
+function aggregateWorkflowEfficiencyWindow(records, startTime, endTime) {
+  const users = new Set();
+  let createdCount = 0;
+  let finalizedCount = 0;
+  let totalDurationMs = 0;
+  let totalCompletedSteps = 0;
+
+  records.forEach((record) => {
+    const createdTime = parseTimestamp(record?.createdAt);
+    const finalTime = getRecordFinalTime(record);
+    const createdInWindow = isTimeInRange(createdTime, startTime, endTime);
+    const finalizedInWindow = isTimeInRange(finalTime, startTime, endTime);
+
+    if (createdInWindow) createdCount += 1;
+    if (createdInWindow || finalizedInWindow) collectWorkflowRecordUsers(record, users);
+
+    if (finalizedInWindow && createdTime > 0 && finalTime >= createdTime) {
+      finalizedCount += 1;
+      totalDurationMs += finalTime - createdTime;
+      totalCompletedSteps += getRecordCompletedStepCount(record);
+    }
+  });
+
+  const durationHours = totalDurationMs / 3600000;
+
+  return {
+    flowAvg: finalizedCount > 0 ? durationHours / finalizedCount : 0,
+    nodeAvg: totalCompletedSteps > 0 ? durationHours / totalCompletedSteps : 0,
+    volume: createdCount,
+    users: users.size,
+    finalizedCount,
+    createdCount,
+  };
+}
+
+function formatEfficiencyDateLabel(time, timeZone) {
+  const dateKey = getLocalDateKey(new Date(time), timeZone);
+  if (!dateKey) return '';
+  return `${dateKey.slice(5, 7)}.${dateKey.slice(8, 10)}`;
+}
+
+function formatEfficiencyPeriodLabel(startTime, endTime, timeZone) {
+  return `${formatEfficiencyDateLabel(startTime, timeZone)}-${formatEfficiencyDateLabel(endTime - 1, timeZone)}`;
+}
+
+function getMetricHasData(metricKey, aggregate) {
+  if (metricKey === 'flowAvg' || metricKey === 'nodeAvg') return aggregate.finalizedCount > 0;
+  if (metricKey === 'volume') return aggregate.createdCount > 0;
+  return aggregate.users > 0;
+}
+
+function getMetricChangePercent(value, previousValue, hasData, previousHasData) {
+  if (!hasData || !previousHasData || previousValue === 0) return 0;
+  return roundMetricValue(((value - previousValue) / previousValue) * 100, 1);
+}
+
+function buildWorkflowEfficiencySummary(template, records, timeZone = 'UTC') {
+  const localTimeZone = normalizeTimeZone(timeZone);
+  const scope = getWorkflowTemplateEfficiencyScope(template);
+  const scopedRecords = records.filter((record) => recordMatchesWorkflowScope(record, scope));
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const currentStart = now - dayMs * 7;
+  const previousStart = now - dayMs * 14;
+  const currentAggregate = aggregateWorkflowEfficiencyWindow(scopedRecords, currentStart, now);
+  const previousAggregate = aggregateWorkflowEfficiencyWindow(scopedRecords, previousStart, currentStart);
+
+  const metrics = workflowEfficiencyMetricDefinitions.map((definition) => {
+    const value = roundMetricValue(currentAggregate[definition.key], definition.precision);
+    const previousValue = roundMetricValue(previousAggregate[definition.key], definition.precision);
+    const hasData = getMetricHasData(definition.key, currentAggregate);
+    const previousHasData = getMetricHasData(definition.key, previousAggregate);
+
+    return {
+      ...definition,
+      value,
+      previousValue,
+      hasData,
+      previousHasData,
+      changePercent: getMetricChangePercent(value, previousValue, hasData, previousHasData),
+    };
+  });
+
+  const trend = workflowEfficiencyMetricDefinitions.reduce((result, definition) => {
+    result[definition.key] = Array.from({ length: 7 }, (_, index) => {
+      const currentDayStart = currentStart + dayMs * index;
+      const previousDayStart = previousStart + dayMs * index;
+      const currentDay = aggregateWorkflowEfficiencyWindow(scopedRecords, currentDayStart, currentDayStart + dayMs);
+      const previousDay = aggregateWorkflowEfficiencyWindow(scopedRecords, previousDayStart, previousDayStart + dayMs);
+
+      return {
+        label: formatEfficiencyDateLabel(currentDayStart, localTimeZone),
+        current: roundMetricValue(currentDay[definition.key], definition.precision),
+        previous: roundMetricValue(previousDay[definition.key], definition.precision),
+      };
+    });
+    return result;
+  }, {});
+
+  return {
+    metrics,
+    deltaPercent: metrics.find((metric) => metric.key === 'flowAvg')?.changePercent || 0,
+    recordCount: scopedRecords.length,
+    completedRecordCount: scopedRecords.filter((record) => getRecordFinalTime(record) > 0).length,
+    currentPeriodLabel: formatEfficiencyPeriodLabel(currentStart, now, localTimeZone),
+    previousPeriodLabel: formatEfficiencyPeriodLabel(previousStart, currentStart, localTimeZone),
+    trend,
+  };
+}
+
 function parseAssistantJson(rawText) {
   const text = String(rawText || '').trim();
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -5238,6 +5460,22 @@ app.get('/api/health', (_req, res) => {
 app.get('/api/workflow-templates', authenticate, requireRoles('developer'), async (_req, res, next) => {
   try {
     res.json(await readWorkflowTemplates());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/workflow-templates/:id/efficiency', authenticate, requireRoles('developer'), async (req, res, next) => {
+  try {
+    const templates = await readWorkflowTemplates();
+    const template = templates.find((item) => item.id === req.params.id);
+
+    if (!template) {
+      return res.status(404).json({ error: 'workflow template not found' });
+    }
+
+    const records = await readRecords();
+    res.json(buildWorkflowEfficiencySummary(template, records, getRequestTimeZone(req)));
   } catch (error) {
     next(error);
   }

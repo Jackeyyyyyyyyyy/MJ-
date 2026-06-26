@@ -16,6 +16,7 @@ import {
   OrganizationSelectOptions,
   SystemAccount,
   WorkflowTemplate,
+  WorkflowEfficiencySummary,
   WorkflowTemplateInput,
   WorkflowVersion,
   Schema,
@@ -306,6 +307,14 @@ export const storage = {
 
   getWorkflowTemplates(): Promise<WorkflowTemplate[]> {
     return request<WorkflowTemplate[]>('/workflow-templates', undefined, { skipImpersonation: true });
+  },
+
+  getWorkflowEfficiencySummary(id: string): Promise<WorkflowEfficiencySummary> {
+    return request<WorkflowEfficiencySummary>(
+      `/workflow-templates/${encodeURIComponent(id)}/efficiency`,
+      undefined,
+      { skipImpersonation: true },
+    );
   },
 
   createWorkflowTemplate(input: WorkflowTemplateInput): Promise<WorkflowTemplate> {

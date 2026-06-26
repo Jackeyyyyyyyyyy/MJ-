@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Building2, Crosshair, GitBranch, Link2, Maximize2, Minimize2, Minus, Plus, Save, Search, Trash2, UserRound, Users } from 'lucide-react';
+import { AlertTriangle, Building2, CheckCircle2, Crosshair, GitBranch, Maximize2, Minimize2, Minus, Plus, Save, Search, ShieldCheck, Trash2, UserCheck, UserRound, Users } from 'lucide-react';
 import { storage } from '../storage';
 import { OrganizationDepartment, OrganizationDirectory, OrganizationMember, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
@@ -29,6 +29,12 @@ function getDepartmentManagerNames(directory: OrganizationDirectory, department?
   return normalizeMemberIds(department?.managerMemberIds)
     .map((memberId) => directory.members.find((member) => member.id === memberId && member.enabled !== false)?.name)
     .filter(Boolean);
+}
+
+function getActiveDepartmentManagers(directory: OrganizationDirectory, department?: OrganizationDepartment | null) {
+  return normalizeMemberIds(department?.managerMemberIds)
+    .map((memberId) => directory.members.find((member) => member.id === memberId && member.enabled !== false))
+    .filter(Boolean) as OrganizationMember[];
 }
 
 interface DepartmentChartNode {
@@ -483,7 +489,19 @@ function ChartViewport({ children }: { children: React.ReactNode }) {
       onPointerCancel={endDrag}
       onWheel={(event) => {
         event.preventDefault();
-        zoomAt(view.scale * (event.deltaY > 0 ? 0.9 : 1.1), event.clientX, event.clientY);
+        if (event.ctrlKey || event.metaKey) {
+          const zoomMultiplier = Math.exp(-event.deltaY * 0.002);
+          zoomAt(view.scale * zoomMultiplier, event.clientX, event.clientY);
+          return;
+        }
+
+        const deltaX = event.deltaX || (event.shiftKey ? event.deltaY : 0);
+        const deltaY = event.shiftKey ? 0 : event.deltaY;
+        setView((current) => ({
+          ...current,
+          x: current.x - deltaX,
+          y: current.y - deltaY,
+        }));
       }}
     >
       <div className="absolute right-5 top-5 z-20 flex items-center gap-1 rounded-full border border-border-silver bg-white/95 p-1 shadow-sm">
@@ -630,15 +648,35 @@ function DepartmentManagerPicker({
   );
 }
 
-function ReportingMemberTree({ node, directory }: { node: ReportingMemberNode; directory: OrganizationDirectory; key?: React.Key }) {
+function ReportingMemberTree({
+  node,
+  directory,
+  managerIdSet,
+}: {
+  node: ReportingMemberNode;
+  directory: OrganizationDirectory;
+  managerIdSet: Set<string>;
+  key?: React.Key;
+}) {
   const member = node.member;
+  const isManager = managerIdSet.has(member.id);
 
   return (
     <div className="relative">
-      <div className="rounded-xl bg-lightest-gray-background px-3 py-2">
-        <p className="text-[12px] font-black text-midnight-graphite truncate">{member.name}</p>
-        <p className="text-[11px] font-bold text-medium-gray truncate">{member.title || '未配置职位'}</p>
-        <p className="text-[10px] font-bold text-light-gray truncate">
+      <div className={cn(
+        "rounded-md border-l-2 px-2.5 py-2",
+        isManager ? "border-l-midnight-graphite bg-white" : "border-l-border-silver bg-transparent",
+      )}>
+        <div className="flex items-baseline gap-2">
+          <p className="min-w-0 flex-1 truncate text-[13px] font-black text-midnight-graphite">{member.name}</p>
+          {(isManager || member.isAdmin) && (
+            <span className="shrink-0 text-[10px] font-bold text-medium-gray">
+              {[isManager ? '主管' : '', member.isAdmin ? '管理员' : ''].filter(Boolean).join(' / ')}
+            </span>
+          )}
+        </div>
+        <p className="mt-1 truncate text-[11px] font-bold text-medium-gray">{member.title || '未配置职位'}</p>
+        <p className="mt-0.5 truncate text-[10px] font-bold text-light-gray">
           上级：{member.supervisorId ? getMemberName(directory, member.supervisorId) : '无'}
         </p>
         {node.hasCycle && (
@@ -646,9 +684,14 @@ function ReportingMemberTree({ node, directory }: { node: ReportingMemberNode; d
         )}
       </div>
       {node.children.length > 0 && (
-        <div className="ml-4 mt-1.5 space-y-1.5 border-l-2 border-slate-300 pl-3">
+        <div className="ml-3 mt-1 space-y-1 border-l border-border-silver pl-3">
           {node.children.map((child) => (
-            <ReportingMemberTree key={child.member.id} node={child} directory={directory} />
+            <ReportingMemberTree
+              key={child.member.id}
+              node={child}
+              directory={directory}
+              managerIdSet={managerIdSet}
+            />
           ))}
         </div>
       )}
@@ -660,42 +703,66 @@ function ReportingChartCard({
   node,
   directory,
   expandedDepartmentIds,
+  selectedDepartmentId,
   onToggleDepartment,
+  onSelectDepartment,
 }: {
   node: ReportingChartNode;
   directory: OrganizationDirectory;
   expandedDepartmentIds: Set<string>;
+  selectedDepartmentId: string;
   onToggleDepartment: (node: ReportingChartNode) => void;
+  onSelectDepartment: (departmentId: string) => void;
   key?: React.Key;
 }) {
   const warning = node.hasMissingParent || node.hasCycle;
   const hasChildren = node.children.length > 0;
   const isExpanded = expandedDepartmentIds.has(node.department.id);
+  const isSelected = selectedDepartmentId === node.department.id;
   const managerNames = getDepartmentManagerNames(directory, node.department);
+  const managerIdSet = useMemo(() => new Set(normalizeMemberIds(node.department.managerMemberIds)), [node.department.managerMemberIds]);
+  const managerLabel = managerNames.length > 0 ? `主管 ${managerNames.slice(0, 2).join('、')}${managerNames.length > 2 ? ` +${managerNames.length - 2}` : ''}` : '未配置主管';
 
   return (
     <div className="flex flex-col items-center shrink-0">
-      <div className={cn(
-        "w-[260px] min-h-[132px] rounded-2xl border-2 bg-white p-4 shadow-sm flex flex-col gap-3",
-        warning ? "border-[#c62828]" : "border-border-silver"
-      )}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="w-9 h-9 rounded-xl bg-black text-white flex items-center justify-center shrink-0">
-            <Building2 size={16} strokeWidth={2.5} />
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => onSelectDepartment(node.department.id)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onSelectDepartment(node.department.id);
+          }
+        }}
+        className={cn(
+          "w-[320px] rounded-lg border bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.06)] outline-none transition-colors hover:border-midnight-graphite/35 focus:ring-2 focus:ring-midnight-graphite/10",
+          warning ? "border-[#c62828]" : isSelected ? "border-midnight-graphite" : "border-border-silver"
+        )}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="truncate text-[17px] font-black leading-6 text-midnight-graphite">{node.department.name}</p>
+            <p className={cn(
+              "mt-1 truncate text-[12px] font-bold",
+              managerNames.length > 0 ? "text-medium-gray" : "text-[#9a5b00]",
+            )}>
+              {managerLabel}
+            </p>
           </div>
-          <div className="flex flex-col items-end gap-1">
-            <span className="px-2 py-1 rounded-full bg-lightest-gray-background text-[10px] font-black text-medium-gray whitespace-nowrap">
-              {node.memberCount} 人
-            </span>
+          <div className="flex shrink-0 items-center gap-2">
             {hasChildren && (
               <button
                 type="button"
-                onClick={() => onToggleDepartment(node)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleDepartment(node);
+                }}
                 className={cn(
-                  "h-7 rounded-full px-2.5 text-[10px] font-black flex items-center gap-1 transition-colors",
+                  "h-8 min-w-8 rounded-lg border px-2 text-[12px] font-black flex items-center justify-center gap-1 transition-colors",
                   isExpanded
-                    ? "bg-black text-white hover:bg-midnight-graphite"
-                    : "bg-lightest-gray-background text-medium-gray hover:bg-border-silver"
+                    ? "border-midnight-graphite bg-midnight-graphite text-white"
+                    : "border-border-silver bg-white text-medium-gray hover:border-midnight-graphite/40"
                 )}
                 aria-label={isExpanded ? '收起下级部门' : '展开下级部门'}
                 title={isExpanded ? '收起下级部门' : '展开下级部门'}
@@ -706,32 +773,25 @@ function ReportingChartCard({
             )}
           </div>
         </div>
-        <div className="space-y-2">
-          <p className="text-[16px] font-black text-midnight-graphite truncate">{node.department.name}</p>
-          {managerNames.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {managerNames.slice(0, 3).map((managerName) => (
-                <span key={managerName} className="rounded-full bg-[#e8f5e9] px-2 py-0.5 text-[10px] font-black text-[#2e7d32]">
-                  主管 {managerName}
-                </span>
-              ))}
-              {managerNames.length > 3 && (
-                <span className="rounded-full bg-[#e8f5e9] px-2 py-0.5 text-[10px] font-black text-[#2e7d32]">
-                  +{managerNames.length - 3}
-                </span>
-              )}
+        <div className="mt-4 space-y-2">
+          <div className="rounded-lg border border-border-silver bg-[#fafafa] p-2.5">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <span className="text-[11px] font-bold text-medium-gray">成员</span>
+              <span className="text-[11px] font-bold text-light-gray">{node.memberCount} 人</span>
             </div>
-          )}
-          <p className="text-[11px] font-bold text-light-gray truncate">
-            已绑定 {node.boundCount} / 未绑定 {Math.max(0, node.memberCount - node.boundCount)}
-          </p>
-          <div className="space-y-1.5">
             {node.memberRoots.length === 0 ? (
-              <p className="text-[11px] font-bold text-light-gray">暂无成员</p>
+              <p className="px-1 py-2 text-[12px] font-bold text-light-gray">暂无成员</p>
             ) : (
-              node.memberRoots.map((memberNode) => (
-                <ReportingMemberTree key={memberNode.member.id} node={memberNode} directory={directory} />
-              ))
+              <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
+                {node.memberRoots.map((memberNode) => (
+                  <ReportingMemberTree
+                    key={memberNode.member.id}
+                    node={memberNode}
+                    directory={directory}
+                    managerIdSet={managerIdSet}
+                  />
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -744,19 +804,21 @@ function ReportingChartCard({
 
       {hasChildren && isExpanded && (
         <div className="flex flex-col items-center">
-          <div className="h-8 w-[3px] bg-slate-300 rounded-full" />
+          <div className="h-8 w-px bg-border-silver" />
           <div className="relative flex items-start gap-8 pt-8">
             {node.children.length > 1 && (
-              <div className="absolute left-[110px] right-[110px] top-0 h-[3px] bg-slate-300 rounded-full" />
+              <div className="absolute left-[140px] right-[140px] top-0 h-px bg-border-silver" />
             )}
             {node.children.map((child) => (
               <div key={`${node.department.id}-${child.department.id}`} className="relative flex flex-col items-center shrink-0">
-                <div className="absolute left-1/2 top-[-32px] h-8 w-[3px] -translate-x-1/2 bg-slate-300 rounded-full" />
+                <div className="absolute left-1/2 top-[-32px] h-8 w-px -translate-x-1/2 bg-border-silver" />
                 <ReportingChartCard
                   node={child}
                   directory={directory}
                   expandedDepartmentIds={expandedDepartmentIds}
+                  selectedDepartmentId={selectedDepartmentId}
                   onToggleDepartment={onToggleDepartment}
+                  onSelectDepartment={onSelectDepartment}
                 />
               </div>
             ))}
@@ -824,6 +886,7 @@ export default function OrganizationAdmin() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const departmentEditorRef = useRef<HTMLDivElement | null>(null);
 
   const accountOptions = useMemo(
     () => accounts.filter((account) => account.role !== 'developer' && account.enabled),
@@ -837,11 +900,42 @@ export default function OrganizationAdmin() {
     () => directory.members.filter((member) => member.departmentId === selectedDepartmentId),
     [directory.members, selectedDepartmentId],
   );
-  const unboundMemberCount = useMemo(
-    () => directory.members.filter((member) => !member.accountUsername && member.enabled !== false).length,
+  const selectedDepartmentManagerIds = useMemo(
+    () => normalizeMemberIds(selectedDepartment?.managerMemberIds),
+    [selectedDepartment],
+  );
+  const activeMembers = useMemo(
+    () => directory.members.filter((member) => member.enabled !== false),
     [directory.members],
   );
-  const boundMemberCount = directory.members.filter((member) => Boolean(member.accountUsername)).length;
+  const unboundMembers = useMemo(
+    () => activeMembers.filter((member) => !member.accountUsername),
+    [activeMembers],
+  );
+  const unboundMemberCount = unboundMembers.length;
+  const boundMemberCount = activeMembers.filter((member) => Boolean(member.accountUsername)).length;
+  const missingManagerDepartments = useMemo(
+    () => directory.departments.filter((department) => getActiveDepartmentManagers(directory, department).length === 0),
+    [directory],
+  );
+  const rootSupervisorMembers = useMemo(
+    () => activeMembers.filter((member) => !member.supervisorId),
+    [activeMembers],
+  );
+  const adminMembers = useMemo(
+    () => activeMembers.filter((member) => member.isAdmin),
+    [activeMembers],
+  );
+  const departmentsWithManagersCount = Math.max(0, directory.departments.length - missingManagerDepartments.length);
+
+  const selectDepartmentForEdit = (departmentId: string, shouldScroll = false) => {
+    setSelectedDepartmentId(departmentId);
+    if (shouldScroll) {
+      window.requestAnimationFrame(() => {
+        departmentEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+  };
 
   const loadData = async () => {
     setIsLoading(true);
@@ -853,6 +947,7 @@ export default function OrganizationAdmin() {
       setDirectory(nextDirectory);
       setAccounts(nextAccounts);
       setSelectedDepartmentId((current) => current || nextDirectory.departments[0]?.id || '');
+      setExpandedReportingDepartmentIds(new Set(nextDirectory.departments.map((department) => department.id)));
     } finally {
       setIsLoading(false);
     }
@@ -902,6 +997,16 @@ export default function OrganizationAdmin() {
         department.id === id ? { ...department, ...patch } : department
       )),
     }));
+  };
+
+  const updateSelectedDepartmentManager = (memberId: string, checked: boolean) => {
+    if (!selectedDepartment) return;
+
+    const managerMemberIds = checked
+      ? normalizeMemberIds([...selectedDepartmentManagerIds, memberId])
+      : selectedDepartmentManagerIds.filter((selectedId) => selectedId !== memberId);
+
+    updateDepartment(selectedDepartment.id, { managerMemberIds });
   };
 
   const updateMember = (id: string, patch: Partial<OrganizationMember>) => {
@@ -957,6 +1062,7 @@ export default function OrganizationAdmin() {
           name: '新成员',
           departmentId,
           title: '成员',
+          isAdmin: false,
           enabled: true,
         },
       ],
@@ -990,6 +1096,41 @@ export default function OrganizationAdmin() {
     }
   };
 
+  const organizationHealthItems = [
+    {
+      label: '主管覆盖',
+      value: `${departmentsWithManagersCount}/${directory.departments.length}`,
+      description: missingManagerDepartments.length > 0 ? `还有 ${missingManagerDepartments.length} 个部门未设主管` : '全部部门已配置主管',
+      icon: missingManagerDepartments.length > 0 ? AlertTriangle : CheckCircle2,
+      tone: missingManagerDepartments.length > 0 ? 'warning' : 'success',
+      targetDepartmentId: missingManagerDepartments[0]?.id,
+    },
+    {
+      label: '账号绑定',
+      value: `${boundMemberCount}/${activeMembers.length}`,
+      description: unboundMemberCount > 0 ? `${unboundMemberCount} 名成员未绑定账号` : '可直接处理审批任务',
+      icon: unboundMemberCount > 0 ? AlertTriangle : CheckCircle2,
+      tone: unboundMemberCount > 0 ? 'warning' : 'success',
+      targetDepartmentId: unboundMembers[0]?.departmentId,
+    },
+    {
+      label: '直属上级',
+      value: rootSupervisorMembers.length,
+      description: rootSupervisorMembers.length > 0 ? '通常是最高层或待补充' : '所有成员都有直属上级',
+      icon: UserCheck,
+      tone: 'neutral',
+      targetDepartmentId: rootSupervisorMembers[0]?.departmentId,
+    },
+    {
+      label: '组织管理员',
+      value: adminMembers.length,
+      description: adminMembers.length > 0 ? '空审批人可转管理员' : '建议至少配置 1 名管理员',
+      icon: ShieldCheck,
+      tone: adminMembers.length > 0 ? 'success' : 'warning',
+      targetDepartmentId: adminMembers[0]?.departmentId,
+    },
+  ];
+
   if (isLoading) {
     return <div className="text-[15px] font-bold text-medium-gray">正在加载组织架构...</div>;
   }
@@ -1017,22 +1158,38 @@ export default function OrganizationAdmin() {
         </div>
       )}
 
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {[
-          { label: '部门', value: directory.departments.length, icon: Building2 },
-          { label: '成员', value: directory.members.length, icon: Users },
-          { label: '已绑定账号', value: `${boundMemberCount}/${directory.members.length}`, icon: Link2 },
-        ].map((item) => (
-          <div key={item.label} className="rounded-2xl border border-border-silver bg-white p-5 flex items-center gap-4">
-            <div className="w-11 h-11 rounded-2xl bg-lightest-gray-background flex items-center justify-center">
-              <item.icon size={18} strokeWidth={2.4} />
-            </div>
-            <div>
-              <p className="text-[11px] font-black text-light-gray uppercase tracking-wider">{item.label}</p>
-              <p className="text-[22px] font-black text-midnight-graphite">{item.value}</p>
-            </div>
-          </div>
-        ))}
+      <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {organizationHealthItems.map((item) => {
+          const Icon = item.icon;
+          const canJump = Boolean(item.targetDepartmentId);
+
+          return (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => {
+                if (item.targetDepartmentId) selectDepartmentForEdit(item.targetDepartmentId, true);
+              }}
+              className={cn(
+                "min-h-[112px] rounded-2xl border bg-white p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:hover:translate-y-0 disabled:hover:shadow-sm",
+                item.tone === 'warning' ? "border-[#f3d08a]" : item.tone === 'success' ? "border-[#cfe7d3]" : "border-border-silver",
+                !canJump && "cursor-default",
+              )}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className={cn(
+                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl",
+                  item.tone === 'warning' ? "bg-[#fff7e6] text-[#9a5b00]" : item.tone === 'success' ? "bg-[#e8f5e9] text-[#2e7d32]" : "bg-lightest-gray-background text-midnight-graphite",
+                )}>
+                  <Icon size={17} strokeWidth={2.5} />
+                </div>
+                <span className="text-[22px] font-black leading-none text-midnight-graphite">{item.value}</span>
+              </div>
+              <p className="mt-3 text-[12px] font-black uppercase tracking-wider text-light-gray">{item.label}</p>
+              <p className="mt-1 text-[12px] font-bold leading-5 text-medium-gray">{item.description}</p>
+            </button>
+          );
+        })}
       </section>
 
       <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
@@ -1044,12 +1201,12 @@ export default function OrganizationAdmin() {
             <div>
               <h2 className="text-[18px] font-black">人员汇报关系图</h2>
               <p className="text-[12px] font-bold text-medium-gray">
-                按成员直属上级生成，适合检查主管审批规则。
+                按部门展示成员、直属上级、主管和管理员配置。
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="px-3 py-1.5 rounded-full bg-[#fff7e6] text-[#9a5b00] text-[11px] font-black">未绑定 {unboundMemberCount}</span>
+          <div className="text-[12px] font-bold text-light-gray">
+            未绑定账号 {unboundMemberCount}
           </div>
         </div>
 
@@ -1065,7 +1222,9 @@ export default function OrganizationAdmin() {
                 node={node}
                 directory={directory}
                 expandedDepartmentIds={expandedReportingDepartmentIds}
+                selectedDepartmentId={selectedDepartmentId}
                 onToggleDepartment={toggleReportingDepartment}
+                onSelectDepartment={(departmentId) => selectDepartmentForEdit(departmentId, true)}
               />
             ))}
           </ChartViewport>
@@ -1098,7 +1257,7 @@ export default function OrganizationAdmin() {
                   key={node.department.id}
                   node={node}
                   selectedId={selectedDepartmentId}
-                  onSelect={setSelectedDepartmentId}
+                  onSelect={(departmentId) => selectDepartmentForEdit(departmentId)}
                 />
               ))
             )}
@@ -1106,7 +1265,7 @@ export default function OrganizationAdmin() {
         </aside>
 
         <div className="space-y-6">
-          <section className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden">
+          <section ref={departmentEditorRef} className="rounded-2xl border border-border-silver bg-white shadow-sm overflow-hidden scroll-mt-6">
             <div className="px-6 py-5 border-b border-border-silver flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-center gap-3">
                 <Building2 size={18} />
@@ -1204,9 +1363,14 @@ export default function OrganizationAdmin() {
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <p className="text-[15px] font-black text-midnight-graphite truncate">{member.name}</p>
-                            {normalizeMemberIds(selectedDepartment?.managerMemberIds).includes(member.id) && (
+                            {selectedDepartmentManagerIds.includes(member.id) && (
                               <span className="shrink-0 rounded-full bg-[#e8f5e9] px-2 py-0.5 text-[10px] font-black text-[#2e7d32]">
                                 部门主管
+                              </span>
+                            )}
+                            {member.isAdmin && (
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#e8f1ff] px-2 py-0.5 text-[10px] font-black text-interactive-blue">
+                                <ShieldCheck size={11} strokeWidth={2.8} /> 管理员
                               </span>
                             )}
                           </div>
@@ -1280,6 +1444,24 @@ export default function OrganizationAdmin() {
                           className="accent-black"
                         />
                         启用成员
+                      </label>
+                      <label className="input-field flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(member.isAdmin)}
+                          onChange={(event) => updateMember(member.id, { isAdmin: event.target.checked })}
+                          className="accent-black"
+                        />
+                        管理员
+                      </label>
+                      <label className="input-field flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedDepartmentManagerIds.includes(member.id)}
+                          onChange={(event) => updateSelectedDepartmentManager(member.id, event.target.checked)}
+                          className="accent-black"
+                        />
+                        部门主管
                       </label>
                     </div>
 

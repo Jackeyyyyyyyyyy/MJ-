@@ -45,6 +45,7 @@ export interface OrganizationMember {
   departmentId: string;
   title: string;
   supervisorId?: string;
+  isAdmin?: boolean;
   enabled: boolean;
 }
 
@@ -301,6 +302,36 @@ export interface WorkflowTemplateInput {
   organizationId?: string;
   moduleName?: string;
   approvalTypeName?: string;
+}
+
+export type WorkflowEfficiencyMetricKey = 'flowAvg' | 'nodeAvg' | 'volume' | 'users';
+
+export interface WorkflowEfficiencyMetric {
+  key: WorkflowEfficiencyMetricKey;
+  label: string;
+  value: number;
+  unit: string;
+  precision: number;
+  previousValue: number;
+  changePercent: number;
+  hasData: boolean;
+  previousHasData: boolean;
+}
+
+export interface WorkflowEfficiencyPoint {
+  label: string;
+  current: number;
+  previous: number;
+}
+
+export interface WorkflowEfficiencySummary {
+  metrics: WorkflowEfficiencyMetric[];
+  deltaPercent: number;
+  recordCount: number;
+  completedRecordCount: number;
+  currentPeriodLabel: string;
+  previousPeriodLabel: string;
+  trend: Record<WorkflowEfficiencyMetricKey, WorkflowEfficiencyPoint[]>;
 }
 
 export interface User {
