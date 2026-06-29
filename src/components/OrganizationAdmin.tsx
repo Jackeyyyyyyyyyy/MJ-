@@ -8,6 +8,8 @@ const emptyDirectory: OrganizationDirectory = {
   departments: [],
   members: [],
 };
+const TRACKPAD_PAN_SENSITIVITY = 1.45;
+const TRACKPAD_ZOOM_SENSITIVITY = 0.00235;
 
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -490,13 +492,13 @@ function ChartViewport({ children }: { children: React.ReactNode }) {
       onWheel={(event) => {
         event.preventDefault();
         if (event.ctrlKey || event.metaKey) {
-          const zoomMultiplier = Math.exp(-event.deltaY * 0.002);
+          const zoomMultiplier = Math.exp(-event.deltaY * TRACKPAD_ZOOM_SENSITIVITY);
           zoomAt(view.scale * zoomMultiplier, event.clientX, event.clientY);
           return;
         }
 
-        const deltaX = event.deltaX || (event.shiftKey ? event.deltaY : 0);
-        const deltaY = event.shiftKey ? 0 : event.deltaY;
+        const deltaX = (event.deltaX || (event.shiftKey ? event.deltaY : 0)) * TRACKPAD_PAN_SENSITIVITY;
+        const deltaY = (event.shiftKey ? 0 : event.deltaY) * TRACKPAD_PAN_SENSITIVITY;
         setView((current) => ({
           ...current,
           x: current.x - deltaX,

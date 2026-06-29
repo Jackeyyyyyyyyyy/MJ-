@@ -51,6 +51,8 @@ const DEFAULT_ORG_ID = 'default-org';
 const BUSINESS_SCOPE_SEPARATOR = '|||';
 const FORM_FIELD_PREFIX = 'form:';
 const SUBMITTER_FIELD_PREFIX = 'submitter:';
+const TRACKPAD_PAN_SENSITIVITY = 1.45;
+const TRACKPAD_ZOOM_SENSITIVITY = 0.00235;
 
 interface BusinessScopeOption {
   key: string;
@@ -2959,13 +2961,13 @@ function WorkflowFlowDesigner({
     event.preventDefault();
 
     if (event.ctrlKey || event.metaKey) {
-      const zoomMultiplier = Math.exp(-event.deltaY * 0.002);
+      const zoomMultiplier = Math.exp(-event.deltaY * TRACKPAD_ZOOM_SENSITIVITY);
       zoomWorkflowCanvas(canvasView.scale * zoomMultiplier, event.clientX, event.clientY);
       return;
     }
 
-    const deltaX = event.deltaX || (event.shiftKey ? event.deltaY : 0);
-    const deltaY = event.shiftKey ? 0 : event.deltaY;
+    const deltaX = (event.deltaX || (event.shiftKey ? event.deltaY : 0)) * TRACKPAD_PAN_SENSITIVITY;
+    const deltaY = (event.shiftKey ? 0 : event.deltaY) * TRACKPAD_PAN_SENSITIVITY;
 
     setCanvasView((current) => ({
       ...current,
