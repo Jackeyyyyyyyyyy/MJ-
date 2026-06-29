@@ -408,9 +408,39 @@ function getConfiguredDetailColumns(type: ApprovalType | null, field: string) {
 }
 
 function getConfiguredDurationRule(type: ApprovalType | null, field: string) {
-  return Array.isArray(type?.durationFields)
+  const configuredRule = Array.isArray(type?.durationFields)
     ? type.durationFields.find((item) => item.field === field) || null
     : null;
+  if (configuredRule) return configuredRule;
+
+  if (!type || !field.includes('天数')) return null;
+  const startField = type.businessFields.find((item) => item !== field && item.includes('开始'));
+  const endField = type.businessFields.find((item) => item !== field && item.includes('结束'));
+  if (!startField || !endField) return null;
+
+  return {
+    field,
+    startField,
+    endField,
+    unit: 'days' as const,
+  };
+}
+
+function getConfiguredDurationRules(type: ApprovalType | null) {
+  if (!type) return [];
+  const rules = Array.isArray(type.durationFields) ? [...type.durationFields] : [];
+  const configuredFields = new Set(rules.map((rule) => rule.field));
+
+  type.businessFields.forEach((field) => {
+    if (configuredFields.has(field)) return;
+    const rule = getConfiguredDurationRule(type, field);
+    if (rule) {
+      rules.push(rule);
+      configuredFields.add(rule.field);
+    }
+  });
+
+  return rules;
 }
 
 function calculateDurationValue(startValue: unknown, endValue: unknown, unit: 'hours' | 'days' = 'hours') {
@@ -420,6 +450,91 @@ function calculateDurationValue(startValue: unknown, endValue: unknown, unit: 'h
   const hours = (endTime - startTime) / 36e5;
   const value = unit === 'days' ? hours / 24 : hours;
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
+}
+
+function getDateOnlyUtcTime(value: unknown) {
+  const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const time = Date.UTC(year, month - 1, day);
+  const date = new Date(time);
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return time;
+}
+
+function calculateInclusiveDayDurationValue(startValue: unknown, endValue: unknown) {
+  const startTime = getDateOnlyUtcTime(startValue);
+  const endTime = getDateOnlyUtcTime(endValue);
+  if (startTime === null || endTime === null || endTime < startTime) return '';
+  const days = Math.round((endTime - startTime) / 864e5) + 1;
+  return String(days);
+}
+
+function formatDurationNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
+}
+
+function getDurationOptionMatch(
+  value: string,
+  unit: 'hours' | 'days',
+  options: string[],
+) {
+  const numericValue = Number(value);
+  const unitText = unit === 'days' ? '天' : '小时';
+  const candidates = [
+    value,
+    `${value}${unitText}`,
+    `${value} ${unitText}`,
+    unit === 'days' ? `${value}日` : `${value}时`,
+  ];
+  const normalizedCandidates = new Set(candidates.map((item) => item.replace(/\s+/g, '').toLowerCase()));
+
+  const exactMatch = options.find((option) => normalizedCandidates.has(option.replace(/\s+/g, '').toLowerCase()));
+  if (exactMatch) return exactMatch;
+
+  if (Number.isFinite(numericValue)) {
+    const numericMatch = options.find((option) => {
+      const optionNumber = Number(option.match(/-?\d+(?:\.\d+)?/)?.[0]);
+      return Number.isFinite(optionNumber) && Math.abs(optionNumber - numericValue) < 0.001;
+    });
+    if (numericMatch) return numericMatch;
+  }
+
+  return options.length > 0 && unit === 'days' ? `${value}${unitText}` : value;
+}
+
+function shouldUseInclusiveDayDuration(
+  type: ApprovalType | null,
+  rule: NonNullable<ApprovalType['durationFields']>[number],
+  options: string[],
+  unit: 'hours' | 'days',
+) {
+  return unit === 'days'
+    && (rule.field.includes('天数') || options.some((option) => option.includes('天')) || type?.name === '出差');
+}
+
+function calculateConfiguredDurationValue(
+  type: ApprovalType | null,
+  rule: NonNullable<ApprovalType['durationFields']>[number],
+  data: Record<string, any>,
+) {
+  const options = getConfiguredSelectOptions(type, rule.field);
+  const unit = rule.unit || (rule.field.includes('天数') || options.some((option) => option.includes('天')) ? 'days' : 'hours');
+  const value = shouldUseInclusiveDayDuration(type, rule, options, unit)
+    ? calculateInclusiveDayDurationValue(data[rule.startField], data[rule.endField])
+    : calculateDurationValue(data[rule.startField], data[rule.endField], unit);
+  if (!value) return '';
+
+  return getDurationOptionMatch(formatDurationNumber(Number(value)), unit, options);
 }
 
 function createEmptyDetailRow(columns: Array<{ key: string | number }>) {
@@ -988,14 +1103,11 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         ? valueOrUpdater(prev[field], prev)
         : valueOrUpdater;
       const next = { ...prev, [field]: value };
-      if (selectedType?.durationFields?.length) {
-        selectedType.durationFields.forEach((rule) => {
+      const durationRules = getConfiguredDurationRules(selectedType);
+      if (durationRules.length > 0) {
+        durationRules.forEach((rule) => {
           if (rule.startField !== field && rule.endField !== field) return;
-          next[rule.field] = calculateDurationValue(
-            next[rule.startField],
-            next[rule.endField],
-            rule.unit || 'hours',
-          );
+          next[rule.field] = calculateConfiguredDurationValue(selectedType, rule, next);
         });
       }
       return next;
@@ -2038,12 +2150,8 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       filledFields.push(field);
     });
 
-    selectedType.durationFields?.forEach((rule) => {
-      nextData[rule.field] = calculateDurationValue(
-        nextData[rule.startField],
-        nextData[rule.endField],
-        rule.unit || 'hours',
-      );
+    getConfiguredDurationRules(selectedType).forEach((rule) => {
+      nextData[rule.field] = calculateConfiguredDurationValue(selectedType, rule, nextData);
     });
 
     if (filledFields.length > 0) {
@@ -2289,6 +2397,24 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     const isDepartmentField = isConfiguredDepartmentField(selectedType, field);
     const isMultilineField = isConfiguredMultilineField(selectedType, field);
 
+    if (durationRule) {
+      return (
+        <div className="relative">
+          <input
+            type="text"
+            readOnly
+            className={cn(
+              "input-field border-b border-border-silver bg-lightest-gray-background pr-11 text-medium-gray focus:border-interactive-blue transition-colors",
+              errors[field] && "border-rose-500"
+            )}
+            placeholder={`${durationRule.startField} 和 ${durationRule.endField} 填完后自动计算`}
+            value={formData[field] || ''}
+          />
+          <Calculator className="absolute right-4 top-1/2 -translate-y-1/2 text-light-silver w-4 h-4 pointer-events-none" />
+        </div>
+      );
+    }
+
     if (selectOptions.length > 0) {
       return (
         <div className="relative">
@@ -2494,9 +2620,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       return (
         <div className="relative">
           <input
-            type="number"
-            inputMode="decimal"
-            step="0.01"
+            type="text"
             readOnly
             className={cn(
               "input-field border-b border-border-silver bg-lightest-gray-background pr-11 text-medium-gray focus:border-interactive-blue transition-colors",
