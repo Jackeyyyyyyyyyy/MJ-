@@ -15,6 +15,7 @@ import {
   Layers,
   LayoutDashboard,
   MessageSquareText,
+  Settings,
   ShieldCheck,
   Workflow,
   X,
@@ -34,6 +35,7 @@ interface SidebarProps {
   onOpenWorkflowAdmin?: () => void;
   onOpenBusinessFormAdmin?: () => void;
   onOpenAiBranchLogs?: () => void;
+  onOpenSettings?: () => void;
   isOpen?: boolean;
   isDesktopCollapsed?: boolean;
   onClose?: () => void;
@@ -53,6 +55,7 @@ export default function Sidebar({
   onOpenWorkflowAdmin,
   onOpenBusinessFormAdmin,
   onOpenAiBranchLogs,
+  onOpenSettings,
   isOpen,
   isDesktopCollapsed,
   onClose,
@@ -169,6 +172,18 @@ export default function Sidebar({
           >
             {currentPerspective === 'boss' ? <LayoutDashboard size={16} strokeWidth={2} /> : <Home size={16} strokeWidth={2} />}
             <span>{homeLabel}</span>
+          </button>
+          <button
+            onClick={onOpenSettings}
+            className={cn(
+              'group mt-1 flex w-full items-center gap-3 rounded-apple-btn px-3 py-2 text-[14px] font-medium transition-all',
+              activeAdminView === 'settings'
+                ? 'bg-interactive-blue text-white'
+                : 'text-deep-gray hover:bg-lightest-gray-background',
+            )}
+          >
+            <Settings size={16} strokeWidth={2} />
+            <span>设置</span>
           </button>
         </section>
 

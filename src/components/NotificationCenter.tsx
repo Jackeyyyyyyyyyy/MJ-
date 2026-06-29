@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   Bell,
-  BellRing,
   CheckCheck,
   CheckCircle2,
   Circle,
@@ -20,13 +19,7 @@ import { storage } from '../storage';
 import { ApprovalNotification, ApprovalRecord, ApprovalStatus } from '../types';
 import { cn } from '../lib/utils';
 import { formatLocalDateTime } from '../lib/time';
-import {
-  ApprovalPushState,
-  disableApprovalPushNotifications,
-  enableApprovalPushNotifications,
-  readApprovalPushState,
-  setApprovalAppBadge,
-} from '../lib/pushNotifications';
+import { setApprovalAppBadge } from '../lib/pushNotifications';
 import ApprovalDetailModal from './ApprovalDetailModal';
 
 interface NotificationCenterProps {
@@ -71,8 +64,6 @@ export default function NotificationCenter({ activeUsername, onOpenRecord }: Not
   const [isUpdating, setIsUpdating] = React.useState(false);
   const [error, setError] = React.useState('');
   const [selectedRecord, setSelectedRecord] = React.useState<ApprovalRecord | null>(null);
-  const [pushState, setPushState] = React.useState<ApprovalPushState | null>(null);
-  const [isPushUpdating, setIsPushUpdating] = React.useState(false);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const mobilePanelRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -113,25 +104,6 @@ export default function NotificationCenter({ activeUsername, onOpenRecord }: Not
   }, [loadNotifications]);
 
   React.useEffect(() => {
-    let isCancelled = false;
-
-    if (!activeUsername) {
-      setPushState(null);
-      return () => {
-        isCancelled = true;
-      };
-    }
-
-    void readApprovalPushState().then((nextState) => {
-      if (!isCancelled) setPushState(nextState);
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [activeUsername]);
-
-  React.useEffect(() => {
     if (!isOpen) return;
 
     const handleClick = (event: MouseEvent) => {
@@ -163,78 +135,6 @@ export default function NotificationCenter({ activeUsername, onOpenRecord }: Not
     } finally {
       setIsUpdating(false);
     }
-  };
-
-  const handleEnablePush = async () => {
-    if (isPushUpdating) return;
-
-    setIsPushUpdating(true);
-    const nextState = await enableApprovalPushNotifications();
-    setPushState(nextState);
-    void setApprovalAppBadge(unreadCount);
-    setIsPushUpdating(false);
-  };
-
-  const handleDisablePush = async () => {
-    if (isPushUpdating) return;
-
-    setIsPushUpdating(true);
-    const nextState = await disableApprovalPushNotifications();
-    setPushState(nextState);
-    void setApprovalAppBadge(0);
-    setIsPushUpdating(false);
-  };
-
-  const renderPushCard = () => {
-    if (!pushState) return null;
-
-    const isEnabled = pushState.status === 'enabled';
-    const canDisable = isEnabled && !isPushUpdating;
-
-    return (
-      <div className="border-b border-border-silver px-3 py-3">
-        <div className={cn(
-          'flex items-start gap-3 rounded-2xl border px-3 py-3',
-          isEnabled ? 'border-[#c8ead1] bg-[#f1fbf3]' : 'border-border-silver bg-lightest-gray-background',
-        )}>
-          <span className={cn(
-            'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
-            isEnabled ? 'bg-[#dff4e5] text-[#2e7d32]' : 'bg-white text-medium-gray',
-          )}>
-            {isEnabled ? <BellRing size={16} strokeWidth={2.5} /> : <Bell size={16} strokeWidth={2.5} />}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[13px] font-black text-midnight-graphite">
-              {isEnabled ? '手机通知已开启' : '手机系统通知'}
-            </span>
-            <span className="mt-1 block text-[12px] font-semibold leading-5 text-deep-gray">
-              {pushState.message}
-            </span>
-            <span className="mt-3 flex flex-wrap gap-2">
-              {pushState.canEnable && (
-                <button
-                  type="button"
-                  onClick={() => void handleEnablePush()}
-                  disabled={isPushUpdating}
-                  className="flex h-8 items-center justify-center rounded-full bg-midnight-graphite px-3 text-[11px] font-black text-white transition-colors hover:bg-deep-gray disabled:opacity-50"
-                >
-                  {isPushUpdating ? '开启中' : '开启'}
-                </button>
-              )}
-              {canDisable && (
-                <button
-                  type="button"
-                  onClick={() => void handleDisablePush()}
-                  className="flex h-8 items-center justify-center rounded-full bg-white px-3 text-[11px] font-black text-medium-gray transition-colors hover:text-midnight-graphite"
-                >
-                  关闭
-                </button>
-              )}
-            </span>
-          </span>
-        </div>
-      </div>
-    );
   };
 
   const openNotificationRecord = async (notification: ApprovalNotification) => {
@@ -374,8 +274,6 @@ export default function NotificationCenter({ activeUsername, onOpenRecord }: Not
               </div>
             </div>
 
-            {renderPushCard()}
-
             {error && (
               <div className="border-b border-[#ffd6d6] bg-[#fff1f0] px-4 py-3 text-[12px] font-bold text-[#c62828]">
                 {error}
@@ -485,8 +383,6 @@ export default function NotificationCenter({ activeUsername, onOpenRecord }: Not
                       </button>
                     </div>
                   </div>
-
-                  {renderPushCard()}
 
                   {error && (
                     <div className="border-b border-[#ffd6d6] bg-[#fff1f0] px-4 py-3 text-[12px] font-bold text-[#c62828]">

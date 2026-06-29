@@ -1,5 +1,6 @@
 import {
   AccountInput,
+  AuthSessionResponse,
   AiAssistantChatResponse,
   AiAssistantOverview,
   AiAssistantPromptConfig,
@@ -14,6 +15,7 @@ import {
   ApprovalType,
   OrganizationDirectory,
   OrganizationSelectOptions,
+  PasskeyCredentialSummary,
   SystemAccount,
   WorkflowTemplate,
   WorkflowEfficiencySummary,
@@ -215,6 +217,44 @@ export const storage = {
     return request<WebPushSubscriptionResult>('/push/subscriptions', {
       method: 'DELETE',
       body: JSON.stringify({ endpoint }),
+    });
+  },
+
+  getPasskeys(): Promise<PasskeyCredentialSummary[]> {
+    return request<PasskeyCredentialSummary[]>('/auth/passkeys');
+  },
+
+  getPasskeyRegistrationOptions(): Promise<any> {
+    return request<any>('/auth/passkey/register/options', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+
+  verifyPasskeyRegistration(credential: unknown): Promise<PasskeyCredentialSummary> {
+    return request<PasskeyCredentialSummary>('/auth/passkey/register/verify', {
+      method: 'POST',
+      body: JSON.stringify({ credential }),
+    });
+  },
+
+  deletePasskey(id: string): Promise<{ removed: boolean }> {
+    return request<{ removed: boolean }>(`/auth/passkeys/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  getPasskeyLoginOptions(username?: string): Promise<any> {
+    return request<any>('/auth/passkey/login/options', {
+      method: 'POST',
+      body: JSON.stringify({ username: username || '' }),
+    });
+  },
+
+  verifyPasskeyLogin(credential: unknown): Promise<AuthSessionResponse> {
+    return request<AuthSessionResponse>('/auth/passkey/login/verify', {
+      method: 'POST',
+      body: JSON.stringify({ credential }),
     });
   },
 

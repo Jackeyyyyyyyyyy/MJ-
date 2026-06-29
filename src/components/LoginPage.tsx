@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { auth } from '../auth';
 import { loginBackup } from '../backupAuth';
+import { isPlatformPasskeyAvailable, loginWithPasskey } from '../lib/passkeys';
 import { motion } from 'motion/react';
+import { Fingerprint, Loader2 } from 'lucide-react';
 
 interface LoginPageProps {
   onLogin: () => void;
@@ -13,6 +15,20 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [rememberDevice, setRememberDevice] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPasskeySubmitting, setIsPasskeySubmitting] = useState(false);
+  const [canUsePasskey, setCanUsePasskey] = useState(false);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    void isPlatformPasskeyAvailable().then((available) => {
+      if (!isCancelled) setCanUsePasskey(available);
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,6 +51,25 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       setError('认证服务暂不可用，请稍后再试');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handlePasskeyLogin = async () => {
+    if (isSubmitting || isPasskeySubmitting) return;
+
+    setError('');
+    setIsPasskeySubmitting(true);
+
+    try {
+      await loginWithPasskey(username.trim() || undefined, { rememberDevice });
+      onLogin();
+    } catch (err) {
+      const nextMessage = err instanceof DOMException && err.name === 'NotAllowedError'
+        ? '这次没有完成 Face ID 验证。'
+        : err instanceof Error ? err.message : '通行密钥登录失败';
+      setError(nextMessage);
+    } finally {
+      setIsPasskeySubmitting(false);
     }
   };
 
@@ -106,10 +141,24 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
             <button 
               type="submit" 
-              disabled={isSubmitting}
+              disabled={isSubmitting || isPasskeySubmitting}
               className="w-full h-12 bg-black text-white rounded-xl text-[14px] font-bold hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 mt-4"
             >
               {isSubmitting ? '认证中' : '安全登录'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handlePasskeyLogin()}
+              disabled={!canUsePasskey || isSubmitting || isPasskeySubmitting}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-border-silver bg-white text-[14px] font-bold text-midnight-graphite transition-all hover:bg-lightest-gray-background active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {isPasskeySubmitting ? (
+                <Loader2 size={17} strokeWidth={2.5} className="animate-spin" />
+              ) : (
+                <Fingerprint size={17} strokeWidth={2.5} />
+              )}
+              {isPasskeySubmitting ? '验证中' : 'Face ID / 通行密钥登录'}
             </button>
           </form>
         </motion.div>

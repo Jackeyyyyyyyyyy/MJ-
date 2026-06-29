@@ -14,6 +14,7 @@ import ApprovalProgressModal from './components/ApprovalProgressModal';
 import AiPromptEditor from './components/AiPromptEditor';
 import AiAssistantHome from './components/AiAssistantHome';
 import BackupPage from './components/BackupPage';
+import SettingsPage from './components/SettingsPage';
 import { auth } from './auth';
 import { storage } from './storage';
 import { AdminView, Role, ApprovalNotification, ApprovalRecord, ApprovalStatus } from './types';
@@ -25,7 +26,7 @@ type AppRoute =
   | { kind: 'admin'; view: AdminView }
   | { kind: 'module'; moduleName: string; typeName: string };
 
-const adminRouteViews: AdminView[] = ['accounts', 'ai-assistant', 'organization', 'stats', 'workflows', 'business-forms', 'ai-branch-logs'];
+const adminRouteViews: AdminView[] = ['settings', 'accounts', 'ai-assistant', 'organization', 'stats', 'workflows', 'business-forms', 'ai-branch-logs'];
 const workRouteTabs: WorkTab[] = ['requests', 'approvals', 'processing', 'cc', 'global'];
 
 function decodeRoutePart(part?: string) {
@@ -232,6 +233,11 @@ function MainApp() {
     pushRoute({ kind: 'admin', view: 'ai-branch-logs' });
   };
 
+  const handleOpenSettings = () => {
+    applyRoute({ kind: 'admin', view: 'settings' });
+    pushRoute({ kind: 'admin', view: 'settings' });
+  };
+
   const handleWorkTabChange = (tab: WorkTab) => {
     setSelectedModule('');
     setSelectedType('');
@@ -421,6 +427,8 @@ function MainApp() {
 
     const isSuperAdminPerspective = auth.getSessionUser()?.role === 'developer' && perspective === 'developer';
     const canUseAiAssistant = perspective === 'boss' || isSuperAdminPerspective;
+    if (activeAdminView === 'settings') return;
+
     const aiAssistantViews: AdminView[] = ['ai-assistant', 'ai-branch-logs'];
     const canAccessAdminView = activeAdminView === 'ai-assistant'
       ? canUseAiAssistant
@@ -445,6 +453,10 @@ function MainApp() {
 
     if (activeAdminView === 'accounts' && isSuperAdminPerspective) {
       return <AccountPermissionAdmin />;
+    }
+
+    if (activeAdminView === 'settings') {
+      return <SettingsPage activeUsername={activeUsername} />;
     }
 
     if (activeAdminView === 'ai-assistant' && canUseAiAssistant) {
@@ -538,6 +550,7 @@ function MainApp() {
       onOpenWorkflowAdmin={handleOpenWorkflowAdmin}
       onOpenBusinessFormAdmin={handleOpenBusinessFormAdmin}
       onOpenAiBranchLogs={handleOpenAiBranchLogs}
+      onOpenSettings={handleOpenSettings}
       onOpenNotificationRecord={handleOpenNotificationRecord}
       selectedModule={selectedModule}
       selectedType={selectedType}

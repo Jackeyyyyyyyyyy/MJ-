@@ -63,6 +63,7 @@ const organizationSeedStateFile = path.join(dataDir, 'organization-seed-state.js
 const notificationsFile = path.join(dataDir, 'approval-notifications.json');
 const pushSubscriptionsFile = path.join(dataDir, 'push-subscriptions.json');
 const webPushKeysFile = path.join(dataDir, 'web-push-vapid-keys.json');
+const passkeysFile = path.join(dataDir, 'account-passkeys.json');
 const bundledOrganizationDirectoryFile = path.resolve(__dirname, 'default-organization-directory.json');
 const approvalSchemaFile = path.join(dataDir, 'approval-schema.json');
 const shouldSyncBundledOrganization = process.env.ORGANIZATION_SEED_SYNC !== 'false';
@@ -194,6 +195,13 @@ const tokenTtlMs =
   Number.isFinite(configuredTokenTtlMs) && configuredTokenTtlMs > 0
     ? configuredTokenTtlMs
     : 8 * 60 * 60 * 1000;
+const passkeyChallengeTtlMs = 5 * 60 * 1000;
+const webAuthnRpName = process.env.WEBAUTHN_RP_NAME?.trim() || 'MJ 审批中心';
+const configuredWebAuthnRpId = process.env.WEBAUTHN_RP_ID?.trim();
+const configuredWebAuthnOrigins = (process.env.WEBAUTHN_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 const configuredMaxUploadFileBytes = Number(process.env.MAX_UPLOAD_FILE_BYTES);
 const maxUploadFileBytes =
   Number.isFinite(configuredMaxUploadFileBytes) && configuredMaxUploadFileBytes > 0
@@ -1541,6 +1549,7 @@ let aiBranchLogWriteQueue = Promise.resolve();
 let organizationWriteQueue = Promise.resolve();
 let notificationWriteQueue = Promise.resolve();
 let pushSubscriptionWriteQueue = Promise.resolve();
+let passkeyWriteQueue = Promise.resolve();
 
 function createBusinessRecord(record) {
   const operation = writeQueue.catch(() => undefined).then(async () => {
@@ -1659,6 +1668,374 @@ function updatePushSubscriptions(mutator) {
 
   pushSubscriptionWriteQueue = operation.catch(() => undefined);
   return operation;
+}
+
+async function readPasskeyCredentials() {
+  const credentials = await readJsonArrayFile(passkeysFile, 'account passkeys', { optional: true });
+  return credentials.filter((credential) => (
+    credential?.id &&
+    credential?.username &&
+    credential?.publicKeyJwk &&
+    credential?.createdAt
+  ));
+}
+
+async function writePasskeyCredentials(credentials) {
+  await writeJsonArrayFile(passkeysFile, credentials);
+}
+
+function updatePasskeyCredentials(mutator) {
+  const operation = passkeyWriteQueue.catch(() => undefined).then(async () => {
+    const credentials = await readPasskeyCredentials();
+    const result = await mutator(credentials);
+    await writePasskeyCredentials(credentials);
+    return result;
+  });
+
+  passkeyWriteQueue = operation.catch(() => undefined);
+  return operation;
+}
+
+function toPublicPasskeyCredential(credential) {
+  return {
+    id: credential.id,
+    name: credential.name || '设备通行密钥',
+    createdAt: credential.createdAt,
+    lastUsedAt: credential.lastUsedAt,
+    transports: Array.isArray(credential.transports) ? credential.transports : [],
+  };
+}
+
+function createPasskeyUserHandle(username) {
+  return crypto
+    .createHmac('sha256', authSecret)
+    .update(`passkey-user:${username}`)
+    .digest('base64url');
+}
+
+function bufferFromBase64url(value) {
+  return Buffer.from(String(value || ''), 'base64url');
+}
+
+function getCredentialIdFromRequest(credential) {
+  const id = String(credential?.rawId || credential?.id || '').trim();
+  if (!id) throw createHttpError('passkey credential id is required', 400);
+  return id;
+}
+
+function getRequestOriginHost(req) {
+  const origin = req.get('origin');
+  if (origin) {
+    try {
+      return new URL(origin).hostname;
+    } catch {
+      // Fall through to host headers.
+    }
+  }
+
+  const referer = req.get('referer');
+  if (referer) {
+    try {
+      return new URL(referer).hostname;
+    } catch {
+      // Fall through to host headers.
+    }
+  }
+
+  const host = String(req.get('x-forwarded-host') || req.get('host') || 'localhost')
+    .split(',')[0]
+    .trim();
+  return host.startsWith('[') ? host.slice(1, host.indexOf(']')) : host.split(':')[0];
+}
+
+function getWebAuthnRpId(req) {
+  return configuredWebAuthnRpId || getRequestOriginHost(req);
+}
+
+function getWebAuthnAllowedOrigins(req) {
+  if (configuredWebAuthnOrigins.length > 0) return configuredWebAuthnOrigins;
+
+  const origins = new Set();
+  const origin = req.get('origin');
+  if (origin) origins.add(origin);
+
+  const referer = req.get('referer');
+  if (referer) {
+    try {
+      origins.add(new URL(referer).origin);
+    } catch {
+      // Ignore invalid referer values.
+    }
+  }
+
+  const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
+  const forwardedHost = String(req.get('x-forwarded-host') || '').split(',')[0].trim();
+  if (forwardedProto && forwardedHost) origins.add(`${forwardedProto}://${forwardedHost}`);
+
+  const host = req.get('host');
+  if (host) origins.add(`${forwardedProto || req.protocol || 'http'}://${host}`);
+
+  return [...origins];
+}
+
+const passkeyChallenges = new Map();
+
+function cleanupPasskeyChallenges() {
+  const now = Date.now();
+  for (const [challenge, record] of passkeyChallenges.entries()) {
+    if (record.expiresAt <= now) passkeyChallenges.delete(challenge);
+  }
+}
+
+function createPasskeyChallenge(kind, data = {}) {
+  cleanupPasskeyChallenges();
+  const challenge = crypto.randomBytes(32).toString('base64url');
+  passkeyChallenges.set(challenge, {
+    ...data,
+    challenge,
+    kind,
+    expiresAt: Date.now() + passkeyChallengeTtlMs,
+  });
+  return challenge;
+}
+
+function consumePasskeyChallenge(challenge, kind) {
+  cleanupPasskeyChallenges();
+  const record = passkeyChallenges.get(challenge);
+  passkeyChallenges.delete(challenge);
+
+  if (!record || record.kind !== kind || record.expiresAt <= Date.now()) {
+    throw createHttpError('passkey challenge expired', 400);
+  }
+
+  return record;
+}
+
+function decodeCbor(buffer) {
+  const input = Buffer.from(buffer);
+  let offset = 0;
+
+  function readLength(additional) {
+    if (additional < 24) return additional;
+    if (additional === 24) return input.readUInt8(offset++);
+    if (additional === 25) {
+      const value = input.readUInt16BE(offset);
+      offset += 2;
+      return value;
+    }
+    if (additional === 26) {
+      const value = input.readUInt32BE(offset);
+      offset += 4;
+      return value;
+    }
+    if (additional === 27) {
+      const value = Number(input.readBigUInt64BE(offset));
+      offset += 8;
+      return value;
+    }
+    throw createHttpError('unsupported passkey data format', 400);
+  }
+
+  function readItem() {
+    if (offset >= input.length) throw createHttpError('passkey data is incomplete', 400);
+
+    const initial = input.readUInt8(offset++);
+    const majorType = initial >> 5;
+    const additional = initial & 0x1f;
+    const length = additional === 31 ? null : readLength(additional);
+
+    if (length === null) throw createHttpError('unsupported passkey data format', 400);
+
+    if (majorType === 0) return length;
+    if (majorType === 1) return -1 - length;
+    if (majorType === 2) {
+      const value = input.subarray(offset, offset + length);
+      offset += length;
+      return value;
+    }
+    if (majorType === 3) {
+      const value = input.subarray(offset, offset + length).toString('utf8');
+      offset += length;
+      return value;
+    }
+    if (majorType === 4) {
+      const value = [];
+      for (let index = 0; index < length; index += 1) value.push(readItem());
+      return value;
+    }
+    if (majorType === 5) {
+      const value = new Map();
+      for (let index = 0; index < length; index += 1) value.set(readItem(), readItem());
+      return value;
+    }
+    if (majorType === 7) {
+      if (additional === 20) return false;
+      if (additional === 21) return true;
+      if (additional === 22) return null;
+    }
+
+    throw createHttpError('unsupported passkey data format', 400);
+  }
+
+  return readItem();
+}
+
+function requireCborMap(value) {
+  if (!(value instanceof Map)) throw createHttpError('invalid passkey data', 400);
+  return value;
+}
+
+function parseAuthenticatorData(authData) {
+  if (!Buffer.isBuffer(authData) || authData.length < 37) {
+    throw createHttpError('invalid authenticator data', 400);
+  }
+
+  return {
+    rpIdHash: authData.subarray(0, 32),
+    flags: authData.readUInt8(32),
+    signCount: authData.readUInt32BE(33),
+    authData,
+  };
+}
+
+function requireVerifiedAuthenticatorData(parsed, rpId, requiresAttestedCredentialData = false) {
+  const expectedRpIdHash = crypto.createHash('sha256').update(rpId).digest();
+  if (!crypto.timingSafeEqual(parsed.rpIdHash, expectedRpIdHash)) {
+    throw createHttpError('passkey domain does not match this site', 400);
+  }
+
+  if ((parsed.flags & 0x01) !== 0x01) {
+    throw createHttpError('passkey user presence is required', 400);
+  }
+
+  if ((parsed.flags & 0x04) !== 0x04) {
+    throw createHttpError('Face ID or device verification is required', 400);
+  }
+
+  if (requiresAttestedCredentialData && (parsed.flags & 0x40) !== 0x40) {
+    throw createHttpError('passkey public key is missing', 400);
+  }
+}
+
+function coseEc2PublicKeyToJwk(cosePublicKey) {
+  const key = requireCborMap(cosePublicKey);
+  const kty = key.get(1);
+  const alg = key.get(3);
+  const crv = key.get(-1);
+  const x = key.get(-2);
+  const y = key.get(-3);
+
+  if (kty !== 2 || alg !== -7 || crv !== 1 || !Buffer.isBuffer(x) || !Buffer.isBuffer(y)) {
+    throw createHttpError('only ES256 platform passkeys are supported', 400);
+  }
+
+  return {
+    kty: 'EC',
+    crv: 'P-256',
+    x: x.toString('base64url'),
+    y: y.toString('base64url'),
+    ext: true,
+  };
+}
+
+function parseAttestedCredentialData(authData) {
+  const parsed = parseAuthenticatorData(authData);
+  if (authData.length < 55) throw createHttpError('passkey credential data is incomplete', 400);
+
+  const credentialIdLength = authData.readUInt16BE(53);
+  const credentialIdStart = 55;
+  const credentialIdEnd = credentialIdStart + credentialIdLength;
+  if (credentialIdEnd >= authData.length) throw createHttpError('passkey credential id is incomplete', 400);
+
+  const credentialId = authData.subarray(credentialIdStart, credentialIdEnd);
+  const cosePublicKey = decodeCbor(authData.subarray(credentialIdEnd));
+
+  return {
+    ...parsed,
+    credentialId: credentialId.toString('base64url'),
+    publicKeyJwk: coseEc2PublicKeyToJwk(cosePublicKey),
+  };
+}
+
+function parseClientData(credential, expectedType, req) {
+  const clientDataJSON = bufferFromBase64url(credential?.response?.clientDataJSON);
+  let clientData;
+
+  try {
+    clientData = JSON.parse(clientDataJSON.toString('utf8'));
+  } catch {
+    throw createHttpError('invalid passkey client data', 400);
+  }
+
+  if (clientData.type !== expectedType) {
+    throw createHttpError('invalid passkey operation', 400);
+  }
+
+  const allowedOrigins = getWebAuthnAllowedOrigins(req);
+  if (!allowedOrigins.includes(clientData.origin)) {
+    throw createHttpError('passkey origin is not allowed', 400);
+  }
+
+  return { clientData, clientDataJSON };
+}
+
+function parseAttestationResponse(credential, req) {
+  const { clientData, clientDataJSON } = parseClientData(credential, 'webauthn.create', req);
+  const challengeRecord = consumePasskeyChallenge(clientData.challenge, 'registration');
+  const attestationObject = requireCborMap(decodeCbor(bufferFromBase64url(credential?.response?.attestationObject)));
+  const authData = attestationObject.get('authData');
+  const parsedAuthData = parseAttestedCredentialData(authData);
+
+  requireVerifiedAuthenticatorData(parsedAuthData, challengeRecord.rpId, true);
+
+  return {
+    challengeRecord,
+    clientDataJSON,
+    parsedAuthData,
+  };
+}
+
+function parseAssertionResponse(credential, req) {
+  const { clientData, clientDataJSON } = parseClientData(credential, 'webauthn.get', req);
+  const challengeRecord = consumePasskeyChallenge(clientData.challenge, 'authentication');
+  const authenticatorData = bufferFromBase64url(credential?.response?.authenticatorData);
+  const parsedAuthData = parseAuthenticatorData(authenticatorData);
+
+  requireVerifiedAuthenticatorData(parsedAuthData, challengeRecord.rpId);
+
+  return {
+    challengeRecord,
+    clientDataJSON,
+    parsedAuthData,
+  };
+}
+
+function verifyPasskeySignature(credential, storedCredential, authenticatorData, clientDataJSON) {
+  const signature = bufferFromBase64url(credential?.response?.signature);
+  const signedData = Buffer.concat([
+    authenticatorData,
+    crypto.createHash('sha256').update(clientDataJSON).digest(),
+  ]);
+  const verifier = crypto.createVerify('SHA256');
+  verifier.update(signedData);
+  verifier.end();
+
+  try {
+    return verifier.verify(
+      crypto.createPublicKey({ key: storedCredential.publicKeyJwk, format: 'jwk' }),
+      signature,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function getPasskeyName(req) {
+  const userAgent = String(req.get('user-agent') || '');
+  if (/iPhone|iPad|Macintosh|Mac OS X|Safari/i.test(userAgent)) return 'Apple 通行密钥';
+  if (/Windows/i.test(userAgent)) return 'Windows Hello 通行密钥';
+  if (/Android/i.test(userAgent)) return 'Android 通行密钥';
+  return '设备通行密钥';
 }
 
 function getPushEndpointHash(endpoint) {
@@ -6275,6 +6652,228 @@ app.delete('/api/accounts/:id', authenticate, requireRoles('developer'), async (
     });
 
     res.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/auth/passkeys', authenticate, async (req, res, next) => {
+  try {
+    const credentials = await readPasskeyCredentials();
+    res.json(
+      credentials
+        .filter((credential) => credential.username === req.user.username)
+        .map(toPublicPasskeyCredential),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/auth/passkeys/:id', authenticate, async (req, res, next) => {
+  try {
+    const credentialId = String(req.params.id || '').trim();
+    const result = await updatePasskeyCredentials((credentials) => {
+      const index = credentials.findIndex((credential) => (
+        credential.id === credentialId &&
+        credential.username === req.user.username
+      ));
+
+      if (index < 0) {
+        throw createHttpError('passkey not found', 404);
+      }
+
+      credentials.splice(index, 1);
+      return { removed: true };
+    });
+
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/auth/passkey/register/options', authenticate, async (req, res, next) => {
+  try {
+    const rpId = getWebAuthnRpId(req);
+    const credentials = await readPasskeyCredentials();
+    const existingCredentials = credentials.filter((credential) => credential.username === req.user.username);
+    const challenge = createPasskeyChallenge('registration', {
+      username: req.user.username,
+      rpId,
+    });
+
+    res.json({
+      publicKey: {
+        challenge,
+        rp: {
+          name: webAuthnRpName,
+          id: rpId,
+        },
+        user: {
+          id: createPasskeyUserHandle(req.user.username),
+          name: req.user.username,
+          displayName: req.user.name,
+        },
+        pubKeyCredParams: [
+          { type: 'public-key', alg: -7 },
+        ],
+        timeout: 60000,
+        attestation: 'none',
+        authenticatorSelection: {
+          authenticatorAttachment: 'platform',
+          residentKey: 'required',
+          requireResidentKey: true,
+          userVerification: 'required',
+        },
+        excludeCredentials: existingCredentials.map((credential) => ({
+          id: credential.id,
+          type: 'public-key',
+          transports: Array.isArray(credential.transports) ? credential.transports : undefined,
+        })),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/auth/passkey/register/verify', authenticate, async (req, res, next) => {
+  try {
+    const credential = req.body?.credential;
+    const credentialId = getCredentialIdFromRequest(credential);
+    const transports = Array.isArray(credential?.response?.transports)
+      ? credential.response.transports.map((transport) => String(transport)).filter(Boolean)
+      : [];
+    const { challengeRecord, parsedAuthData } = parseAttestationResponse(credential, req);
+
+    if (challengeRecord.username !== req.user.username) {
+      throw createHttpError('passkey challenge does not match current user', 403);
+    }
+
+    if (credentialId !== parsedAuthData.credentialId) {
+      throw createHttpError('passkey credential id mismatch', 400);
+    }
+
+    const savedCredential = await updatePasskeyCredentials((credentials) => {
+      if (credentials.some((item) => item.id === parsedAuthData.credentialId)) {
+        throw createHttpError('passkey already exists', 409);
+      }
+
+      const now = new Date().toISOString();
+      const nextCredential = {
+        id: parsedAuthData.credentialId,
+        username: req.user.username,
+        userHandle: createPasskeyUserHandle(req.user.username),
+        publicKeyJwk: parsedAuthData.publicKeyJwk,
+        signCount: parsedAuthData.signCount,
+        transports,
+        name: getPasskeyName(req),
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      credentials.push(nextCredential);
+      return nextCredential;
+    });
+
+    res.status(201).json(toPublicPasskeyCredential(savedCredential));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/auth/passkey/login/options', async (req, res, next) => {
+  try {
+    const username = String(req.body?.username || '').trim();
+    const credentials = await readPasskeyCredentials();
+    const rpId = getWebAuthnRpId(req);
+    let allowCredentials;
+
+    if (username) {
+      const user = await findAccount(username);
+      if (!user) throw createHttpError('account not found', 404);
+
+      const userCredentials = credentials.filter((credential) => credential.username === username);
+      if (userCredentials.length === 0) throw createHttpError('this account has no passkey', 404);
+
+      allowCredentials = userCredentials.map((credential) => ({
+        id: credential.id,
+        type: 'public-key',
+        transports: Array.isArray(credential.transports) ? credential.transports : undefined,
+      }));
+    } else if (credentials.length === 0) {
+      throw createHttpError('no passkey has been configured yet', 404);
+    }
+
+    const challenge = createPasskeyChallenge('authentication', {
+      username: username || null,
+      rpId,
+    });
+
+    res.json({
+      publicKey: {
+        challenge,
+        rpId,
+        timeout: 60000,
+        userVerification: 'required',
+        ...(allowCredentials ? { allowCredentials } : {}),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/auth/passkey/login/verify', async (req, res, next) => {
+  try {
+    const credential = req.body?.credential;
+    const credentialId = getCredentialIdFromRequest(credential);
+    const { challengeRecord, parsedAuthData, clientDataJSON } = parseAssertionResponse(credential, req);
+    const credentials = await readPasskeyCredentials();
+    const storedCredential = credentials.find((item) => item.id === credentialId);
+
+    if (!storedCredential) {
+      throw createHttpError('invalid passkey', 401);
+    }
+
+    if (challengeRecord.username && storedCredential.username !== challengeRecord.username) {
+      throw createHttpError('passkey does not match this account', 401);
+    }
+
+    const user = await findAccount(storedCredential.username);
+    if (!user) {
+      throw createHttpError('passkey account is disabled', 401);
+    }
+
+    const isVerified = verifyPasskeySignature(
+      credential,
+      storedCredential,
+      parsedAuthData.authData,
+      clientDataJSON,
+    );
+
+    if (!isVerified) {
+      throw createHttpError('invalid passkey signature', 401);
+    }
+
+    await updatePasskeyCredentials((items) => {
+      const item = items.find((nextItem) => nextItem.id === storedCredential.id);
+      if (item) {
+        item.lastUsedAt = new Date().toISOString();
+        item.updatedAt = item.lastUsedAt;
+        if (parsedAuthData.signCount > Number(item.signCount || 0)) {
+          item.signCount = parsedAuthData.signCount;
+        }
+      }
+      return item;
+    });
+
+    const session = createToken(user);
+    res.json({
+      user: toPublicUser(user),
+      ...session,
+    });
   } catch (error) {
     next(error);
   }

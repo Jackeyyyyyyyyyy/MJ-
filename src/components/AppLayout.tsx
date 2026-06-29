@@ -21,6 +21,7 @@ interface AppLayoutProps {
   onOpenWorkflowAdmin: () => void;
   onOpenBusinessFormAdmin: () => void;
   onOpenAiBranchLogs: () => void;
+  onOpenSettings: () => void;
   onOpenNotificationRecord?: (notification: ApprovalNotification, record: ApprovalRecord) => void;
   selectedModule?: string;
   selectedType?: string;
@@ -233,6 +234,7 @@ export default function AppLayout({
   onOpenWorkflowAdmin,
   onOpenBusinessFormAdmin,
   onOpenAiBranchLogs,
+  onOpenSettings,
   onOpenNotificationRecord,
   selectedModule,
   selectedType,
@@ -315,6 +317,10 @@ export default function AppLayout({
         }}
         onOpenAiBranchLogs={() => {
           onOpenAiBranchLogs();
+          setIsSidebarOpen(false);
+        }}
+        onOpenSettings={() => {
+          onOpenSettings();
           setIsSidebarOpen(false);
         }}
         onSelectType={(m, t) => {

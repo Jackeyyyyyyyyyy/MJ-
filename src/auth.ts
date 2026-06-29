@@ -1,4 +1,4 @@
-import { User, Role } from './types';
+import { AuthSessionResponse, User, Role } from './types';
 
 const AUTH_KEY = 'mj_approval_auth';
 const ACTIVE_ACCOUNT_KEY = 'mj_active_account';
@@ -101,6 +101,22 @@ function readSession(): AuthSession | null {
   return readStoredSession()?.session || null;
 }
 
+function storeSession(session: AuthSessionResponse, options: { rememberDevice?: boolean } = {}): User {
+  const normalizedSession = {
+    ...session,
+    user: normalizeUser(session.user) || session.user,
+  };
+  const targetStorage = options.rememberDevice ? localStorage : sessionStorage;
+  const otherStorage = options.rememberDevice ? sessionStorage : localStorage;
+
+  otherStorage.removeItem(AUTH_KEY);
+  otherStorage.removeItem(PERSPECTIVE_KEY);
+  otherStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+  targetStorage.setItem(AUTH_KEY, JSON.stringify(normalizedSession));
+  targetStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+  return normalizedSession.user;
+}
+
 function readActiveAccount(): User | null {
   const storedSession = readStoredSession();
   if (storedSession?.session.user.role !== 'developer') return null;
@@ -135,20 +151,12 @@ export const auth = {
 
     if (!response.ok) return null;
 
-    const session = await response.json() as AuthSession;
-    const normalizedSession = {
-      ...session,
-      user: normalizeUser(session.user) || session.user,
-    };
-    const targetStorage = options.rememberDevice ? localStorage : sessionStorage;
-    const otherStorage = options.rememberDevice ? sessionStorage : localStorage;
+    const session = await response.json() as AuthSessionResponse;
+    return storeSession(session, options);
+  },
 
-    otherStorage.removeItem(AUTH_KEY);
-    otherStorage.removeItem(PERSPECTIVE_KEY);
-    otherStorage.removeItem(ACTIVE_ACCOUNT_KEY);
-    targetStorage.setItem(AUTH_KEY, JSON.stringify(normalizedSession));
-    targetStorage.removeItem(ACTIVE_ACCOUNT_KEY);
-    return normalizedSession.user;
+  acceptSession(session: AuthSessionResponse, options: { rememberDevice?: boolean } = {}): User {
+    return storeSession(session, options);
   },
 
   logout() {

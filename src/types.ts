@@ -16,7 +16,7 @@ export enum ApprovalStatus {
 
 export type Role = 'employee' | 'boss' | 'developer';
 
-export type AdminView = 'accounts' | 'ai-assistant' | 'organization' | 'stats' | 'workflows' | 'business-forms' | 'ai-branch-logs';
+export type AdminView = 'settings' | 'accounts' | 'ai-assistant' | 'organization' | 'stats' | 'workflows' | 'business-forms' | 'ai-branch-logs';
 
 export type ApproverRuleType =
   | 'specific_members'
@@ -515,6 +515,20 @@ export interface WebPushSubscriptionResult {
   subscribed: boolean;
   updatedAt?: string;
   removed?: number;
+}
+
+export interface AuthSessionResponse {
+  user: User;
+  token: string;
+  expiresAt: number;
+}
+
+export interface PasskeyCredentialSummary {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  transports?: string[];
 }
 
 export interface ApprovalAttachment {
