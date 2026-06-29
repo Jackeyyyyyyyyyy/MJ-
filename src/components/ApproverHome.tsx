@@ -93,24 +93,26 @@ export default function ApproverHome() {
   };
 
   return (
-    <div className="space-y-8 pb-40 animate-in fade-in duration-700">
+    <div className="space-y-5 pb-32 animate-in fade-in duration-700 lg:space-y-8 lg:pb-40">
       <StatsOverview
         title="审批"
         subtitle="待办事宜与处理记录"
         items={summaryItems}
       />
 
-      <div className="flex p-1 bg-lightest-gray-background rounded-xl w-full lg:w-fit overflow-x-auto no-scrollbar">
+      <div className="-mx-1 flex gap-1 overflow-x-auto no-scrollbar rounded-[16px] bg-[#ececf0] p-1 lg:mx-0 lg:w-fit lg:gap-0 lg:rounded-xl lg:bg-lightest-gray-background">
         <button 
           onClick={() => setActiveTab('pending')}
           className={cn(
-            "flex-1 lg:flex-none px-8 py-2.5 text-[13px] font-bold rounded-lg transition-all flex items-center justify-center gap-3",
-            activeTab === 'pending' ? "bg-white text-black shadow-sm" : "text-light-gray hover:text-black"
+            "h-8 shrink-0 rounded-[12px] px-3 text-[11px] font-medium transition-all flex items-center justify-center gap-1.5 lg:h-auto lg:flex-1 lg:border-0 lg:rounded-lg lg:px-8 lg:py-2.5 lg:text-[13px] lg:font-bold lg:gap-3",
+            activeTab === 'pending'
+              ? "bg-white text-midnight-graphite shadow-sm lg:bg-white lg:text-black lg:shadow-sm"
+              : "text-medium-gray hover:text-black lg:bg-transparent lg:text-light-gray"
           )}
         >
           待处理
           {pendingRecords.length > 0 && (
-            <span className="px-2 min-w-[18px] h-[18px] bg-black text-white text-[10px] flex items-center justify-center rounded-full">
+            <span className="px-1.5 min-w-[16px] h-[16px] bg-lightest-gray-background text-current lg:bg-black lg:text-white text-[10px] flex items-center justify-center rounded-full">
               {pendingRecords.length}
             </span>
           )}
@@ -118,15 +120,17 @@ export default function ApproverHome() {
         <button 
           onClick={() => setActiveTab('processed')}
           className={cn(
-            "flex-1 lg:flex-none px-8 py-2.5 text-[13px] font-bold rounded-lg transition-all",
-            activeTab === 'processed' ? "bg-white text-black shadow-sm" : "text-light-gray hover:text-black"
+            "h-8 shrink-0 rounded-[12px] px-3 text-[11px] font-medium transition-all lg:h-auto lg:flex-1 lg:border-0 lg:rounded-lg lg:px-8 lg:py-2.5 lg:text-[13px] lg:font-bold",
+            activeTab === 'processed'
+              ? "bg-white text-midnight-graphite shadow-sm lg:bg-white lg:text-black lg:shadow-sm"
+              : "text-medium-gray hover:text-black lg:bg-transparent lg:text-light-gray"
           )}
         >
           历史记录
         </button>
       </div>
 
-      <div className="bg-white border border-border-silver rounded-2xl overflow-hidden shadow-sm">
+      <div className="lg:bg-white lg:border lg:border-border-silver lg:rounded-2xl lg:overflow-hidden lg:shadow-sm">
         <ApprovalTable 
           records={activeTab === 'pending' ? pendingRecords : processedRecords}
           onViewDetail={(r) => { setSelectedRecord(r); setShowDetail(true); }}

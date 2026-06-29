@@ -19,25 +19,29 @@ interface StatsOverviewProps {
 
 export default function StatsOverview({ title, subtitle, items, action }: StatsOverviewProps) {
   return (
-    <section className="bg-white border border-border-silver rounded-lg overflow-hidden">
+    <section className="overflow-hidden rounded-[18px] border border-black/[0.05] bg-white lg:bg-white lg:border-border-silver lg:rounded-lg">
       <div className="flex flex-col lg:flex-row lg:items-stretch">
-        <header className="px-5 py-4 lg:w-[240px] border-b lg:border-b-0 lg:border-r border-border-silver flex flex-col justify-center gap-3">
+        <header className="px-4 pt-4 pb-3 border-b border-black/[0.04] lg:px-5 lg:py-4 lg:w-[240px] lg:border-b-0 lg:border-r lg:border-border-silver flex flex-col justify-center gap-3">
           <div>
-            <h1 className="text-[22px] font-bold tracking-tight">{title}</h1>
-            <p className="text-[12px] text-light-gray font-semibold mt-1">{subtitle}</p>
+            <h1 className="text-[19px] leading-tight font-semibold text-midnight-graphite lg:text-[22px] lg:font-bold">{title}</h1>
+            <p className="text-[11px] text-light-gray font-medium mt-0.5 lg:text-[12px] lg:font-semibold lg:mt-1">{subtitle}</p>
           </div>
           {action}
         </header>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 flex-1 divide-x-0 lg:divide-x divide-y lg:divide-y-0 divide-border-silver">
+        <div className={cn(
+          "grid flex-1 divide-x divide-black/[0.04] lg:divide-border-silver lg:grid-cols-4",
+          items.length >= 5 ? "grid-cols-5" : "grid-cols-4",
+          items.length === 3 && "grid-cols-3"
+        )}>
           {items.map((item) => (
-            <div key={item.label} className="min-h-[72px] px-4 py-3 flex items-center justify-between gap-3">
-              <div className="min-w-0 flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-light-gray tracking-widest">{item.label}</span>
-                <span className="text-[24px] leading-none font-bold text-midnight-graphite tracking-tight">{item.value}</span>
+            <div key={item.label} className="min-h-[56px] px-2 py-2.5 flex flex-col items-center justify-center gap-1 lg:min-h-[72px] lg:px-4 lg:py-3 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
+              <div className="min-w-0 flex flex-col items-center gap-1 lg:items-start">
+                <span className="text-[10px] leading-none font-medium text-light-gray whitespace-nowrap lg:text-[11px] lg:font-bold lg:tracking-widest">{item.label}</span>
+                <span className="text-[18px] leading-none font-semibold text-midnight-graphite lg:text-[24px] lg:font-bold">{item.value}</span>
               </div>
               <div className={cn(
-                "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+                "hidden w-8 h-8 rounded-lg lg:flex items-center justify-center shrink-0",
                 item.bg || "bg-lightest-gray-background",
                 item.tone || "text-midnight-graphite",
               )}>

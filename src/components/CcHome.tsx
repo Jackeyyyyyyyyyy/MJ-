@@ -68,38 +68,40 @@ export default function CcHome() {
   ];
 
   return (
-    <div className="space-y-8 pb-40 animate-in fade-in duration-700">
+    <div className="space-y-5 pb-32 animate-in fade-in duration-700 lg:space-y-8 lg:pb-40">
       <StatsOverview
         title="我的抄送"
         subtitle="流程结果与同步记录"
         items={summaryItems}
       />
 
-      <div className="space-y-5">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <h2 className="text-[20px] font-bold tracking-tight">抄送记录</h2>
-          <div className="flex bg-lightest-gray-background p-1 rounded-xl w-fit">
+      <div className="space-y-3 lg:space-y-5">
+        <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center lg:gap-4">
+          <h2 className="text-[17px] font-semibold text-midnight-graphite lg:text-[20px] lg:font-bold lg:tracking-tight">抄送记录</h2>
+          <div className="-mx-1 overflow-x-auto no-scrollbar px-1 sm:mx-0 sm:px-0">
+            <div className="inline-flex min-w-max rounded-[15px] bg-[#ececf0] p-1 lg:flex lg:w-fit lg:rounded-xl lg:border-0 lg:bg-lightest-gray-background">
             {(['ALL', ApprovalStatus.APPROVED, ApprovalStatus.COMPLETED, ApprovalStatus.REJECTED] as string[]).map((status) => (
               <button
                 key={status}
                 onClick={() => setFilterStatus(status === 'ALL' ? ALL_STATUS : status)}
                 className={cn(
-                  "px-4 py-1.5 text-[11px] font-bold rounded-lg transition-all",
+                  "h-7 rounded-[11px] px-2.5 text-[11px] font-medium transition-all lg:h-auto lg:rounded-lg lg:px-4 lg:py-1.5 lg:text-[11px] lg:font-bold",
                   (filterStatus === status || (filterStatus === ALL_STATUS && status === 'ALL'))
-                    ? "bg-white text-black shadow-sm"
-                    : "text-light-gray hover:text-black"
+                    ? "bg-white text-midnight-graphite shadow-sm lg:bg-white lg:text-black"
+                    : "text-medium-gray hover:text-black lg:text-light-gray"
                 )}
               >
                 {status === 'ALL'
                   ? '全部'
                   : status === ApprovalStatus.COMPLETED
                     ? '已完成'
-                    : (status === ApprovalStatus.APPROVED ? '已通过' : '驳回')}
+                  : (status === ApprovalStatus.APPROVED ? '已通过' : '驳回')}
               </button>
             ))}
+            </div>
           </div>
         </div>
-        <div className="bg-white border border-border-silver rounded-2xl overflow-hidden shadow-sm">
+        <div className="lg:bg-white lg:border lg:border-border-silver lg:rounded-2xl lg:overflow-hidden lg:shadow-sm">
           <ApprovalTable
             records={filteredRecords}
             onViewDetail={(record) => { setSelectedRecord(record); setShowDetail(true); }}

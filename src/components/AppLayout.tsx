@@ -208,7 +208,7 @@ function MobileAccountSwitcher({ activeAccount, accounts, isLoading, onChange }:
         const account = enabledAccounts.find((item) => item.username === event.target.value);
         if (account) onChange(account);
       }}
-      className="w-full h-11 px-3 rounded-apple-btn bg-lightest-gray-background text-[13px] font-bold text-midnight-graphite outline-none border border-border-silver"
+      className="w-full h-10 px-3 rounded-2xl bg-white/80 text-[12px] font-bold text-midnight-graphite outline-none border border-black/[0.06] shadow-sm"
       aria-label="切换账号"
       disabled={isLoading}
     >
@@ -346,7 +346,7 @@ export default function AppLayout({
 
       <div className="flex-1 flex flex-col min-w-0 relative h-full overflow-hidden">
         <header className="glass grow-0 shrink-0 z-30">
-          <div className="h-16 lg:h-20 flex items-center justify-between px-6 lg:px-12">
+          <div className="h-14 lg:h-20 flex items-center justify-between px-5 lg:px-12">
             <div className="flex items-center gap-4 lg:gap-6 min-w-0">
               <button
                 type="button"
@@ -361,7 +361,7 @@ export default function AppLayout({
               </button>
               <button
                 onClick={() => setIsSidebarOpen(true)}
-                className="w-10 h-10 flex items-center justify-center lg:hidden text-midnight-graphite"
+                className="w-9 h-9 flex items-center justify-center lg:hidden text-midnight-graphite"
               >
                 <div className="flex flex-col gap-1.5 w-5">
                   <span className="w-full h-0.5 bg-midnight-graphite rounded-full" />
@@ -380,7 +380,7 @@ export default function AppLayout({
               )}
             </div>
 
-            <div className="flex items-center gap-4 lg:gap-8">
+            <div className="flex items-center gap-3 lg:gap-8">
               <NotificationCenter
                 activeUsername={currentUsername}
                 onOpenRecord={onOpenNotificationRecord}
@@ -409,7 +409,7 @@ export default function AppLayout({
           </div>
 
           {isDeveloper && (
-            <div className="sm:hidden px-5 pb-3">
+            <div className="sm:hidden px-5 pb-2">
               <MobileAccountSwitcher
                 activeAccount={activeAccount}
                 accounts={accounts}
@@ -420,7 +420,7 @@ export default function AppLayout({
           )}
         </header>
 
-        <main className="flex-1 overflow-y-auto no-scrollbar pt-12 lg:pt-16 px-6 lg:px-20 pb-40">
+        <main className="flex-1 overflow-y-auto no-scrollbar pt-5 lg:pt-16 px-5 lg:px-20 pb-28 lg:pb-40">
           <div className="max-w-[1680px] mx-auto min-h-full flex flex-col">
             <AnimatePresence mode="wait">
               <motion.div
@@ -434,7 +434,7 @@ export default function AppLayout({
                 {children}
               </motion.div>
             </AnimatePresence>
-            <footer className="pt-12 text-center">
+            <footer className="pt-8 lg:pt-12 text-center">
               <p className="text-[11px] font-bold text-light-gray">
                 © 2026 MJ审批. All rights reserved.
               </p>

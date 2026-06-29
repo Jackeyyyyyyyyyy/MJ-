@@ -125,21 +125,91 @@ export default function ApprovalTable({
     );
   };
 
+  const renderMobileCard = (record: ApprovalRecord) => {
+    const processorNames = (record.processors || []).map((processor) => processor.name).filter(Boolean).join('、');
+    const [firstBusinessEntry] = Object.entries(record.businessData);
+    const handleCardKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onViewDetail(record);
+      }
+    };
+
+    return (
+      <article
+        key={record.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => onViewDetail(record)}
+        onKeyDown={handleCardKeyDown}
+        className="rounded-[16px] border border-black/[0.05] bg-white px-3.5 py-3.5 active:scale-[0.99] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-blue-highlight"
+        title="查看详情"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-medium text-light-gray font-mono">#{record.id.split('-')[1]}</p>
+            <h3 className="mt-1 truncate text-[15px] font-semibold leading-tight text-midnight-graphite">
+              {record.approvalTypeName}
+            </h3>
+            <p className="mt-0.5 truncate text-[11px] font-medium text-medium-gray">{record.moduleName}</p>
+          </div>
+          <span className={cn(
+            "status-tag shrink-0 px-2 py-0.5 text-[10px] font-medium",
+            record.status === ApprovalStatus.PENDING && "status-pending",
+            record.status === ApprovalStatus.PROCESSING && "status-processing",
+            record.status === ApprovalStatus.APPROVED && "status-approved",
+            record.status === ApprovalStatus.COMPLETED && "status-completed",
+            record.status === ApprovalStatus.REJECTED && "status-rejected"
+          )}>
+            {record.status}
+          </span>
+        </div>
+
+        {firstBusinessEntry && (
+          <div className="mt-3 rounded-[12px] bg-canvas-white px-3 py-2.5">
+            <p className="text-[10px] font-medium text-light-gray">{firstBusinessEntry[0]}</p>
+            <p className="mt-0.5 truncate text-[13px] font-medium text-charcoal-grey">
+              {formatBusinessValuePreview(firstBusinessEntry[1])}
+            </p>
+          </div>
+        )}
+
+        <div className="mt-3 grid grid-cols-2 gap-2.5 text-[11px]">
+          <div className="min-w-0">
+            <p className="font-medium text-light-gray">发起人</p>
+            <p className="mt-0.5 truncate font-medium text-midnight-graphite">{record.applicant}</p>
+          </div>
+          <div className="min-w-0 text-right">
+            <p className="font-medium text-light-gray">办理人</p>
+            <p className="mt-0.5 truncate font-medium text-midnight-graphite">{processorNames || '-'}</p>
+          </div>
+          <div className="col-span-2 flex items-center justify-between border-t border-black/[0.05] pt-2.5">
+            <span className="font-medium text-medium-gray">{formatLocalDate(record.createdAt)}</span>
+            <span className="font-medium text-light-gray">{formatLocalTime(record.createdAt)}</span>
+          </div>
+        </div>
+      </article>
+    );
+  };
+
   if (!records || records.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-40 px-12 bg-pure-white">
-        <div className="w-24 h-24 bg-canvas-white rounded-full flex items-center justify-center mb-8">
-          <FileText size={32} strokeWidth={1} className="text-light-silver" />
+      <div className="flex flex-col items-center justify-center rounded-[18px] border border-black/[0.05] bg-white px-6 py-14 lg:rounded-none lg:border-0 lg:bg-pure-white lg:px-12 lg:py-40">
+        <div className="w-11 h-11 bg-canvas-white rounded-full flex items-center justify-center mb-4 lg:w-24 lg:h-24 lg:mb-8">
+          <FileText size={20} strokeWidth={1.2} className="text-light-silver lg:w-8 lg:h-8" />
         </div>
-        <p className="text-[21px] font-bold text-midnight-graphite tracking-tight">暂无卷宗记录</p>
-        <p className="text-[17px] font-medium text-light-gray mt-2">当前条件下未发现任何匹配的审批数据。</p>
+        <p className="text-[15px] font-semibold text-midnight-graphite lg:text-[21px] lg:font-bold lg:tracking-tight">暂无卷宗记录</p>
+        <p className="text-center text-[12px] font-normal text-light-gray mt-1.5 lg:text-[17px] lg:font-medium lg:mt-2">当前条件下未发现任何匹配的审批数据。</p>
       </div>
     );
   }
 
   return (
-    <div className="w-full bg-pure-white">
-      <div className="overflow-x-auto no-scrollbar">
+    <div className="w-full bg-transparent lg:bg-pure-white">
+      <div className="space-y-3 lg:hidden">
+        {records.map(renderMobileCard)}
+      </div>
+      <div className="hidden overflow-x-auto no-scrollbar lg:block">
         <div className="min-w-[1120px] lg:min-w-0">
           <table className="w-full text-left border-collapse">
             <thead>
