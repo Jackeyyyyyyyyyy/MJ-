@@ -873,6 +873,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [uploadingFields, setUploadingFields] = useState<Record<string, boolean>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [organizationOptions, setOrganizationOptions] = useState<OrganizationSelectOptions>(emptyOrganizationOptions);
   const [aiPanelOpen, setAiPanelOpen] = useState(true);
   const [aiFillMode, setAiFillMode] = useState<AiFillMode>('text');
@@ -882,6 +883,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const [aiFillMessage, setAiFillMessage] = useState('');
   const [aiFillMessageType, setAiFillMessageType] = useState<AiFillMessageType>('idle');
   const [isAiFilling, setIsAiFilling] = useState(false);
+  const isSubmittingRef = React.useRef(false);
 
   const user = auth.getCurrentUser();
   const visibleModules = getVisibleApprovalModules();
@@ -962,8 +964,14 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     setStep(3);
   };
 
-  const handleInputChange = (field: string, value: any) => {
+  const handleInputChange = (
+    field: string,
+    valueOrUpdater: any | ((currentValue: any, currentData: Record<string, any>) => any),
+  ) => {
     setFormData(prev => {
+      const value = typeof valueOrUpdater === 'function'
+        ? valueOrUpdater(prev[field], prev)
+        : valueOrUpdater;
       const next = { ...prev, [field]: value };
       if (selectedType?.durationFields?.length) {
         selectedType.durationFields.forEach((rule) => {
@@ -977,11 +985,12 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       }
       return next;
     });
-    if (errors[field]) {
-      const newErrors = { ...errors };
-      delete newErrors[field];
-      setErrors(newErrors);
-    }
+    setErrors((previousErrors) => {
+      if (!previousErrors[field]) return previousErrors;
+      const nextErrors = { ...previousErrors };
+      delete nextErrors[field];
+      return nextErrors;
+    });
   };
 
   const handleFileUpload = async (field: string, fileList: FileList | null) => {
@@ -1026,11 +1035,10 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         })),
       );
       const uploads = await storage.uploadFiles(payload);
-      const currentValue = toFileFieldValue(formData[field]);
-      handleInputChange(field, {
-        ...currentValue,
+      handleInputChange(field, (currentValue: unknown) => ({
+        ...toFileFieldValue(currentValue),
         attachments: uploads,
-      });
+      }));
     } catch (error) {
       setErrors(prev => ({
         ...prev,
@@ -1062,11 +1070,10 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         })),
       );
       const uploads = await storage.uploadFiles(payload);
-      const currentValue = getCustomerInfoChangeValue(field);
-      handleInputChange(field, {
-        ...currentValue,
+      handleInputChange(field, (currentValue: unknown) => ({
+        ...getCustomerInfoChangeValueFrom(currentValue),
         [section]: uploads,
-      });
+      }));
     } catch (error) {
       setErrors(prev => ({
         ...prev,
@@ -1094,11 +1101,10 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
         })),
       );
       const uploads = await storage.uploadFiles(payload);
-      const currentValue = getSupplierQuotationInfoValue(field);
-      handleInputChange(field, {
-        ...currentValue,
+      handleInputChange(field, (currentValue: unknown) => ({
+        ...getSupplierQuotationInfoValueFrom(currentValue),
         attachments: uploads,
-      });
+      }));
     } catch (error) {
       setErrors(prev => ({
         ...prev,
@@ -1112,6 +1118,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedModule || !selectedType || !user) return;
+    if (isSubmittingRef.current) return;
 
     const newErrors: Record<string, string> = {};
     selectedType.businessFields.forEach(field => {
@@ -1226,6 +1233,9 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       return;
     }
 
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+
     const payload = {
       moduleName: selectedModule.name,
       approvalTypeName: selectedType.name,
@@ -1236,6 +1246,10 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     handleClose();
 
     storage.addRecord(payload)
+      .finally(() => {
+        isSubmittingRef.current = false;
+        setIsSubmitting(false);
+      })
       .then(() => onSuccess())
       .catch((error) => {
         window.alert(error instanceof Error ? error.message : '申请提交失败，请稍后再试');
@@ -1299,30 +1313,28 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     return selectedModule?.name === '订单' && selectedType?.name === '项目货变更' && field === '变更为';
   };
 
-  const getCustomerInfoChangeValue = (field: string): CustomerInfoChangeValue => {
-    const value = formData[field];
+  const getCustomerInfoChangeValueFrom = (value: unknown): CustomerInfoChangeValue => {
     return isCustomerInfoChangeValue(value) ? value : createEmptyCustomerInfoChange();
   };
 
-  const getSupplierQuotationInfoValue = (field: string): SupplierQuotationInfoValue => {
-    const value = formData[field];
+  const getCustomerInfoChangeValue = (field: string): CustomerInfoChangeValue => {
+    return getCustomerInfoChangeValueFrom(formData[field]);
+  };
+
+  const getSupplierQuotationInfoValueFrom = (value: unknown): SupplierQuotationInfoValue => {
     return isSupplierQuotationInfoValue(value) ? value : createEmptySupplierQuotationInfo();
   };
 
-  const getSupplierInfoChangeValue = (field: string): SupplierInfoChangeValue => {
-    const value = formData[field];
+  const getSupplierQuotationInfoValue = (field: string): SupplierQuotationInfoValue => {
+    return getSupplierQuotationInfoValueFrom(formData[field]);
+  };
+
+  const getSupplierInfoChangeValueFrom = (value: unknown): SupplierInfoChangeValue => {
     return isSupplierInfoChangeValue(value) ? value : createEmptySupplierInfoChange();
   };
 
-  const updateCustomerRows = (
-    field: string,
-    section: 'bankAccounts' | 'invoiceInfos',
-    rows: Array<CustomerBankAccountRow | CustomerInvoiceInfoRow>,
-  ) => {
-    handleInputChange(field, {
-      ...getCustomerInfoChangeValue(field),
-      [section]: rows,
-    });
+  const getSupplierInfoChangeValue = (field: string): SupplierInfoChangeValue => {
+    return getSupplierInfoChangeValueFrom(formData[field]);
   };
 
   const updateCustomerRow = (
@@ -1332,35 +1344,41 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     key: string,
     value: string,
   ) => {
-    const rows = getCustomerInfoChangeValue(field)[section].map((row, index) => (
-      index === rowIndex ? { ...row, [key]: value } : row
-    ));
-    updateCustomerRows(field, section, rows);
+    handleInputChange(field, (currentValue: unknown) => {
+      const currentFieldValue = getCustomerInfoChangeValueFrom(currentValue);
+      return {
+        ...currentFieldValue,
+        [section]: currentFieldValue[section].map((row, index) => (
+          index === rowIndex ? { ...row, [key]: value } : row
+        )),
+      };
+    });
   };
 
   const addCustomerRow = (field: string, section: 'bankAccounts' | 'invoiceInfos') => {
     const nextRow = section === 'bankAccounts'
       ? createEmptyCustomerBankAccount()
       : createEmptyCustomerInvoiceInfo();
-    updateCustomerRows(field, section, [...getCustomerInfoChangeValue(field)[section], nextRow]);
+    handleInputChange(field, (currentValue: unknown) => {
+      const currentFieldValue = getCustomerInfoChangeValueFrom(currentValue);
+      return {
+        ...currentFieldValue,
+        [section]: [...currentFieldValue[section], nextRow],
+      };
+    });
   };
 
   const removeCustomerRow = (field: string, section: 'bankAccounts' | 'invoiceInfos', rowIndex: number) => {
-    const rows = getCustomerInfoChangeValue(field)[section].filter((_, index) => index !== rowIndex);
     const fallbackRow = section === 'bankAccounts'
       ? createEmptyCustomerBankAccount()
       : createEmptyCustomerInvoiceInfo();
-    updateCustomerRows(field, section, rows.length > 0 ? rows : [fallbackRow]);
-  };
-
-  const updateSupplierRows = (
-    field: string,
-    section: 'roleServices' | 'bankAccounts' | 'invoiceInfos',
-    rows: Array<SupplierRoleServiceRow | CustomerBankAccountRow | CustomerInvoiceInfoRow>,
-  ) => {
-    handleInputChange(field, {
-      ...getSupplierInfoChangeValue(field),
-      [section]: rows,
+    handleInputChange(field, (currentValue: unknown) => {
+      const currentFieldValue = getCustomerInfoChangeValueFrom(currentValue);
+      const rows = currentFieldValue[section].filter((_, index) => index !== rowIndex);
+      return {
+        ...currentFieldValue,
+        [section]: rows.length > 0 ? rows : [fallbackRow],
+      };
     });
   };
 
@@ -1371,10 +1389,15 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     key: string,
     value: string,
   ) => {
-    const rows = getSupplierInfoChangeValue(field)[section].map((row, index) => (
-      index === rowIndex ? { ...row, [key]: value } : row
-    ));
-    updateSupplierRows(field, section, rows);
+    handleInputChange(field, (currentValue: unknown) => {
+      const currentFieldValue = getSupplierInfoChangeValueFrom(currentValue);
+      return {
+        ...currentFieldValue,
+        [section]: currentFieldValue[section].map((row, index) => (
+          index === rowIndex ? { ...row, [key]: value } : row
+        )),
+      };
+    });
   };
 
   const createEmptySupplierSectionRow = (section: 'roleServices' | 'bankAccounts' | 'invoiceInfos') => {
@@ -1384,15 +1407,27 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   };
 
   const addSupplierRow = (field: string, section: 'roleServices' | 'bankAccounts' | 'invoiceInfos') => {
-    updateSupplierRows(field, section, [
-      ...getSupplierInfoChangeValue(field)[section],
-      createEmptySupplierSectionRow(section),
-    ]);
+    handleInputChange(field, (currentValue: unknown) => {
+      const currentFieldValue = getSupplierInfoChangeValueFrom(currentValue);
+      return {
+        ...currentFieldValue,
+        [section]: [
+          ...currentFieldValue[section],
+          createEmptySupplierSectionRow(section),
+        ],
+      };
+    });
   };
 
   const removeSupplierRow = (field: string, section: 'roleServices' | 'bankAccounts' | 'invoiceInfos', rowIndex: number) => {
-    const rows = getSupplierInfoChangeValue(field)[section].filter((_, index) => index !== rowIndex);
-    updateSupplierRows(field, section, rows.length > 0 ? rows : [createEmptySupplierSectionRow(section)]);
+    handleInputChange(field, (currentValue: unknown) => {
+      const currentFieldValue = getSupplierInfoChangeValueFrom(currentValue);
+      const rows = currentFieldValue[section].filter((_, index) => index !== rowIndex);
+      return {
+        ...currentFieldValue,
+        [section]: rows.length > 0 ? rows : [createEmptySupplierSectionRow(section)],
+      };
+    });
   };
 
   const renderCustomerAttachmentInput = (
@@ -1595,35 +1630,45 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     );
   };
 
-  const updateSupplierQuotationRows = (field: string, rows: SupplierQuotationRow[]) => {
-    handleInputChange(field, {
-      ...getSupplierQuotationInfoValue(field),
-      quotationRows: rows,
-    });
-  };
-
   const updateSupplierQuotationRow = (
     field: string,
     rowIndex: number,
     key: string,
     value: string,
   ) => {
-    const rows = getSupplierQuotationInfoValue(field).quotationRows.map((row, index) => (
-      index === rowIndex ? { ...row, [key]: value } : row
-    ));
-    updateSupplierQuotationRows(field, rows);
+    handleInputChange(field, (currentValue: unknown) => {
+      const currentFieldValue = getSupplierQuotationInfoValueFrom(currentValue);
+      return {
+        ...currentFieldValue,
+        quotationRows: currentFieldValue.quotationRows.map((row, index) => (
+          index === rowIndex ? { ...row, [key]: value } : row
+        )),
+      };
+    });
   };
 
   const addSupplierQuotationRow = (field: string) => {
-    updateSupplierQuotationRows(field, [
-      ...getSupplierQuotationInfoValue(field).quotationRows,
-      createEmptySupplierQuotationRow(),
-    ]);
+    handleInputChange(field, (currentValue: unknown) => {
+      const currentFieldValue = getSupplierQuotationInfoValueFrom(currentValue);
+      return {
+        ...currentFieldValue,
+        quotationRows: [
+          ...currentFieldValue.quotationRows,
+          createEmptySupplierQuotationRow(),
+        ],
+      };
+    });
   };
 
   const removeSupplierQuotationRow = (field: string, rowIndex: number) => {
-    const rows = getSupplierQuotationInfoValue(field).quotationRows.filter((_, index) => index !== rowIndex);
-    updateSupplierQuotationRows(field, rows.length > 0 ? rows : [createEmptySupplierQuotationRow()]);
+    handleInputChange(field, (currentValue: unknown) => {
+      const currentFieldValue = getSupplierQuotationInfoValueFrom(currentValue);
+      const rows = currentFieldValue.quotationRows.filter((_, index) => index !== rowIndex);
+      return {
+        ...currentFieldValue,
+        quotationRows: rows.length > 0 ? rows : [createEmptySupplierQuotationRow()],
+      };
+    });
   };
 
   const renderSupplierQuotationInfoInput = (field: string) => {
@@ -1769,9 +1814,15 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     return getStructuredDetailColumns(field).length > 0;
   };
 
-  const getStructuredDetails = (field: string): Array<Record<string, string>> => {
-    const value = formData[field];
+  const getStructuredDetailsFromValue = (
+    field: string,
+    value: unknown,
+  ): Array<Record<string, string>> => {
     return Array.isArray(value) && value.length > 0 ? value : [createEmptyStructuredDetail(field)];
+  };
+
+  const getStructuredDetails = (field: string): Array<Record<string, string>> => {
+    return getStructuredDetailsFromValue(field, formData[field]);
   };
 
   const updateStructuredDetail = (
@@ -1781,19 +1832,25 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     value: string,
   ) => {
     const columns = getStructuredDetailColumns(field);
-    const rows = getStructuredDetails(field).map((row, index) => (
-      index === rowIndex ? fillStructuredDetailDuration({ ...row, [key]: value }, columns) : row
+    handleInputChange(field, (currentValue: unknown) => (
+      getStructuredDetailsFromValue(field, currentValue).map((row, index) => (
+        index === rowIndex ? fillStructuredDetailDuration({ ...row, [key]: value }, columns) : row
+      ))
     ));
-    handleInputChange(field, rows);
   };
 
   const addStructuredDetail = (field: string) => {
-    handleInputChange(field, [...getStructuredDetails(field), createEmptyStructuredDetail(field)]);
+    handleInputChange(field, (currentValue: unknown) => [
+      ...getStructuredDetailsFromValue(field, currentValue),
+      createEmptyStructuredDetail(field),
+    ]);
   };
 
   const removeStructuredDetail = (field: string, rowIndex: number) => {
-    const rows = getStructuredDetails(field).filter((_, index) => index !== rowIndex);
-    handleInputChange(field, rows.length > 0 ? rows : [createEmptyStructuredDetail(field)]);
+    handleInputChange(field, (currentValue: unknown) => {
+      const rows = getStructuredDetailsFromValue(field, currentValue).filter((_, index) => index !== rowIndex);
+      return rows.length > 0 ? rows : [createEmptyStructuredDetail(field)];
+    });
   };
 
   const fillStructuredDetailDuration = (
@@ -2680,7 +2737,12 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
                   </div>
 
                   <div className="pt-10 flex flex-col gap-4">
-                    <button type="submit" className="btn-primary w-full h-[52px] text-[17px] font-bold">
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="btn-primary w-full h-[52px] text-[17px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isSubmitting && <Loader2 size={18} className="animate-spin" />}
                       确认初始化流程
                     </button>
                     <button type="button" onClick={() => setStep(2)} className="h-[52px] w-full text-[15px] font-semibold text-medium-gray hover:text-midnight-graphite">
