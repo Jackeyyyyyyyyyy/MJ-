@@ -271,6 +271,7 @@ function toPublicUser(user) {
     username: user.username,
     role,
     name: user.name,
+    ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
   };
 }
 
@@ -288,6 +289,25 @@ function verifyPassword(password, passwordHash) {
   const expectedBuffer = Buffer.from(expected);
 
   return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function normalizeAvatarUrl(value) {
+  const avatarUrl = String(value || '').trim();
+  if (!avatarUrl) return '';
+
+  if (avatarUrl.length > 300 * 1024) {
+    throw createHttpError('avatar image is too large', 413);
+  }
+
+  if (/^https:\/\/[^\s]+$/i.test(avatarUrl) && avatarUrl.length <= 2048) {
+    return avatarUrl;
+  }
+
+  if (/^data:image\/(?:png|jpe?g|webp|gif);base64,[a-z0-9+/=\s]+$/i.test(avatarUrl)) {
+    return avatarUrl.replace(/\s/g, '');
+  }
+
+  throw createHttpError('avatar must be a png, jpeg, webp, or gif image', 400);
 }
 
 function getLinkedAccountMember(directory, username) {
@@ -332,6 +352,7 @@ function toPublicAccount(account, directory = { departments: [], members: [] }) 
     canSwitchPerspective: role === 'developer',
     isSuperAdmin: role === 'developer',
     enabled: normalizedAccount.enabled !== false,
+    ...(normalizedAccount.avatarUrl ? { avatarUrl: normalizedAccount.avatarUrl } : {}),
     createdAt: normalizedAccount.createdAt,
     updatedAt: normalizedAccount.updatedAt,
   };
@@ -6491,6 +6512,68 @@ app.get('/api/ai-branch-logs', authenticate, requireRoles('developer'), async (_
   }
 });
 
+app.get('/api/account/profile', authenticate, async (req, res) => {
+  res.json(req.user);
+});
+
+app.patch('/api/account/profile', authenticate, async (req, res, next) => {
+  try {
+    const targetUsername = normalizeWorkflowText(req.user?.username);
+    const hasPassword = Object.prototype.hasOwnProperty.call(req.body || {}, 'password');
+    const hasAvatar = Object.prototype.hasOwnProperty.call(req.body || {}, 'avatarUrl');
+
+    if (!hasPassword && !hasAvatar) {
+      return res.json(req.user);
+    }
+
+    if (targetUsername === superAdmin.username) {
+      throw createHttpError('super admin profile is managed by environment variables', 400);
+    }
+
+    const nextPassword = hasPassword ? String(req.body?.password || '') : '';
+    const currentPassword = String(req.body?.currentPassword || '');
+    const nextAvatarUrl = hasAvatar ? normalizeAvatarUrl(req.body?.avatarUrl) : undefined;
+    const isDeveloperOverride =
+      normalizeRole(req.sessionUser?.role) === 'developer' &&
+      normalizeWorkflowText(req.sessionUser?.username) !== targetUsername;
+    const directory = await readOrganizationDirectory();
+
+    const updatedAccount = await updateAccounts((accounts) => {
+      const account = accounts.find((item) => normalizeWorkflowText(item.username) === targetUsername);
+      if (!account) {
+        throw createHttpError('account not found', 404);
+      }
+
+      if (hasPassword) {
+        if (nextPassword.length < 6) {
+          throw createHttpError('password must be at least 6 characters', 400);
+        }
+
+        if (!isDeveloperOverride && !verifyPassword(currentPassword, account.passwordHash)) {
+          throw createHttpError('current password is incorrect', 401);
+        }
+
+        account.passwordHash = hashPassword(nextPassword);
+      }
+
+      if (hasAvatar) {
+        if (nextAvatarUrl) {
+          account.avatarUrl = nextAvatarUrl;
+        } else {
+          delete account.avatarUrl;
+        }
+      }
+
+      account.updatedAt = new Date().toISOString();
+      return account;
+    });
+
+    res.json(toPublicUser(applyDirectoryAccountName(updatedAccount, directory)));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/accounts', authenticate, requireRoles('developer'), async (_req, res, next) => {
   try {
     const accounts = await readAccounts();
@@ -6510,6 +6593,7 @@ app.post('/api/accounts', authenticate, requireRoles('developer'), async (req, r
     const name = String(req.body?.name || username).trim();
     const role = normalizeRole(req.body?.role);
     const password = String(req.body?.password || '123456');
+    const avatarUrl = req.body?.avatarUrl === undefined ? '' : normalizeAvatarUrl(req.body.avatarUrl);
 
     if (!username || !isManagedRole(role)) {
       return res.status(400).json({ error: 'missing or invalid account fields' });
@@ -6534,6 +6618,7 @@ app.post('/api/accounts', authenticate, requireRoles('developer'), async (req, r
         role,
         passwordHash: hashPassword(password || '123456'),
         enabled: true,
+        ...(avatarUrl ? { avatarUrl } : {}),
         createdAt: now,
         updatedAt: now,
       };
@@ -6569,6 +6654,7 @@ app.patch('/api/accounts/:id', authenticate, requireRoles('developer'), async (r
       const nextUsername = req.body?.username === undefined ? account.username : String(req.body.username || '').trim();
       const nextName = req.body?.name === undefined ? account.name : String(req.body.name || nextUsername).trim();
       const nextRole = normalizeRole(req.body?.role === undefined ? account.role : req.body.role);
+      const nextAvatarUrl = req.body?.avatarUrl === undefined ? undefined : normalizeAvatarUrl(req.body.avatarUrl);
 
       if (!nextUsername || !isManagedRole(nextRole)) {
         const error = new Error('missing or invalid account fields');
@@ -6603,6 +6689,14 @@ app.patch('/api/accounts/:id', authenticate, requireRoles('developer'), async (r
           throw error;
         }
         account.passwordHash = hashPassword(password);
+      }
+
+      if (nextAvatarUrl !== undefined) {
+        if (nextAvatarUrl) {
+          account.avatarUrl = nextAvatarUrl;
+        } else {
+          delete account.avatarUrl;
+        }
       }
 
       account.updatedAt = new Date().toISOString();

@@ -1,4 +1,5 @@
 import React from 'react';
+import AccountProfileSettingsCard from './AccountProfileSettingsCard';
 import NotificationSettingsCard from './NotificationSettingsCard';
 import PasskeySettingsCard from './PasskeySettingsCard';
 
@@ -15,6 +16,7 @@ export default function SettingsPage({ activeUsername }: SettingsPageProps) {
       </div>
 
       <div className="grid gap-4">
+        <AccountProfileSettingsCard activeUsername={activeUsername} />
         <NotificationSettingsCard activeUsername={activeUsername} />
         <PasskeySettingsCard activeUsername={activeUsername} />
       </div>

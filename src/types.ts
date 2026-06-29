@@ -340,6 +340,7 @@ export interface User {
   username: string;
   role: Role;
   name: string;
+  avatarUrl?: string;
 }
 
 export interface AccountPermission {
@@ -370,6 +371,7 @@ export interface AccountInput {
   name?: string;
   role: Exclude<Role, 'developer'>;
   password?: string;
+  avatarUrl?: string;
   enabled?: boolean;
 }
 

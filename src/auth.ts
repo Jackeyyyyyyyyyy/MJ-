@@ -31,6 +31,7 @@ function normalizeUser(user?: Partial<User> | null): User | null {
     username: user.username,
     name: user.name,
     role: normalizeRole(user.role),
+    ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
   };
 }
 
@@ -201,8 +202,27 @@ export const auth = {
       username: account.username,
       role,
       name: account.name,
+      ...(account.avatarUrl ? { avatarUrl: account.avatarUrl } : {}),
     }));
     storedSession.storage.setItem(PERSPECTIVE_KEY, role);
+  },
+
+  updateStoredUser(user: User) {
+    const normalizedUser = normalizeUser(user);
+    const storedSession = readStoredSession();
+    if (!normalizedUser || !storedSession) return;
+
+    if (storedSession.session.user.username === normalizedUser.username) {
+      storedSession.storage.setItem(AUTH_KEY, JSON.stringify({
+        ...storedSession.session,
+        user: normalizedUser,
+      }));
+    }
+
+    const activeAccount = readActiveAccount();
+    if (activeAccount?.username === normalizedUser.username) {
+      storedSession.storage.setItem(ACTIVE_ACCOUNT_KEY, JSON.stringify(normalizedUser));
+    }
   },
 
   getImpersonatedUsername(): string | null {

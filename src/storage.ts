@@ -17,6 +17,7 @@ import {
   OrganizationSelectOptions,
   PasskeyCredentialSummary,
   SystemAccount,
+  User,
   WorkflowTemplate,
   WorkflowEfficiencySummary,
   WorkflowEfficiencyRange,
@@ -61,6 +62,12 @@ type BusinessFormVisibilityInput = {
   moduleName: string;
   approvalTypeName: string;
   visibleToUsers: boolean;
+};
+
+type AccountProfileInput = {
+  avatarUrl?: string;
+  password?: string;
+  currentPassword?: string;
 };
 
 interface RequestOptions {
@@ -260,6 +267,17 @@ export const storage = {
 
   getAccounts(): Promise<SystemAccount[]> {
     return request<SystemAccount[]>('/accounts', undefined, { skipImpersonation: true });
+  },
+
+  getAccountProfile(): Promise<User> {
+    return request<User>('/account/profile');
+  },
+
+  updateAccountProfile(profile: AccountProfileInput): Promise<User> {
+    return request<User>('/account/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(profile),
+    });
   },
 
   createAccount(account: AccountInput): Promise<SystemAccount> {

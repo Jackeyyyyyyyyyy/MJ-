@@ -41,6 +41,9 @@ interface AccountSwitcherProps {
   accounts: SystemAccount[];
   isLoading: boolean;
   onChange: (account: SystemAccount) => void;
+  className?: string;
+  buttonClassName?: string;
+  menuClassName?: string;
 }
 
 function getAccountPrimaryLabel(account: SystemAccount) {
@@ -64,10 +67,55 @@ function getMobileAccountLabel(account: SystemAccount) {
   return `${account.name}（${account.username} · ${account.roleLabel}）`;
 }
 
-function AccountSwitcher({ activeAccount, accounts, isLoading, onChange }: AccountSwitcherProps) {
+function getAccountAvatarUrl(account?: Pick<SystemAccount, 'avatarUrl'> | null) {
+  return account?.avatarUrl || '';
+}
+
+function AccountAvatar({
+  account,
+  label,
+  sizeClassName = 'w-8 h-8',
+  iconSize = 16,
+  selected = false,
+}: {
+  account?: Pick<SystemAccount, 'avatarUrl' | 'isSuperAdmin'> | null;
+  label: string;
+  sizeClassName?: string;
+  iconSize?: number;
+  selected?: boolean;
+}) {
+  const avatarUrl = getAccountAvatarUrl(account);
+
+  return (
+    <span className={cn(
+      "rounded-full flex items-center justify-center shrink-0 overflow-hidden",
+      avatarUrl ? "bg-white" : selected ? "bg-white/20" : "bg-lightest-gray-background",
+      sizeClassName,
+    )}>
+      {avatarUrl ? (
+        <img src={avatarUrl} alt={label} className="h-full w-full object-cover" />
+      ) : account?.isSuperAdmin ? (
+        <ShieldCheck size={iconSize} strokeWidth={2.4} />
+      ) : (
+        <UserRound size={iconSize} strokeWidth={2.4} />
+      )}
+    </span>
+  );
+}
+
+function AccountSwitcher({
+  activeAccount,
+  accounts,
+  isLoading,
+  onChange,
+  className,
+  buttonClassName,
+  menuClassName,
+}: AccountSwitcherProps) {
   const [isOpen, setIsOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
   const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const searchInputRef = React.useRef<HTMLInputElement | null>(null);
   const enabledAccounts = React.useMemo(
     () => accounts.filter((account) => account.enabled || account.isSuperAdmin),
     [accounts],
@@ -100,23 +148,28 @@ function AccountSwitcher({ activeAccount, accounts, isLoading, onChange }: Accou
     return () => document.removeEventListener('mousedown', handleClick);
   }, [isOpen]);
 
+  React.useEffect(() => {
+    if (isOpen) window.setTimeout(() => searchInputRef.current?.focus(), 0);
+  }, [isOpen]);
+
   const selectedAccount = activeAccount || enabledAccounts.find((account) => account.isSuperAdmin) || null;
   const selectedLabel = selectedAccount ? getAccountPrimaryLabel(selectedAccount) : '选择账号';
   const selectedRole = selectedAccount ? getAccountSecondaryLabel(selectedAccount) : '账号视角';
 
   return (
-    <div ref={rootRef} className="relative w-[260px] max-w-full">
+    <div ref={rootRef} className={cn("relative w-[260px] max-w-full", className)}>
       <button
         type="button"
         onClick={() => setIsOpen((current) => !current)}
-        className="w-full h-11 px-3 rounded-apple-btn bg-lightest-gray-background hover:bg-white border border-transparent hover:border-border-silver transition-all flex items-center justify-between gap-3 text-left"
+        className={cn(
+          "w-full h-11 px-3 rounded-apple-btn bg-lightest-gray-background hover:bg-white border border-transparent hover:border-border-silver transition-all flex items-center justify-between gap-3 text-left",
+          buttonClassName,
+        )}
         aria-expanded={isOpen}
         aria-label="切换账号"
       >
         <span className="flex items-center gap-3 min-w-0">
-          <span className="w-7 h-7 rounded-full bg-white text-midnight-graphite flex items-center justify-center shrink-0 shadow-sm">
-            {selectedAccount?.isSuperAdmin ? <ShieldCheck size={15} strokeWidth={2.4} /> : <UserRound size={15} strokeWidth={2.4} />}
-          </span>
+          <AccountAvatar account={selectedAccount} label={selectedLabel} sizeClassName="w-7 h-7 shadow-sm" iconSize={15} />
           <span className="min-w-0">
             <span className="block text-[13px] font-bold text-midnight-graphite truncate">{selectedLabel}</span>
             <span className="block text-[11px] font-semibold text-medium-gray truncate">{selectedRole}</span>
@@ -132,12 +185,16 @@ function AccountSwitcher({ activeAccount, accounts, isLoading, onChange }: Accou
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={{ duration: 0.18 }}
-            className="absolute left-0 top-[calc(100%+8px)] z-50 w-[320px] max-w-[calc(100vw-40px)] rounded-2xl border border-border-silver bg-white shadow-apple-xl overflow-hidden"
+            className={cn(
+              "absolute left-0 top-[calc(100%+8px)] z-50 w-[320px] max-w-[calc(100vw-40px)] rounded-2xl border border-border-silver bg-white shadow-apple-xl overflow-hidden",
+              menuClassName,
+            )}
           >
             <div className="p-3 border-b border-border-silver">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-light-silver w-3.5 h-3.5" />
                 <input
+                  ref={searchInputRef}
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="搜索姓名、账号或角色"
@@ -171,12 +228,11 @@ function AccountSwitcher({ activeAccount, accounts, isLoading, onChange }: Accou
                       : "text-midnight-graphite hover:bg-lightest-gray-background"
                   )}
                 >
-                  <span className={cn(
-                    "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
-                    selectedAccount?.username === account.username ? "bg-white/20" : "bg-lightest-gray-background"
-                    )}>
-                      {account.isSuperAdmin ? <ShieldCheck size={16} strokeWidth={2.4} /> : <UserRound size={16} strokeWidth={2.4} />}
-                  </span>
+                  <AccountAvatar
+                    account={account}
+                    label={getAccountPrimaryLabel(account)}
+                    selected={selectedAccount?.username === account.username}
+                  />
                   <span className="min-w-0">
                     <span className="block text-[13px] font-black truncate">
                       {getAccountPrimaryLabel(account)}
@@ -199,25 +255,16 @@ function AccountSwitcher({ activeAccount, accounts, isLoading, onChange }: Accou
 }
 
 function MobileAccountSwitcher({ activeAccount, accounts, isLoading, onChange }: AccountSwitcherProps) {
-  const enabledAccounts = accounts.filter((account) => account.enabled || account.isSuperAdmin);
-
   return (
-    <select
-      value={activeAccount?.username || ''}
-      onChange={(event) => {
-        const account = enabledAccounts.find((item) => item.username === event.target.value);
-        if (account) onChange(account);
-      }}
-      className="w-full h-10 px-3 rounded-2xl bg-white/80 text-[12px] font-bold text-midnight-graphite outline-none border border-black/[0.06] shadow-sm"
-      aria-label="切换账号"
-      disabled={isLoading}
-    >
-      {enabledAccounts.map((account) => (
-        <option key={account.id} value={account.username}>
-          {getMobileAccountLabel(account)}
-        </option>
-      ))}
-    </select>
+    <AccountSwitcher
+      activeAccount={activeAccount}
+      accounts={accounts}
+      isLoading={isLoading}
+      onChange={onChange}
+      className="w-full"
+      buttonClassName="h-10 rounded-2xl bg-white/80 text-[12px] border-black/[0.06] shadow-sm hover:bg-white"
+      menuClassName="w-full max-w-full"
+    />
   );
 }
 
@@ -248,6 +295,16 @@ export default function AppLayout({
   const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = React.useState(false);
   const [accounts, setAccounts] = React.useState<SystemAccount[]>([]);
   const [isLoadingAccounts, setIsLoadingAccounts] = React.useState(false);
+  const [accountRefreshTick, setAccountRefreshTick] = React.useState(0);
+
+  React.useEffect(() => {
+    const handleAccountProfileUpdated = () => {
+      setAccountRefreshTick((current) => current + 1);
+    };
+
+    window.addEventListener('mj-account-profile-updated', handleAccountProfileUpdated);
+    return () => window.removeEventListener('mj-account-profile-updated', handleAccountProfileUpdated);
+  }, []);
 
   React.useEffect(() => {
     if (sessionUser?.role !== 'developer') return;
@@ -268,7 +325,7 @@ export default function AppLayout({
     return () => {
       isMounted = false;
     };
-  }, [sessionUser?.role]);
+  }, [sessionUser?.role, accountRefreshTick]);
 
   const handleAccountChange = (account: SystemAccount) => {
     auth.setActiveAccount(account);
@@ -282,6 +339,7 @@ export default function AppLayout({
   const displayRole = getPerspectiveLabel(perspective || user?.role || 'employee');
   const displayName = activeAccount ? getAccountPrimaryLabel(activeAccount) : user?.name || currentUsername || displayRole;
   const displayInitial = displayName.trim().charAt(0) || displayRole.charAt(0);
+  const displayAvatarUrl = activeAccount?.avatarUrl || user?.avatarUrl || '';
 
   return (
     <div className="flex h-screen bg-canvas-white overflow-hidden relative">
@@ -391,8 +449,12 @@ export default function AppLayout({
                   <p className="text-[14px] font-semibold text-midnight-graphite tracking-tight leading-none">{displayName}</p>
                 </div>
 
-                <div className="w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-lightest-gray-background text-midnight-graphite flex items-center justify-center font-semibold text-[14px] transition-transform group-hover:scale-95 duration-500">
-                  {displayInitial}
+                <div className="w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-lightest-gray-background text-midnight-graphite flex items-center justify-center font-semibold text-[14px] overflow-hidden transition-transform group-hover:scale-95 duration-500">
+                  {displayAvatarUrl ? (
+                    <img src={displayAvatarUrl} alt={displayName} className="h-full w-full object-cover" />
+                  ) : (
+                    displayInitial
+                  )}
                 </div>
               </div>
 
