@@ -200,12 +200,18 @@ export const storage = {
   markNotificationRead(id: string): Promise<ApprovalNotification> {
     return request<ApprovalNotification>(`/notifications/${encodeURIComponent(id)}/read`, {
       method: 'PATCH',
+    }).then((notification) => {
+      emitNotificationsUpdated();
+      return notification;
     });
   },
 
   markAllNotificationsRead(): Promise<{ updated: number }> {
     return request<{ updated: number }>('/notifications/read-all', {
       method: 'PATCH',
+    }).then((result) => {
+      emitNotificationsUpdated();
+      return result;
     });
   },
 

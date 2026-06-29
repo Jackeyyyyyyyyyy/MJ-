@@ -528,12 +528,12 @@ function MainApp() {
 
     switch (perspective) {
       case 'employee':
-        return <WorkHome activeTab={activeWorkTab} onTabChange={handleWorkTabChange} />;
+        return <WorkHome activeUsername={activeUsername} activeTab={activeWorkTab} onTabChange={handleWorkTabChange} />;
       case 'boss':
       case 'developer':
-        return <WorkHome showGlobal activeTab={activeWorkTab} onTabChange={handleWorkTabChange} />;
+        return <WorkHome showGlobal activeUsername={activeUsername} activeTab={activeWorkTab} onTabChange={handleWorkTabChange} />;
       default:
-        return <WorkHome activeTab={activeWorkTab} onTabChange={handleWorkTabChange} />;
+        return <WorkHome activeUsername={activeUsername} activeTab={activeWorkTab} onTabChange={handleWorkTabChange} />;
     }
   };
 
