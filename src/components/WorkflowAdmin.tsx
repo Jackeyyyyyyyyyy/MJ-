@@ -860,8 +860,8 @@ function flowNodesFromDraft(draft: WorkflowVersion): WorkflowNode[] {
 
   const branches = draft.branches || [];
   const defaultBranch = branches.find((branch) => branch.isDefault) || branches[branches.length - 1];
-  const conditionalBranches = branches.filter((branch) => !branch.isDefault);
-  if (conditionalBranches.length === 0) {
+  const hasConditionalBranches = branches.some((branch) => !branch.isDefault);
+  if (!hasConditionalBranches) {
     const linearNodes = (defaultBranch?.approvalSteps || []).map(stepToFlowNode);
     return isProcessorTaskEnabled(draft.processorRule)
       ? [...linearNodes, createProcessorFlowNode(draft.processorRule)]
@@ -873,26 +873,27 @@ function flowNodesFromDraft(draft: WorkflowVersion): WorkflowNode[] {
     type: 'condition',
     title: '条件分化',
     subtitle: '按条件进入不同分支',
-    conditions: [
-      ...conditionalBranches.map((branch, index) => ({
-        id: branch.id,
-        title: branch.name || `条件 ${index + 1}`,
-        expression: branch.conditions.map((condition) => formatCondition(condition)).join(' 且 '),
-        priority: index + 1,
-        isDefault: false,
-        workflowConditions: branch.conditions,
-        nodes: branch.approvalSteps.map(stepToFlowNode),
-      })),
-      ...(defaultBranch ? [{
-        id: defaultBranch.id,
-        title: '默认条件',
-        expression: '',
-        priority: 999,
-        isDefault: true,
-        workflowConditions: [],
-        nodes: defaultBranch.approvalSteps.map(stepToFlowNode),
-      }] : []),
-    ],
+    conditions: branches.map((branch, index) => (
+      branch.isDefault
+        ? {
+            id: branch.id,
+            title: branch.name || '其余情况',
+            expression: '',
+            priority: 999,
+            isDefault: true,
+            workflowConditions: [],
+            nodes: branch.approvalSteps.map(stepToFlowNode),
+          }
+        : {
+            id: branch.id,
+            title: branch.name || `条件 ${index + 1}`,
+            expression: branch.conditions.map((condition) => formatCondition(condition)).join(' 且 '),
+            priority: index + 1,
+            isDefault: false,
+            workflowConditions: branch.conditions,
+            nodes: branch.approvalSteps.map(stepToFlowNode),
+          }
+    )),
   };
 
   return isProcessorTaskEnabled(draft.processorRule)
@@ -2451,6 +2452,8 @@ function makeFlowBranchDefault(
   index: number,
   isAiCondition: boolean,
 ): WorkflowConditionBranch {
+  const workflowConditions = isAiCondition ? [] : (branch.workflowConditions || []);
+
   return {
     ...branch,
     title: isAiCondition ? getAiBranchTitle(index) : '其余情况',
@@ -2458,7 +2461,7 @@ function makeFlowBranchDefault(
     aiDescription: isAiCondition ? normalizeAiBranchDescriptionText(branch.aiDescription, index, true) : branch.aiDescription,
     priority: 999,
     isDefault: true,
-    workflowConditions: [],
+    workflowConditions,
   };
 }
 
@@ -2484,23 +2487,17 @@ function reconcileFlowConditionBranches(
     return patchedBranch;
   });
 
-  if (patchChangesDefaultState && !nextBranches.some((branch) => branch.isDefault) && nextBranches.length > 0) {
-    const fallbackIndex = Math.max(
-      0,
-      nextBranches.reduce((matchedIndex, branch, index) => (
-        branch.id === branchId ? matchedIndex : index
-      ), -1),
-    );
-    nextBranches = nextBranches.map((branch, index) => (
-      index === fallbackIndex ? makeFlowBranchDefault(branch, index, isAiCondition) : branch
-    ));
-  }
-
   if (!patchChangesDefaultState) return nextBranches;
 
-  const regularBranches = nextBranches.filter((branch) => !branch.isDefault);
-  const defaultBranches = nextBranches.filter((branch) => branch.isDefault);
-  return [...regularBranches, ...defaultBranches];
+  let hasDefault = false;
+  return nextBranches.map((branch, index) => {
+    if (!branch.isDefault) return branch;
+    if (!hasDefault) {
+      hasDefault = true;
+      return makeFlowBranchDefault(branch, index, isAiCondition);
+    }
+    return makeFlowBranchConfigured(branch, index, field, isAiCondition);
+  });
 }
 
 function enforceFlowConditionFallbackBranches(
@@ -2513,7 +2510,6 @@ function enforceFlowConditionFallbackBranches(
     const isAiCondition = node.conditionMode === 'ai';
     const branches = node.conditions || [];
     const defaultIndex = branches.findIndex((branch) => branch.isDefault);
-    const fallbackIndex = defaultIndex >= 0 ? defaultIndex : Math.max(0, branches.length - 1);
 
     return {
       ...node,
@@ -2523,7 +2519,7 @@ function enforceFlowConditionFallbackBranches(
           nodes: enforceFlowConditionFallbackBranches(branch.nodes || [], field),
         };
 
-        if (index === fallbackIndex) {
+        if (branch.isDefault && index === defaultIndex) {
           return makeFlowBranchDefault(branchWithSyncedNodes, index, isAiCondition);
         }
 
@@ -2544,36 +2540,39 @@ function resizeConditionBranches(
   field: WorkflowConditionField,
 ) {
   const totalCount = clampFlowBranchCount(branchCount);
-  const conditionCount = totalCount - 1;
-  const conditionalBranches = branches.filter((branch) => !branch.isDefault);
-  const defaultBranch = branches.find((branch) => branch.isDefault);
-  const nextConditionalBranches = Array.from({ length: conditionCount }, (_, index) => {
-    const existing = conditionalBranches[index];
-    if (existing) {
-      return {
-        ...existing,
-        title: existing.title || (isAiCondition ? getAiBranchTitle(index) : `条件 ${index + 1}`),
-        expression: existing.expression || (isAiCondition ? getAiBranchSelectionExpression(index) : getFlowBranchExpression(existing.workflowConditions || [])),
-        priority: index + 1,
-        isDefault: false,
-      };
+  const originalDefaultIndex = branches.findIndex((branch) => branch.isDefault);
+  const nextBranches = branches.slice(0, totalCount);
+
+  while (nextBranches.length < totalCount) {
+    nextBranches.push(createConditionBranch(isAiCondition, nextBranches.length, totalCount, field));
+  }
+
+  const defaultIndex = nextBranches.findIndex((branch) => branch.isDefault);
+  const fallbackIndex = defaultIndex >= 0
+    ? defaultIndex
+    : originalDefaultIndex >= 0
+      ? Math.min(originalDefaultIndex, totalCount - 1)
+      : totalCount - 1;
+  let hasDefault = false;
+
+  return nextBranches.map((branch, index) => {
+    if (index === fallbackIndex && !hasDefault) {
+      hasDefault = true;
+      return makeFlowBranchDefault(branch, index, isAiCondition);
     }
-    return createConditionBranch(isAiCondition, index, totalCount, field);
+
+    if (branch.isDefault) {
+      return makeFlowBranchConfigured(branch, index, field, isAiCondition);
+    }
+
+    return {
+      ...branch,
+      title: branch.title || (isAiCondition ? getAiBranchTitle(index) : `条件 ${index + 1}`),
+      expression: branch.expression || (isAiCondition ? getAiBranchSelectionExpression(index) : getFlowBranchExpression(branch.workflowConditions || [])),
+      priority: index + 1,
+      isDefault: false,
+    };
   });
-
-  const fallbackBranch = defaultBranch
-    ? {
-        ...defaultBranch,
-        title: isAiCondition ? getAiBranchTitle(totalCount - 1) : (defaultBranch.title || '其余情况'),
-        expression: isAiCondition ? getAiBranchSelectionExpression(totalCount - 1, true) : (defaultBranch.expression || ''),
-        aiDescription: isAiCondition ? getAiBranchDescription(totalCount - 1, true) : defaultBranch.aiDescription,
-        priority: 999,
-        isDefault: true,
-        workflowConditions: [],
-      }
-    : createConditionBranch(isAiCondition, totalCount - 1, totalCount, field);
-
-  return [...nextConditionalBranches, fallbackBranch];
 }
 
 function FlowGap({
@@ -2846,11 +2845,7 @@ function WorkflowFlowDesigner({
   onUpdateFlowBranchCondition: (nodeId: string, branchId: string, conditionId: string, patch: Partial<WorkflowCondition>) => void;
   onRemoveFlowNode: (nodeId: string) => void;
 }) {
-  const defaultBranch = branches.find((branch) => branch.isDefault) || branches[branches.length - 1];
-  const conditionalBranches = branches.filter((branch) => !branch.isDefault);
-  const flowBranches = conditionalBranches.length > 0
-    ? [...conditionalBranches, ...(defaultBranch ? [defaultBranch] : [])]
-    : defaultBranch ? [defaultBranch] : [];
+  const flowBranches = branches;
   const selectedBranch = selection.type === 'branch' || selection.type === 'step'
     ? branches.find((branch) => branch.id === selection.branchId) || null
     : null;
@@ -3538,21 +3533,22 @@ function FlowConditionBranchEditor({
     approvalSteps: [],
   };
   const fallbackField = fieldOptions[0]?.value || `${SUBMITTER_FIELD_PREFIX}department`;
-  const setBranchConfigEnabled = (enabled: boolean) => {
-    if (enabled && !isAiCondition && !fieldOptions.length) {
+  const setBranchFallback = (isDefault: boolean) => {
+    if (!isDefault && !isAiCondition && !fieldOptions.length) {
       window.alert('当前业务表单没有可用条件字段，不能配置条件。');
       return;
     }
 
-    const workflowConditions = enabled && !isAiCondition
-      ? (conditions.length > 0 ? conditions : [defaultCondition(fallbackField)])
-      : [];
+    const defaultWorkflowCondition = defaultCondition(fallbackField);
 
     onUpdateFlowBranch(nodeId, branch.id, {
-      isDefault: !enabled,
-      workflowConditions,
-      expression: enabled ? getFlowBranchExpression(workflowConditions) : '',
-      title: enabled ? getConfiguredBranchTitle(branch, index, Boolean(isAiCondition)) : '其余情况',
+      isDefault,
+      ...(!isDefault && !isAiCondition && conditions.length === 0
+        ? {
+            workflowConditions: [defaultWorkflowCondition],
+            expression: getFlowBranchExpression([defaultWorkflowCondition]),
+          }
+        : {}),
     });
   };
   const aiDescription = normalizeAiBranchDescriptionText(branch.aiDescription, index, branch.isDefault);
@@ -3584,7 +3580,7 @@ function FlowConditionBranchEditor({
 
       {!isAiCondition && (
         <label className={cn(
-          "flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 text-[13px] font-black transition-colors",
+          "flex h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 text-[12px] font-black transition-colors",
           branch.isDefault
             ? "border-[#b7d9ff] bg-[#f2f8ff] text-interactive-blue"
             : "border-border-silver bg-white text-midnight-graphite hover:border-light-silver",
@@ -3592,24 +3588,22 @@ function FlowConditionBranchEditor({
           <input
             type="checkbox"
             checked={Boolean(branch.isDefault)}
-            onChange={(event) => setBranchConfigEnabled(!event.target.checked)}
-            className="mt-0.5 h-4 w-4 accent-interactive-blue"
+            onChange={(event) => setBranchFallback(event.target.checked)}
+            className="h-4 w-4 accent-interactive-blue"
           />
-          <span className="min-w-0">
-            <span className="block">设为兜底分支（必选一个）</span>
-            <span className={cn(
-              "mt-0.5 block text-[11px] font-bold leading-4",
-              branch.isDefault ? "text-interactive-blue/75" : "text-light-gray",
-            )}>
-              未命中其他条件时进入；取消当前兜底会自动让另一条分支接住。
-            </span>
+          <span>兜底分支</span>
+          <span className={cn(
+            "ml-auto text-[11px] font-bold",
+            branch.isDefault ? "text-interactive-blue/75" : "text-light-gray",
+          )}>
+            {branch.isDefault ? '未命中时进入' : '按条件命中'}
           </span>
         </label>
       )}
 
       {branch.isDefault ? (
-        <div className="rounded-xl bg-lightest-gray-background px-3 py-2 text-[12px] font-bold leading-5 text-medium-gray">
-          {isAiCondition ? 'AI 会按这条分支说明判断是否进入；未命中其他分支或判断失败时，也会进入这里。' : '其他条件都不命中时，自动进入这条分支。'}
+        <div className="rounded-lg bg-lightest-gray-background px-3 py-2 text-[11px] font-bold text-medium-gray">
+          {isAiCondition ? 'AI 未命中时进入。' : '未命中时进入此分支。'}
         </div>
       ) : isAiCondition ? (
         <label className="block space-y-2">
