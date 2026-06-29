@@ -167,6 +167,12 @@ const supplierRoleServiceColumns: Array<{ key: keyof SupplierRoleServiceRow; lab
 const projectCargoOptions = ['项目货', '非项目货'];
 const currencyOptions = ['CNY', 'USD', 'EUR', 'HKD', 'JPY', 'GBP'];
 const emptyOrganizationOptions: OrganizationSelectOptions = { departments: [], members: [] };
+const noCompanionOption: SearchableSingleSelectOption = {
+  key: '__none__',
+  value: '无',
+  label: '无',
+  searchText: '无 none',
+};
 
 const supplierQuotationColumns: Array<{ key: keyof SupplierQuotationRow; label: string; placeholder: string }> = [
   { key: 'truckType', label: '拖车类型', placeholder: '输入拖车类型' },
@@ -438,13 +444,22 @@ function getMemberSearchText(member: OrganizationSelectOptions['members'][number
   return [member.id, member.name, member.departmentName, member.title].filter(Boolean).join(' ');
 }
 
-function getMemberSelectOptions(members: OrganizationSelectOptions['members']) {
-  return members.map((member) => ({
+function isTripCompanionField(moduleName: string | undefined, typeName: string | undefined, field: string) {
+  return moduleName === '出勤休假' && typeName === '出差' && field === '同行人';
+}
+
+function getMemberSelectOptions(
+  members: OrganizationSelectOptions['members'],
+  options: { includeNoCompanionOption?: boolean } = {},
+) {
+  const memberOptions = members.map((member) => ({
     key: member.id,
     value: member.name,
     label: getMemberOptionLabel(member),
     searchText: getMemberSearchText(member),
   }));
+
+  return options.includeNoCompanionOption ? [noCompanionOption, ...memberOptions] : memberOptions;
 }
 
 type SearchableSingleSelectOption = {
@@ -1891,10 +1906,14 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const getAiFieldOptions = (field: string, kind: AiFormFillField['kind']) => {
     if (kind === 'select') return getConfiguredSelectOptions(selectedType, field);
     if (kind === 'member') {
-      return [...new Set(organizationOptions.members.flatMap((member) => [
+      const options = organizationOptions.members.flatMap((member) => [
         member.name,
         getMemberOptionLabel(member),
-      ]).filter(Boolean))];
+      ]).filter(Boolean);
+      if (isTripCompanionField(selectedModule?.name, selectedType?.name, field)) {
+        options.unshift(noCompanionOption.value);
+      }
+      return [...new Set(options)];
     }
     if (kind === 'department') return organizationOptions.departments.map((department) => department.name);
     return [];
@@ -2293,7 +2312,9 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     if (isMemberField) {
-      const memberOptions = getMemberSelectOptions(organizationOptions.members);
+      const memberOptions = getMemberSelectOptions(organizationOptions.members, {
+        includeNoCompanionOption: isTripCompanionField(selectedModule?.name, selectedType?.name, field),
+      });
 
       return (
         <SearchableSingleSelect
@@ -2512,7 +2533,9 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     if (isMemberField) {
-      const memberOptions = getMemberSelectOptions(organizationOptions.members);
+      const memberOptions = getMemberSelectOptions(organizationOptions.members, {
+        includeNoCompanionOption: isTripCompanionField(selectedModule?.name, selectedType?.name, field),
+      });
 
       return (
         <SearchableSingleSelect

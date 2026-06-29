@@ -1127,10 +1127,26 @@ function normalizeDateFields(dateFields, businessFields) {
   return normalizedBusinessFields.filter(isDateBusinessField);
 }
 
+function applyBusinessFormCompatibilityDefaults(schema) {
+  const tripModule = schema.modules.find((module) => module.name === '出勤休假');
+  const tripType = tripModule?.approvalTypes.find((approvalType) => approvalType.name === '出差');
+  if (!tripType) return schema;
+
+  if (!tripType.businessFields.includes('同行人')) {
+    tripType.businessFields.push('同行人');
+  }
+
+  if (!tripType.memberFields.includes('同行人')) {
+    tripType.memberFields.push('同行人');
+  }
+
+  return schema;
+}
+
 function normalizeApprovalSchema(schema) {
   const modules = Array.isArray(schema?.modules) ? schema.modules : [];
 
-  return {
+  return applyBusinessFormCompatibilityDefaults({
     systemName: String(schema?.systemName || 'MJ审批').trim() || 'MJ审批',
     commonFields: normalizeStringList(schema?.commonFields),
     modules: modules
@@ -1163,7 +1179,7 @@ function normalizeApprovalSchema(schema) {
           .filter((approvalType) => approvalType.name && approvalType.businessFields.length > 0),
       }))
       .filter((module) => module.name && module.approvalTypes.length > 0),
-  };
+  });
 }
 
 async function readApprovalSchema() {

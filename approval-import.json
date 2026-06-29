@@ -20,8 +20,9 @@
     {
       "moduleName": "出勤休假",
       "approvalTypeName": "出差",
-      "businessFields": ["出行方式", "出差事由", "行程"],
+      "businessFields": ["出行方式", "出差事由", "行程", "同行人"],
       "multilineFields": ["出差事由"],
+      "memberFields": ["同行人"],
       "selectFields": [
         { "field": "出行方式", "options": ["私车公用", "开公司车", "其他"] }
       ],
