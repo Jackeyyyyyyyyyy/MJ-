@@ -21,7 +21,7 @@ export default function StatsOverview({ title, subtitle, items, action }: StatsO
   return (
     <section className="overflow-hidden rounded-[16px] border border-black/[0.05] bg-white lg:bg-white lg:border-border-silver lg:rounded-lg">
       <div className="flex flex-col lg:flex-row lg:items-stretch">
-        <header className="px-4 pt-3 pb-2 border-b border-black/[0.04] lg:px-5 lg:py-4 lg:w-[240px] lg:border-b-0 lg:border-r lg:border-border-silver flex flex-col justify-center gap-3">
+        <header className="hidden lg:flex lg:px-5 lg:py-4 lg:w-[240px] lg:border-r lg:border-border-silver flex-col justify-center gap-3">
           <div>
             <h1 className="text-[19px] leading-tight font-semibold text-midnight-graphite lg:text-[22px] lg:font-bold">{title}</h1>
             <p className="hidden text-[11px] text-light-gray font-medium mt-0.5 lg:block lg:text-[12px] lg:font-semibold lg:mt-1">{subtitle}</p>
