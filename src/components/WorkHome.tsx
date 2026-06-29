@@ -41,15 +41,15 @@ export default function WorkHome({ showGlobal = false, activeTab: controlledTab,
   ];
 
   return (
-    <div className="space-y-4 lg:space-y-6">
-      <div className="-mx-1 flex gap-1 overflow-x-auto no-scrollbar rounded-[16px] bg-[#ececf0] p-1 lg:mx-0 lg:w-fit lg:gap-0 lg:rounded-xl lg:bg-lightest-gray-background">
+    <div className="space-y-2.5 lg:space-y-6">
+      <div className="-mx-1 flex gap-1 overflow-x-auto no-scrollbar rounded-[15px] bg-[#ececf0] p-1 lg:mx-0 lg:w-fit lg:gap-0 lg:rounded-xl lg:bg-lightest-gray-background">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              "h-8 shrink-0 rounded-[12px] px-3 text-[11px] font-medium transition-all flex items-center justify-center gap-1.5 whitespace-nowrap lg:h-auto lg:flex-1 lg:border-0 lg:rounded-lg lg:px-6 lg:py-2.5 lg:text-[13px] lg:font-bold lg:gap-2",
+              "h-7 shrink-0 rounded-[11px] px-2.5 text-[11px] font-medium transition-all flex items-center justify-center gap-1.5 whitespace-nowrap lg:h-auto lg:flex-1 lg:border-0 lg:rounded-lg lg:px-6 lg:py-2.5 lg:text-[13px] lg:font-bold lg:gap-2",
               activeTab === tab.id
                 ? "bg-white text-midnight-graphite shadow-sm lg:bg-white lg:text-black lg:shadow-sm"
                 : "text-medium-gray hover:text-black lg:bg-transparent lg:text-light-gray"

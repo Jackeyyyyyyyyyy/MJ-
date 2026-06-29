@@ -62,15 +62,15 @@ export default function ApplicantHome() {
   ];
 
   return (
-    <div className="space-y-5 pb-32 animate-in fade-in duration-700 lg:space-y-8 lg:pb-40">
+    <div className="space-y-3 pb-32 animate-in fade-in duration-700 lg:space-y-8 lg:pb-40">
       <StatsOverview
         title="我的申请"
         subtitle="管理与追踪"
         items={summaryItems}
       />
 
-      <div className="space-y-3 lg:space-y-5">
-        <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center lg:gap-4">
+      <div className="space-y-2.5 lg:space-y-5">
+        <div className="flex flex-col justify-between gap-2 lg:flex-row lg:items-center lg:gap-4">
           <div className="flex items-center justify-between gap-3 lg:block">
             <h2 className="text-[17px] font-semibold text-midnight-graphite lg:text-[20px] lg:font-bold lg:tracking-tight">历史记录</h2>
             <button
@@ -81,15 +81,15 @@ export default function ApplicantHome() {
               <span>新建</span>
             </button>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:flex-row lg:items-center">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:flex-row lg:items-center">
             <div className="-mx-1 overflow-x-auto no-scrollbar px-1 sm:mx-0 sm:px-0">
-              <div className="inline-flex min-w-max rounded-[15px] bg-[#ececf0] p-1 lg:flex lg:rounded-xl lg:border-0 lg:bg-lightest-gray-background">
+              <div className="inline-flex min-w-max rounded-[14px] bg-[#ececf0] p-1 lg:flex lg:rounded-xl lg:border-0 lg:bg-lightest-gray-background">
               {(['ALL', ApprovalStatus.PENDING, ApprovalStatus.PROCESSING, ApprovalStatus.APPROVED, ApprovalStatus.COMPLETED, ApprovalStatus.REJECTED] as string[]).map((status) => (
                 <button
                   key={status}
                   onClick={() => setFilterStatus(status === 'ALL' ? ALL_STATUS : status)}
                   className={cn(
-                    "h-7 rounded-[11px] px-2.5 text-[11px] font-medium transition-all lg:h-auto lg:rounded-lg lg:px-4 lg:py-1.5 lg:text-[11px] lg:font-bold",
+                    "h-6 rounded-[10px] px-2.5 text-[11px] font-medium transition-all lg:h-auto lg:rounded-lg lg:px-4 lg:py-1.5 lg:text-[11px] lg:font-bold",
                     (filterStatus === status || (filterStatus === ALL_STATUS && status === 'ALL'))
                       ? "bg-white text-midnight-graphite shadow-sm lg:bg-white lg:text-black"
                       : "text-medium-gray hover:text-black lg:text-light-gray"

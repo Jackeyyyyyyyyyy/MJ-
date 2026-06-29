@@ -194,12 +194,12 @@ export default function ApprovalTable({
 
   if (!records || records.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-[18px] border border-black/[0.05] bg-white px-6 py-14 lg:rounded-none lg:border-0 lg:bg-pure-white lg:px-12 lg:py-40">
-        <div className="w-11 h-11 bg-canvas-white rounded-full flex items-center justify-center mb-4 lg:w-24 lg:h-24 lg:mb-8">
-          <FileText size={20} strokeWidth={1.2} className="text-light-silver lg:w-8 lg:h-8" />
+      <div className="flex flex-col items-center justify-center rounded-[16px] border border-black/[0.05] bg-white px-6 py-9 lg:rounded-none lg:border-0 lg:bg-pure-white lg:px-12 lg:py-40">
+        <div className="w-9 h-9 bg-canvas-white rounded-full flex items-center justify-center mb-3 lg:w-24 lg:h-24 lg:mb-8">
+          <FileText size={17} strokeWidth={1.2} className="text-light-silver lg:w-8 lg:h-8" />
         </div>
-        <p className="text-[15px] font-semibold text-midnight-graphite lg:text-[21px] lg:font-bold lg:tracking-tight">暂无卷宗记录</p>
-        <p className="text-center text-[12px] font-normal text-light-gray mt-1.5 lg:text-[17px] lg:font-medium lg:mt-2">当前条件下未发现任何匹配的审批数据。</p>
+        <p className="text-[14px] font-semibold text-midnight-graphite lg:text-[21px] lg:font-bold lg:tracking-tight">暂无卷宗记录</p>
+        <p className="text-center text-[11px] font-normal text-light-gray mt-1 lg:text-[17px] lg:font-medium lg:mt-2">当前条件下未发现任何匹配的审批数据。</p>
       </div>
     );
   }
