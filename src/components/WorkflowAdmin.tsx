@@ -69,6 +69,12 @@ interface BusinessScopeOption {
 type ConditionFieldKind = 'number' | 'currency' | 'text' | 'member' | 'department';
 type WorkflowConditionBranch = NonNullable<WorkflowNode['conditions']>[number];
 type ConditionDisplayOption = { value: string; label: string };
+type SearchableSelectOption = {
+  value: string;
+  label: string;
+  description?: string;
+  searchText?: string;
+};
 type ConditionDisplayLookup = {
   departments?: ConditionDisplayOption[];
   members?: ConditionDisplayOption[];
@@ -2882,6 +2888,30 @@ function WorkflowFlowDesigner({
     () => getEligibleSubmitterMembers(submitPermission, directory),
     [submitPermission, directory],
   );
+  const previewSubmitterOptions = React.useMemo(
+    () => eligibleSubmitters.map((member) => {
+      const departmentName = directory.departments.find((department) => department.id === member.departmentId)?.name || '';
+      const description = [
+        member.accountUsername ? `账号 ${member.accountUsername}` : '未绑定账号',
+        departmentName,
+        member.title,
+      ].filter(Boolean).join(' · ');
+
+      return {
+        value: member.id,
+        label: member.name,
+        description,
+        searchText: [
+          member.name,
+          member.accountUsername,
+          departmentName,
+          member.title,
+          member.id,
+        ].filter(Boolean).join(' '),
+      };
+    }),
+    [eligibleSubmitters, directory.departments],
+  );
   const [previewSubmitterId, setPreviewSubmitterId] = React.useState('');
   const previewSubmitter = eligibleSubmitters.find((member) => member.id === previewSubmitterId)
     || eligibleSubmitters[0]
@@ -3035,23 +3065,27 @@ function WorkflowFlowDesigner({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="flex h-9 items-center gap-2 rounded-full bg-lightest-gray-background px-3 text-[12px] font-bold text-medium-gray">
+          <div className="flex h-9 items-center gap-2 rounded-full bg-lightest-gray-background px-3 text-[12px] font-bold text-medium-gray">
             <UserRound size={14} strokeWidth={2.4} />
-            <span>申请人预览</span>
+            <span className="shrink-0">申请人预览</span>
             {eligibleSubmitters.length > 0 ? (
-              <select
-                className="bg-transparent text-[12px] font-black text-midnight-graphite outline-none"
-                value={previewSubmitter?.id || ''}
-                onChange={(event) => setPreviewSubmitterId(event.target.value)}
-              >
-                {eligibleSubmitters.map((member) => (
-                  <option key={member.id} value={member.id}>{member.name}</option>
-                ))}
-              </select>
+              <div className="w-[132px] sm:w-[160px]">
+                <SearchableSingleSelect
+                  value={previewSubmitter?.id || ''}
+                  options={previewSubmitterOptions}
+                  onChange={setPreviewSubmitterId}
+                  placeholder="选择申请人"
+                  searchPlaceholder="搜索姓名、账号、部门或职位"
+                  emptyText="暂无成员"
+                  allowClear={false}
+                  buttonClassName="h-7 rounded-full border-0 bg-transparent px-0 text-[12px] font-black ring-0 hover:border-transparent"
+                  panelClassName="left-auto right-0 w-[320px]"
+                />
+              </div>
             ) : (
               <span className="text-[12px] font-black text-light-gray">暂无成员</span>
             )}
-          </label>
+          </div>
         </div>
       </div>
 
@@ -4729,13 +4763,19 @@ function SearchableSingleSelect({
   placeholder,
   searchPlaceholder = '搜索名称或账号',
   emptyText,
+  allowClear = true,
+  buttonClassName,
+  panelClassName,
 }: {
   value: string;
-  options: Array<{ value: string; label: string }>;
+  options: SearchableSelectOption[];
   onChange: (value: string) => void;
   placeholder: string;
   searchPlaceholder?: string;
   emptyText: string;
+  allowClear?: boolean;
+  buttonClassName?: string;
+  panelClassName?: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
@@ -4748,10 +4788,15 @@ function SearchableSingleSelect({
   );
   const filteredOptions = useMemo(() => {
     if (!normalizedKeyword) return options;
-    return options.filter((option) => (
-      option.label.toLowerCase().includes(normalizedKeyword)
-      || option.value.toLowerCase().includes(normalizedKeyword)
-    ));
+    return options.filter((option) => {
+      const searchableText = [
+        option.label,
+        option.value,
+        option.description,
+        option.searchText,
+      ].filter(Boolean).join(' ').toLowerCase();
+      return searchableText.includes(normalizedKeyword);
+    });
   }, [normalizedKeyword, options]);
 
   useEffect(() => {
@@ -4786,6 +4831,7 @@ function SearchableSingleSelect({
           "flex h-10 w-full items-center justify-between gap-3 rounded-md border bg-white px-3 text-left text-[13px] font-medium outline-none transition-all",
           isOpen ? "border-interactive-blue ring-2 ring-sky-blue-highlight" : "border-[#d7d7dc] hover:border-light-silver",
           selectedOption ? "text-midnight-graphite" : "text-light-gray",
+          buttonClassName,
         )}
       >
         <span className="min-w-0 truncate">{selectedOption?.label || placeholder}</span>
@@ -4793,7 +4839,7 @@ function SearchableSingleSelect({
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden rounded-xl border border-border-silver bg-white p-2 shadow-xl shadow-black/10">
+        <div className={cn("absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden rounded-xl border border-border-silver bg-white p-2 shadow-xl shadow-black/10", panelClassName)}>
           <div className="relative rounded-md bg-lightest-gray-background">
             <Search
               aria-hidden="true"
@@ -4829,7 +4875,14 @@ function SearchableSingleSelect({
                       isSelected ? "bg-[#e7f1ff] text-interactive-blue" : "text-midnight-graphite hover:bg-lightest-gray-background",
                     )}
                   >
-                    <span className="min-w-0 truncate">{option.label}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate">{option.label}</span>
+                      {option.description && (
+                        <span className="mt-0.5 block truncate text-[11px] font-semibold text-light-gray">
+                          {option.description}
+                        </span>
+                      )}
+                    </span>
                     {isSelected && <Check size={14} strokeWidth={3} className="shrink-0" />}
                   </button>
                 );
@@ -4839,7 +4892,7 @@ function SearchableSingleSelect({
 
           <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] font-semibold text-light-gray">
             <span>{normalizedKeyword ? `找到 ${filteredOptions.length} 项` : `共 ${options.length} 项`}</span>
-            {value && (
+            {allowClear && value && (
               <button
                 type="button"
                 onClick={() => selectValue('')}
