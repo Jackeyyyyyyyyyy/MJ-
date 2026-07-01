@@ -663,6 +663,20 @@ type SearchableSingleSelectOption = {
   searchText?: string;
 };
 
+function getNearestClippingParent(element: HTMLElement | null) {
+  let parent = element?.parentElement || null;
+
+  while (parent) {
+    const { overflowY } = window.getComputedStyle(parent);
+    if (/(auto|scroll|hidden)/.test(overflowY)) {
+      return parent;
+    }
+    parent = parent.parentElement;
+  }
+
+  return null;
+}
+
 function SearchableSingleSelect({
   value,
   options,
@@ -684,6 +698,7 @@ function SearchableSingleSelect({
 }) {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const [isOpen, setIsOpen] = React.useState(false);
+  const [dropdownDirection, setDropdownDirection] = React.useState<'up' | 'down'>('down');
   const selectedOption = React.useMemo(
     () => options.find((option) => option.value === value) || null,
     [options, value],
@@ -691,13 +706,51 @@ function SearchableSingleSelect({
   const selectedLabel = selectedOption?.label || value;
   const [query, setQuery] = React.useState(selectedOption?.label || '');
 
+  const findExactOption = React.useCallback((nextQuery: string) => {
+    const normalizedValue = nextQuery.trim().toLowerCase();
+    if (!normalizedValue) return null;
+
+    return options.find((option) => (
+      option.value.toLowerCase() === normalizedValue
+      || option.label.toLowerCase() === normalizedValue
+      || option.key.toLowerCase() === normalizedValue
+    )) || null;
+  }, [options]);
+
+  const commitExactQuery = React.useCallback((nextQuery: string) => {
+    const exactOption = findExactOption(nextQuery);
+    if (!exactOption) return false;
+
+    onChange(exactOption.value);
+    setQuery(exactOption.label);
+    return true;
+  }, [findExactOption, onChange]);
+
+  const updateDropdownDirection = React.useCallback(() => {
+    if (typeof window === 'undefined' || !rootRef.current) return;
+
+    const rootRect = rootRef.current.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const clippingParent = getNearestClippingParent(rootRef.current);
+    const clippingRect = clippingParent?.getBoundingClientRect();
+    const bottomLimit = Math.min(viewportHeight, clippingRect?.bottom ?? viewportHeight) - 12;
+    const topLimit = Math.max(0, clippingRect?.top ?? 0) + 12;
+    const spaceBelow = bottomLimit - rootRect.bottom;
+    const spaceAbove = rootRect.top - topLimit;
+
+    setDropdownDirection(spaceBelow < 240 && spaceAbove > spaceBelow ? 'up' : 'down');
+  }, []);
+
   React.useEffect(() => {
     if (!isOpen) return undefined;
 
     const closeOnOutsidePress = (event: MouseEvent | TouchEvent) => {
       if (rootRef.current?.contains(event.target as Node)) return;
+      const committed = commitExactQuery(query);
       setIsOpen(false);
-      setQuery(selectedOption?.label || '');
+      if (!committed) {
+        setQuery(selectedOption?.label || '');
+      }
     };
 
     document.addEventListener('mousedown', closeOnOutsidePress);
@@ -706,7 +759,20 @@ function SearchableSingleSelect({
       document.removeEventListener('mousedown', closeOnOutsidePress);
       document.removeEventListener('touchstart', closeOnOutsidePress);
     };
-  }, [isOpen, selectedOption]);
+  }, [commitExactQuery, isOpen, query, selectedOption]);
+
+  React.useLayoutEffect(() => {
+    if (!isOpen) return undefined;
+
+    updateDropdownDirection();
+    window.addEventListener('resize', updateDropdownDirection);
+    window.addEventListener('scroll', updateDropdownDirection, true);
+
+    return () => {
+      window.removeEventListener('resize', updateDropdownDirection);
+      window.removeEventListener('scroll', updateDropdownDirection, true);
+    };
+  }, [isOpen, updateDropdownDirection]);
 
   React.useEffect(() => {
     if (!isOpen) {
@@ -729,6 +795,12 @@ function SearchableSingleSelect({
 
     if (!nextQuery.trim()) {
       onChange('');
+      return;
+    }
+
+    const exactOption = findExactOption(nextQuery);
+    if (exactOption) {
+      onChange(exactOption.value);
       return;
     }
 
@@ -759,9 +831,20 @@ function SearchableSingleSelect({
         onFocus={(event) => {
           setQuery(selectedOption?.label || '');
           setIsOpen(true);
+          window.requestAnimationFrame(updateDropdownDirection);
           event.currentTarget.select();
         }}
         onChange={(event) => handleInputChange(event.target.value)}
+        onBlur={() => {
+          window.setTimeout(() => {
+            if (!rootRef.current || rootRef.current.contains(document.activeElement)) return;
+            const committed = commitExactQuery(query);
+            setIsOpen(false);
+            if (!committed) {
+              setQuery(selectedOption?.label || '');
+            }
+          }, 0);
+        }}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             setIsOpen(false);
@@ -793,7 +876,12 @@ function SearchableSingleSelect({
         </span>
       )}
       {isOpen && (
-        <div className="absolute left-0 right-0 top-full z-[120] mt-2 max-h-72 overflow-y-auto rounded-[18px] border border-black/[0.06] bg-white py-1.5 shadow-[0_10px_28px_rgba(20,24,34,0.08)]">
+        <div
+          className={cn(
+            "absolute left-0 right-0 z-[120] max-h-72 overflow-y-auto rounded-[18px] border border-black/[0.06] bg-white py-1.5 shadow-[0_10px_28px_rgba(20,24,34,0.08)]",
+            dropdownDirection === 'up' ? "bottom-full mb-2" : "top-full mt-2",
+          )}
+        >
           {visibleOptions.length > 0 ? visibleOptions.map((option) => (
             <button
               key={option.key}
@@ -3099,7 +3187,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess, initia
                     }}
                   />
 
-                  <div className="mj-mobile-card mj-mobile-form-list overflow-hidden px-4 py-0 sm:grid sm:grid-cols-1 sm:gap-10 sm:bg-transparent sm:p-0 sm:shadow-none sm:ring-0">
+                  <div className="mj-mobile-card mj-mobile-form-list overflow-visible px-4 py-0 sm:grid sm:grid-cols-1 sm:gap-10 sm:bg-transparent sm:p-0 sm:shadow-none sm:ring-0">
                     {selectedType.businessFields.map(field => (
                       <div key={field} className="border-b border-black/[0.04] py-3 last:border-b-0 sm:space-y-3 sm:border-b-0 sm:py-0">
                         <label className="text-[14.5px] font-semibold text-midnight-graphite sm:text-[14px]">

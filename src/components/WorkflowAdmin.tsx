@@ -51,6 +51,7 @@ const DEFAULT_ORG_ID = 'default-org';
 const BUSINESS_SCOPE_SEPARATOR = '|||';
 const FORM_FIELD_PREFIX = 'form:';
 const SUBMITTER_FIELD_PREFIX = 'submitter:';
+const PREVIEW_ALL_SUBMITTERS_ID = '__all_submitters__';
 const TRACKPAD_PAN_SENSITIVITY = 1.45;
 const TRACKPAD_ZOOM_SENSITIVITY = 0.00235;
 
@@ -1403,6 +1404,140 @@ function formatStepRule(step: ApprovalStep, directory: OrganizationDirectory) {
     .join('、') || '指定成员';
 }
 
+function findDirectoryMember(directory: OrganizationDirectory, memberId?: string) {
+  if (!memberId) return undefined;
+  return directory.members.find((member) => member.id === memberId);
+}
+
+function formatResolvedMembers(
+  members: Array<OrganizationDirectory['members'][number] | undefined>,
+  emptyText: string,
+) {
+  const uniqueMembers = members.reduce<Array<OrganizationDirectory['members'][number]>>((result, member) => {
+    if (!member || result.some((item) => item.id === member.id)) return result;
+    return [...result, member];
+  }, []);
+
+  if (uniqueMembers.length === 0) return emptyText;
+
+  const names = uniqueMembers.slice(0, 4).map((member) => member.name);
+  return uniqueMembers.length > 4
+    ? `${names.join('、')} 等 ${uniqueMembers.length} 人`
+    : names.join('、');
+}
+
+function formatDepartmentNames(directory: OrganizationDirectory, departmentIds: string[] = []) {
+  return departmentIds
+    .map((departmentId) => directory.departments.find((department) => department.id === departmentId)?.name)
+    .filter(Boolean)
+    .join('、');
+}
+
+function resolveDepartmentManagerMembers(
+  rule: ApproverRule,
+  directory: OrganizationDirectory,
+  previewSubmitter: OrganizationDirectory['members'][number],
+) {
+  const lineage = getDepartmentLineage(directory, previewSubmitter.departmentId);
+  const membersById = new Map(directory.members.map((member) => [member.id, member]));
+  const startIndex = Math.max(0, Math.min(lineage.length - 1, getDepartmentManagerLevel(rule) - 1));
+  const shouldFallbackToParent = rule.departmentManagerFallbackToParent !== false;
+  const shouldIncludeSelf = rule.departmentManagerIncludeSelf === true;
+
+  for (let index = startIndex; index < lineage.length; index += 1) {
+    const managers = (lineage[index]?.managerMemberIds || [])
+      .map((memberId) => membersById.get(memberId))
+      .filter((member): member is OrganizationDirectory['members'][number] => Boolean(member && member.enabled !== false));
+    const approvers = shouldIncludeSelf ? managers : managers.filter((member) => member.id !== previewSubmitter.id);
+
+    if (approvers.length > 0 || !shouldFallbackToParent) return approvers;
+  }
+
+  return [];
+}
+
+function resolveSupervisorMembers(
+  directory: OrganizationDirectory,
+  previewSubmitter: OrganizationDirectory['members'][number],
+  levels: number[],
+) {
+  const membersById = new Map(directory.members.map((member) => [member.id, member]));
+  const requestedLevels = levels.length > 0 ? levels : [1];
+  const maxDepth = Math.max(...requestedLevels);
+  const supervisors: Array<OrganizationDirectory['members'][number] | undefined> = [];
+  let current: OrganizationDirectory['members'][number] | undefined = previewSubmitter;
+
+  for (let index = 0; index < maxDepth; index += 1) {
+    const supervisor = current?.supervisorId ? membersById.get(current.supervisorId) : undefined;
+    const level = index + 1;
+    if (requestedLevels.includes(level)) supervisors.push(supervisor);
+    current = supervisor;
+  }
+
+  return supervisors;
+}
+
+function formatApproverResolution(
+  rule: ApproverRule,
+  directory: OrganizationDirectory,
+  previewSubmitter: OrganizationDirectory['members'][number] | null,
+) {
+  if (rule.type === 'specific_members' || rule.type === 'specified') {
+    return formatResolvedMembers((rule.memberIds || []).map((memberId) => findDirectoryMember(directory, memberId)), '待选择审批人');
+  }
+
+  if (rule.type === 'specific_positions') {
+    const titles = new Set((rule.positionTitles || []).filter(Boolean));
+    const matchedMembers = directory.members.filter((member) => member.enabled !== false && titles.has(member.title));
+    return formatResolvedMembers(matchedMembers, titles.size > 0 ? `未找到 ${Array.from(titles).join('、')}` : '待选择职位');
+  }
+
+  if (rule.type === 'initiator_self') {
+    return previewSubmitter ? previewSubmitter.name : '申请人本人';
+  }
+
+  if (rule.type === 'initiator_select') {
+    return rule.fieldName ? `由申请人从「${rule.fieldName}」选择` : '由申请人提交时选择';
+  }
+
+  if (rule.type === 'form_member_field') {
+    return rule.fieldName ? `表单人员字段「${rule.fieldName}」` : '表单人员字段';
+  }
+
+  if (rule.type === 'department_manager') {
+    if (!previewSubmitter) return `按申请人的${getDepartmentManagerLevelLabel(getDepartmentManagerLevel(rule))}动态解析`;
+    return formatResolvedMembers(resolveDepartmentManagerMembers(rule, directory, previewSubmitter), '未配置部门主管');
+  }
+
+  if (rule.type === 'submitter_manager') {
+    if (!previewSubmitter) return '按申请人的直属上级动态解析';
+    return formatResolvedMembers(resolveSupervisorMembers(directory, previewSubmitter, [1]), '未配置直属上级');
+  }
+
+  if (rule.type === 'multi_supervisor' || rule.type === 'direct_supervisor' || rule.type === 'nth_supervisor') {
+    const levels = rule.type === 'multi_supervisor'
+      ? getSupervisorLevels(rule)
+      : [rule.type === 'nth_supervisor' ? (rule.supervisorLevel || 1) : 1];
+    if (!previewSubmitter) return `按申请人的第 ${levels.join('、')} 级主管动态解析`;
+    return formatResolvedMembers(resolveSupervisorMembers(directory, previewSubmitter, levels), '未配置主管');
+  }
+
+  return getApproverTypeLabel(rule.type);
+}
+
+function formatCcResolution(rule: CcRule | undefined, directory: OrganizationDirectory) {
+  const ccRule = rule || defaultCcRule();
+  const memberText = formatResolvedMembers((ccRule.memberIds || []).map((memberId) => findDirectoryMember(directory, memberId)), '');
+  const departmentText = formatDepartmentNames(directory, ccRule.departmentIds || []);
+  return [memberText, departmentText ? `部门：${departmentText}` : ''].filter(Boolean).join('；') || '到达这里时抄送';
+}
+
+function formatProcessorResolution(rule: ProcessorRule, directory: OrganizationDirectory) {
+  const memberText = formatResolvedMembers((rule.memberIds || []).map((memberId) => findDirectoryMember(directory, memberId)), '');
+  const departmentText = formatDepartmentNames(directory, rule.departmentIds || []);
+  return [memberText, departmentText ? `部门：${departmentText}` : ''].filter(Boolean).join('；') || '待配置办理人';
+}
+
 function formatSubmitPermission(permission: SubmitPermissionRule, directory: OrganizationDirectory) {
   let scope = '全部成员';
   if (permission.type === 'members') {
@@ -1450,7 +1585,7 @@ function formatProcessorRule(rule: ProcessorRule, directory: OrganizationDirecto
 }
 
 function formatPreviewSubmitter(member: OrganizationDirectory['members'][number] | null, directory: OrganizationDirectory) {
-  if (!member) return '暂无可预览申请人';
+  if (!member) return '全局视图 · 不指定申请人';
 
   const departmentName = directory.departments.find((department) => department.id === member.departmentId)?.name;
   return [member.name, departmentName, member.title].filter(Boolean).join(' · ');
@@ -2118,12 +2253,13 @@ function traceFlowRoutePreview(
   previewSubmitter: OrganizationDirectory['members'][number] | null,
   routeState: FlowRoutePreviewState = 'certain',
 ): FlowRoutePreview {
-  const routePreview = createEmptyFlowRoutePreview(Boolean(previewSubmitter));
-  if (!previewSubmitter) return routePreview;
+  const routePreview = createEmptyFlowRoutePreview(true);
+  const initialRouteState = previewSubmitter ? routeState : 'possible';
+  routePreview.isUncertain = !previewSubmitter;
 
   let activePaths: Array<{ segments: string[]; state: FlowRoutePreviewState }> = [{
     segments: [],
-    state: routeState,
+    state: initialRouteState,
   }];
 
   nodes.forEach((node) => {
@@ -2214,12 +2350,13 @@ type FlowAnchorSide = 'top' | 'bottom' | 'left' | 'right';
 type FlowPoint = { x: number; y: number };
 type FlowNodeBox = { x: number; y: number; width: number; height: number };
 
-const FLOW_EDGE_COLOR = '#CBD5E1';
-const FLOW_EDGE_STROKE = 2;
+const FLOW_EDGE_COLOR = '#B8C7DA';
+const FLOW_EDGE_STROKE = 2.2;
 const FLOW_ARROW_WIDTH = 10;
 const FLOW_ARROW_HEIGHT = 7;
-const FLOW_BRANCH_CARD_WIDTH = 300;
+const FLOW_BRANCH_CARD_WIDTH = 340;
 const FLOW_BRANCH_GAP = 180;
+const FLOW_END_CARD_WIDTH = 220;
 
 function normalizeFlowBranchWidths(branchWidths: number[]) {
   return branchWidths.length > 0
@@ -2642,12 +2779,12 @@ function FlowNode({
   const isRouteMarked = Boolean(routeState);
   const isRouteExcluded = Boolean(routeExcluded) && !isRouteMarked;
   const toneClass = {
-    submit: 'border-[#7d89b0] bg-white',
-    approval: 'border-[#e2b56c] bg-white',
-    condition: 'border-[#79a87b] bg-[#fbfff7]',
-    cc: 'border-[#6697d4] bg-[#f7fbff]',
-    processor: 'border-[#8c7a54] bg-[#fffdf7]',
-    end: 'border-border-silver bg-white',
+    submit: 'border-[#667085] bg-white',
+    approval: 'border-[#d99a2b] bg-white',
+    condition: 'border-[#5f9565] bg-[#fbfff7]',
+    cc: 'border-[#4d87c7] bg-[#f7fbff]',
+    processor: 'border-[#8a6a20] bg-[#fffdf7]',
+    end: 'border-[#c9ced8] bg-white',
   }[tone];
 
   return (
@@ -2655,21 +2792,21 @@ function FlowNode({
       type="button"
       onClick={onClick}
       className={cn(
-        "w-full rounded-lg border p-0 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-sky-blue-highlight",
+        "w-full rounded-[10px] border p-0 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-sky-blue-highlight",
         toneClass,
         isRouteMarked && "border-[#ff3b30] bg-[#fff8f7] shadow-[0_0_0_3px_rgba(255,59,48,0.14)]",
         routeState === 'possible' && "border-dashed",
-        isRouteExcluded && "border-[#e5e5ea] bg-white/65 opacity-45 shadow-none grayscale-[0.25] hover:translate-y-0 hover:shadow-none",
+        isRouteExcluded && "border-[#e0e4ec] bg-white/80 opacity-70 shadow-none hover:translate-y-0 hover:shadow-none",
         selected && "ring-2 ring-interactive-blue ring-offset-2",
         hasError && "border-[#c62828] bg-[#fffafa]"
       )}
     >
       <div className={cn(
-        "h-7 rounded-t-[6px] px-3 flex items-center justify-between text-[11px] font-black",
+        "h-8 rounded-t-[9px] px-3.5 flex items-center justify-between text-[12px] font-black",
         isRouteMarked && "bg-[#ffe5e2] text-[#c9251d]",
-        isRouteExcluded && "bg-[#f4f4f5] text-[#8e8e93]",
+        isRouteExcluded && "bg-[#f4f6f9] text-[#667085]",
         tone === 'approval' && "bg-[#fff7e6] text-[#8a5a12]",
-        tone === 'submit' && "bg-[#7d89b0] text-white",
+        tone === 'submit' && "bg-[#667085] text-white",
         tone === 'condition' && "bg-[#edf7ed] text-[#2e7d32]",
         tone === 'cc' && "bg-[#e7f1ff] text-[#2267ad]",
         tone === 'processor' && "bg-[#fff7e0] text-[#7b5b18]",
@@ -2690,10 +2827,10 @@ function FlowNode({
           {hasError && <AlertCircle size={14} />}
         </span>
       </div>
-      <div className="p-3">
+      <div className="p-3.5">
         <div className="flex items-start gap-2.5">
           <span className={cn(
-            "mt-0.5 h-8 w-8 rounded-full flex shrink-0 items-center justify-center",
+            "mt-0.5 h-9 w-9 rounded-full flex shrink-0 items-center justify-center",
             isRouteMarked && "bg-[#ffe5e2] text-[#ff3b30]",
             isRouteExcluded && "bg-[#f4f4f5] text-[#8e8e93]",
             tone === 'approval' && "bg-[#fff7e6] text-[#8a5a12]",
@@ -2709,16 +2846,27 @@ function FlowNode({
           </span>
           <span className="min-w-0">
             <span className={cn(
-              "block truncate text-[14px] font-black text-midnight-graphite",
-              isRouteExcluded && "text-medium-gray"
+              "block truncate text-[15px] font-black leading-5 text-[#111827]",
+              isRouteExcluded && "text-[#475467]"
             )}>{title}</span>
-            <span className="mt-1 block text-[11px] font-bold text-medium-gray leading-5">{subtitle}</span>
+            <span className="mt-1 block text-[12px] font-semibold text-[#4b5563] leading-5">{subtitle}</span>
             {meta && <span className="hidden">{meta}</span>}
           </span>
         </div>
         {children}
       </div>
     </button>
+  );
+}
+
+function FlowNodePeoplePreview({ label }: { label?: string }) {
+  if (!label) return null;
+
+  return (
+    <div className="mt-3 rounded-[8px] border border-[#e5eaf2] bg-white px-3 py-2 text-[12px] font-semibold leading-5 text-[#1f2937]">
+      <span className="mr-2 text-[11px] font-black text-[#667085]">实际人员</span>
+      {label}
+    </div>
   );
 }
 
@@ -3066,10 +3214,17 @@ function FlowSequence({
       {nodes.map((node, index) => (
         <React.Fragment key={node.id}>
           {shouldRenderStandaloneFlowNode(node) && (
-            <div className="w-[300px]">
+            <div style={{ width: `${FLOW_BRANCH_CARD_WIDTH}px` }}>
             {(() => {
               const routeState = routePreview.nodeStates.get(node.id);
               const routeExcluded = routePreview.hasPreview && !routeState;
+              const peoplePreview = node.type === 'approver'
+                ? formatApproverResolution(node.rule || { type: 'specific_members', memberIds: [] }, directory, previewSubmitter)
+                : node.type === 'cc'
+                  ? formatCcResolution(node.ccRule, directory)
+                  : node.type === 'processor'
+                    ? formatProcessorResolution(processorRule, directory)
+                    : '';
               return (
             <FlowNode
               tone={getFlowNodeTone(node)}
@@ -3084,15 +3239,7 @@ function FlowSequence({
               routeExcluded={routeExcluded}
               onClick={() => onSelect({ type: 'flow-node', nodeId: node.id })}
             >
-              {node.type === 'approver' && (
-                <SupervisorChainPreview
-                  rule={node.rule || { type: 'specific_members', memberIds: [] }}
-                  directory={directory}
-                  previewSubmitter={previewSubmitter}
-                  previewKey={node.id}
-                  compact
-                />
-              )}
+              <FlowNodePeoplePreview label={peoplePreview} />
             </FlowNode>
               );
             })()}
@@ -3119,7 +3266,7 @@ function FlowSequence({
                       width={branchWidths[conditionIndex] || FLOW_BRANCH_CARD_WIDTH}
                       showBottomConnector={conditionBranches.length > 1}
                     >
-                      <div className="w-[300px]">
+                      <div style={{ width: `${FLOW_BRANCH_CARD_WIDTH}px` }}>
                         {(() => {
                           const routeState = routePreview.branchStates.get(condition.id);
                           const routeExcluded = routePreview.hasPreview && !routeState;
@@ -3289,37 +3436,48 @@ function WorkflowFlowDesigner({
     [submitPermission, directory],
   );
   const previewSubmitterOptions = React.useMemo(
-    () => eligibleSubmitters.map((member) => {
-      const departmentName = directory.departments.find((department) => department.id === member.departmentId)?.name || '';
-      const description = [
-        member.accountUsername ? `账号 ${member.accountUsername}` : '未绑定账号',
-        departmentName,
-        member.title,
-      ].filter(Boolean).join(' · ');
-
-      return {
-        value: member.id,
-        label: member.name,
-        description,
-        searchText: [
-          member.name,
-          member.accountUsername,
+    () => [
+      {
+        value: PREVIEW_ALL_SUBMITTERS_ID,
+        label: '全局视图',
+        description: '不指定申请人，显示所有可能路径',
+        searchText: '全局 全部 不指定 不选 申请人 所有可能路径',
+      },
+      ...eligibleSubmitters.map((member) => {
+        const departmentName = directory.departments.find((department) => department.id === member.departmentId)?.name || '';
+        const description = [
+          member.accountUsername ? `账号 ${member.accountUsername}` : '未绑定账号',
           departmentName,
           member.title,
-          member.id,
-        ].filter(Boolean).join(' '),
-      };
-    }),
+        ].filter(Boolean).join(' · ');
+
+        return {
+          value: member.id,
+          label: member.name,
+          description,
+          searchText: [
+            member.name,
+            member.accountUsername,
+            departmentName,
+            member.title,
+            member.id,
+          ].filter(Boolean).join(' '),
+        };
+      }),
+    ],
     [eligibleSubmitters, directory.departments],
   );
-  const [previewSubmitterId, setPreviewSubmitterId] = React.useState('');
-  const previewSubmitter = eligibleSubmitters.find((member) => member.id === previewSubmitterId)
-    || eligibleSubmitters[0]
-    || null;
+  const [previewSubmitterId, setPreviewSubmitterId] = React.useState(PREVIEW_ALL_SUBMITTERS_ID);
+  const previewSubmitter = previewSubmitterId === PREVIEW_ALL_SUBMITTERS_ID
+    ? null
+    : eligibleSubmitters.find((member) => member.id === previewSubmitterId) || null;
 
   React.useEffect(() => {
-    if (!previewSubmitterId || !eligibleSubmitters.some((member) => member.id === previewSubmitterId)) {
-      setPreviewSubmitterId(eligibleSubmitters[0]?.id || '');
+    if (
+      previewSubmitterId !== PREVIEW_ALL_SUBMITTERS_ID
+      && !eligibleSubmitters.some((member) => member.id === previewSubmitterId)
+    ) {
+      setPreviewSubmitterId(PREVIEW_ALL_SUBMITTERS_ID);
     }
   }, [eligibleSubmitters, previewSubmitterId]);
 
@@ -3353,7 +3511,7 @@ function WorkflowFlowDesigner({
 
     const scale = Math.min(
       1.2,
-      Math.max(0.36, Math.min((frame.clientWidth - paddingX) / contentWidth, (frame.clientHeight - paddingY) / contentHeight)),
+      Math.max(0.44, Math.min((frame.clientWidth - paddingX) / contentWidth, (frame.clientHeight - paddingY) / contentHeight)),
     );
 
     setCanvasView({
@@ -3484,23 +3642,19 @@ function WorkflowFlowDesigner({
           <div className="flex h-9 items-center gap-2 rounded-full bg-lightest-gray-background px-3 text-[12px] font-bold text-medium-gray">
             <UserRound size={14} strokeWidth={2.4} />
             <span className="shrink-0">申请人预览</span>
-            {eligibleSubmitters.length > 0 ? (
-              <div className="w-[132px] sm:w-[160px]">
-                <SearchableSingleSelect
-                  value={previewSubmitter?.id || ''}
-                  options={previewSubmitterOptions}
-                  onChange={setPreviewSubmitterId}
-                  placeholder="选择申请人"
-                  searchPlaceholder="搜索姓名、账号、部门或职位"
-                  emptyText="暂无成员"
-                  allowClear={false}
-                  buttonClassName="h-7 rounded-full border-0 bg-transparent px-0 text-[12px] font-black ring-0 hover:border-transparent"
-                  panelClassName="left-auto right-0 w-[320px]"
-                />
-              </div>
-            ) : (
-              <span className="text-[12px] font-black text-light-gray">暂无成员</span>
-            )}
+            <div className="w-[132px] sm:w-[170px]">
+              <SearchableSingleSelect
+                value={previewSubmitterId}
+                options={previewSubmitterOptions}
+                onChange={setPreviewSubmitterId}
+                placeholder="选择申请人"
+                searchPlaceholder="搜索姓名、账号、部门或职位"
+                emptyText="暂无成员"
+                allowClear={false}
+                buttonClassName="h-7 rounded-full border-0 bg-transparent px-0 text-[12px] font-black ring-0 hover:border-transparent"
+                panelClassName="left-auto right-0 w-[340px]"
+              />
+            </div>
           </div>
           {routePreview.hasPreview && (
             <div className="flex h-9 items-center gap-2 rounded-full border border-[#fecaca] bg-[#fff7f7] px-3 text-[12px] font-black text-[#dc2626]">
@@ -3531,7 +3685,7 @@ function WorkflowFlowDesigner({
           onPointerCancel={stopCanvasPan}
           onWheel={handleCanvasWheel}
           className={cn(
-            "workflow-canvas-frame relative min-h-[680px] overflow-hidden bg-[#f7f8fa] cursor-grab select-none touch-none",
+            "workflow-canvas-frame relative min-h-[680px] overflow-hidden bg-[#fbfcfe] cursor-grab select-none touch-none",
             isPanning && "cursor-grabbing"
           )}
         >
@@ -3603,7 +3757,7 @@ function WorkflowFlowDesigner({
             style={{
               minHeight: `${canvasContentHeight}px`,
               minWidth: `${canvasMinWidth}px`,
-              backgroundImage: 'radial-gradient(#d9dde5 1px, transparent 1px)',
+              backgroundImage: 'radial-gradient(#d7dde8 1px, transparent 1px)',
               backgroundSize: '18px 18px',
               transform: `translate3d(${canvasView.x}px, ${canvasView.y}px, 0) scale(${canvasView.scale})`,
               transformOrigin: '0 0',
@@ -3614,7 +3768,7 @@ function WorkflowFlowDesigner({
               className="mx-auto flex flex-col items-center"
               style={{ width: `${branchFlowWidth}px` }}
             >
-              <div className="w-[300px]">
+              <div style={{ width: `${FLOW_BRANCH_CARD_WIDTH}px` }}>
                 <FlowNode
                   tone="submit"
                   kicker="提交"
@@ -3651,7 +3805,7 @@ function WorkflowFlowDesigner({
                 canUseRuleConditions={fieldOptions.length > 0}
                 canAddProcessorTask={!containsProcessorNode(flowNodes)}
               />
-              <div className="w-[180px]">
+              <div style={{ width: `${FLOW_END_CARD_WIDTH}px` }}>
                 <FlowNode
                   tone="end"
                   kicker="结束"

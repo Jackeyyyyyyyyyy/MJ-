@@ -42,6 +42,8 @@ async function loadLocalEnvFile() {
 await loadLocalEnvFile();
 
 const app = express();
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
 const port = process.env.PORT || 8080;
 const host = process.env.API_HOST?.trim();
 const maxBackupUploadBytes = Number(process.env.BACKUP_UPLOAD_LIMIT_BYTES || 300 * 1024 * 1024);
@@ -50,9 +52,12 @@ const dataDir =
   process.env.DATA_DIR ||
   path.resolve(process.cwd(), 'data');
 const recordsFile = path.join(dataDir, 'approval-records.json');
+const approvalDraftsFile = path.join(dataDir, 'approval-drafts.json');
 const accountsFile = path.join(dataDir, 'approval-accounts.json');
 const uploadsDir = path.join(dataDir, 'uploads');
 const uploadsIndexFile = path.join(dataDir, 'approval-uploads.json');
+const workflowEventsFile = path.join(dataDir, 'workflow-events.json');
+const workflowEfficiencySnapshotsFile = path.join(dataDir, 'workflow-efficiency-snapshots.json');
 const businessRecordsDir = path.join(dataDir, 'business-records');
 const aiPromptConfigsFile = path.join(dataDir, 'ai-prompt-configs.json');
 const aiAssistantConfigFile = path.join(dataDir, 'ai-assistant-config.json');
@@ -128,6 +133,19 @@ const protectedBusinessForms = new Set([
   '\u4f9b\u5e94\u5546|||\u62a5\u4ef7',
   '\u8ba2\u5355|||\u9879\u76ee\u8d27\u53d8\u66f4',
 ]);
+const isRailwayRuntime = Boolean(
+  process.env.RAILWAY_ENVIRONMENT ||
+  process.env.RAILWAY_PROJECT_ID ||
+  process.env.RAILWAY_SERVICE_ID ||
+  process.env.RAILWAY_VOLUME_MOUNT_PATH,
+);
+const isProductionRuntime = process.env.NODE_ENV === 'production' || isRailwayRuntime;
+const minAccountPasswordLength = 10;
+const insecureSecretPattern = /(?:replace-with|changeme|password|123456|secret)/i;
+const weakAccountPasswords = new Set(['123456', '123456789', 'password', 'admin', 'qwerty', 'changeme', '111111', '000000']);
+const backupRestoreEnabled = process.env.BACKUP_RESTORE_ENABLED === 'true' || (
+  !isProductionRuntime && process.env.BACKUP_RESTORE_ENABLED !== 'false'
+);
 const defaultAiAssistantPrompt =
   '你是 MJ 审批系统的管理助手，只做只读分析。你负责总结审批风险、发现异常、解释待办优先级，并引用相关审批单。不得编造数据，不得替用户做审批决定，不得建议绕过流程。回答要先给简短结论，再列关键原因；如果涉及具体单据，请在 relatedRecordIds 中返回对应 recordId。';
 const defaultAiPromptBase =
@@ -179,12 +197,28 @@ function requireEnv(name) {
   return value;
 }
 
-const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD?.trim() || requireEnv('APP_PASSWORD');
+function enforceProductionSecret(name, value, minLength) {
+  if (isProductionRuntime && (value.length < minLength || insecureSecretPattern.test(value))) {
+    console.error(`${name} must be at least ${minLength} characters and cannot use placeholder or weak values in production/Railway.`);
+    process.exit(1);
+  }
+
+  return value;
+}
+
+const configuredSuperAdminPassword = process.env.SUPER_ADMIN_PASSWORD?.trim();
+const superAdminPassword = enforceProductionSecret(
+  configuredSuperAdminPassword ? 'SUPER_ADMIN_PASSWORD' : 'APP_PASSWORD',
+  configuredSuperAdminPassword || requireEnv('APP_PASSWORD'),
+  12,
+);
 const superAdminUsername = process.env.SUPER_ADMIN_USERNAME?.trim() || 'developer';
 const superAdminName = process.env.SUPER_ADMIN_NAME?.trim() || '超级管理员';
-const authSecret = requireEnv('AUTH_SECRET');
+const authSecret = enforceProductionSecret('AUTH_SECRET', requireEnv('AUTH_SECRET'), 32);
 const backupUsername = process.env.BACKUP_ADMIN_USER?.trim();
-const backupPassword = process.env.BACKUP_ADMIN_PASSWORD?.trim();
+const backupPassword = process.env.BACKUP_ADMIN_PASSWORD?.trim()
+  ? enforceProductionSecret('BACKUP_ADMIN_PASSWORD', process.env.BACKUP_ADMIN_PASSWORD.trim(), 16)
+  : '';
 const configuredBackupTokenTtlMs = Number(process.env.BACKUP_TOKEN_TTL_MS);
 const backupTokenTtlMs =
   Number.isFinite(configuredBackupTokenTtlMs) && configuredBackupTokenTtlMs > 0
@@ -212,6 +246,21 @@ const maxUploadBatchBytes =
   Number.isFinite(configuredMaxUploadBatchBytes) && configuredMaxUploadBatchBytes > 0
     ? configuredMaxUploadBatchBytes
     : 20 * 1024 * 1024;
+const configuredWorkflowSlaBusinessHours = Number(process.env.WORKFLOW_SLA_BUSINESS_HOURS);
+const workflowSlaBusinessHours =
+  Number.isFinite(configuredWorkflowSlaBusinessHours) && configuredWorkflowSlaBusinessHours > 0
+    ? configuredWorkflowSlaBusinessHours
+    : 72;
+const configuredWorkdayStartHour = Number(process.env.WORKFLOW_WORKDAY_START_HOUR);
+const workflowWorkdayStartHour =
+  Number.isFinite(configuredWorkdayStartHour) && configuredWorkdayStartHour >= 0 && configuredWorkdayStartHour < 24
+    ? Math.floor(configuredWorkdayStartHour)
+    : 9;
+const configuredWorkdayEndHour = Number(process.env.WORKFLOW_WORKDAY_END_HOUR);
+const workflowWorkdayEndHour =
+  Number.isFinite(configuredWorkdayEndHour) && configuredWorkdayEndHour > workflowWorkdayStartHour && configuredWorkdayEndHour <= 24
+    ? Math.floor(configuredWorkdayEndHour)
+    : 18;
 const superAdmin = {
   id: 'super-admin',
   username: superAdminUsername,
@@ -263,6 +312,77 @@ const rolePermissions = {
   ],
 };
 
+function normalizeAccountPermissions(value) {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set();
+  const permissions = [];
+  for (const item of value) {
+    const key = String(item?.key || item || '').trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const label = String(item?.label || key).trim() || key;
+    permissions.push({ key, label });
+  }
+
+  return permissions;
+}
+
+function getAccountPermissions(role, customPermissions) {
+  const permissions = [];
+  const seen = new Set();
+
+  for (const permission of [...(rolePermissions[role] || []), ...normalizeAccountPermissions(customPermissions)]) {
+    if (!permission?.key || seen.has(permission.key)) continue;
+    seen.add(permission.key);
+    permissions.push(permission);
+  }
+
+  return permissions;
+}
+
+app.use((_req, res, next) => {
+  const csp = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "font-src 'self' data:",
+    "connect-src 'self' https:",
+    "manifest-src 'self'",
+    "form-action 'self'",
+    ...(isProductionRuntime ? ['upgrade-insecure-requests'] : []),
+  ].join('; ');
+
+  res.setHeader('Content-Security-Policy', csp);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (isProductionRuntime) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
+
+const smallAuthBodyLimitBytes = 64 * 1024;
+app.use([
+  '/api/auth/login',
+  '/api/auth/passkey/login/options',
+  '/api/auth/passkey/login/verify',
+  '/api/backup/login',
+], (req, res, next) => {
+  const contentLength = Number(req.get('content-length') || 0);
+  if (Number.isFinite(contentLength) && contentLength > smallAuthBodyLimitBytes) {
+    return res.status(413).json({ error: 'request body is too large' });
+  }
+
+  return next();
+});
+
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '30mb' }));
 
 function toPublicUser(user) {
@@ -289,6 +409,21 @@ function verifyPassword(password, passwordHash) {
   const expectedBuffer = Buffer.from(expected);
 
   return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function assertStrongAccountPassword(password) {
+  const value = String(password || '');
+  if (value.length < minAccountPasswordLength) {
+    throw createHttpError(`password must be at least ${minAccountPasswordLength} characters`, 400);
+  }
+
+  if (isProductionRuntime && weakAccountPasswords.has(value.trim().toLowerCase())) {
+    throw createHttpError('password is too weak for production', 400);
+  }
+}
+
+function createSeedPasswordHash() {
+  return hashPassword(isProductionRuntime ? crypto.randomBytes(24).toString('base64url') : '123456');
 }
 
 function normalizeAvatarUrl(value) {
@@ -348,7 +483,7 @@ function toPublicAccount(account, directory = { departments: [], members: [] }) 
     accountName: normalizedAccount.accountName || normalizedAccount.name,
     ...(normalizedAccount.linkedMember ? { linkedMember: normalizedAccount.linkedMember } : {}),
     roleLabel: roleLabels[role] || role,
-    permissions: rolePermissions[role] || [],
+    permissions: getAccountPermissions(role, normalizedAccount.permissions),
     canSwitchPerspective: role === 'developer',
     isSuperAdmin: role === 'developer',
     enabled: normalizedAccount.enabled !== false,
@@ -1369,7 +1504,14 @@ async function updateBusinessForm(oldModuleName, oldApprovalTypeName, {
     commonFields: existingType.commonFields?.length ? existingType.commonFields : schema.commonFields,
   });
 
-  return writeApprovalSchema(schema);
+  const nextSchema = await writeApprovalSchema(schema);
+  await migrateWorkflowTemplatesForBusinessForm(
+    currentModuleName,
+    currentApprovalTypeName,
+    nextModuleName,
+    nextApprovalTypeName,
+  );
+  return nextSchema;
 }
 
 async function updateBusinessFormVisibility(items) {
@@ -1465,6 +1607,61 @@ async function deleteWorkflowTemplatesForBusinessForm(moduleName, approvalTypeNa
   });
 }
 
+function applyWorkflowBusinessNames(version, oldModuleName, oldApprovalTypeName, nextModuleName, nextApprovalTypeName) {
+  if (!version?.basic) return false;
+  if (getBusinessFormConfigKey(version.basic.moduleName, version.basic.approvalTypeName) !== getBusinessFormConfigKey(oldModuleName, oldApprovalTypeName)) {
+    return false;
+  }
+
+  version.basic.moduleName = nextModuleName;
+  version.basic.approvalTypeName = nextApprovalTypeName;
+  return true;
+}
+
+async function migrateWorkflowTemplatesForBusinessForm(oldModuleName, oldApprovalTypeName, nextModuleName, nextApprovalTypeName) {
+  const oldKey = getBusinessFormConfigKey(oldModuleName, oldApprovalTypeName);
+  const nextKey = getBusinessFormConfigKey(nextModuleName, nextApprovalTypeName);
+  if (!oldKey || oldKey === nextKey) return 0;
+
+  let updatedCount = 0;
+  await updateWorkflowTemplates((templates) => {
+    templates.forEach((template) => {
+      let changed = false;
+      if (getWorkflowTemplateBusinessKey(template) === oldKey) {
+        template.moduleName = nextModuleName;
+        template.approvalTypeName = nextApprovalTypeName;
+        changed = true;
+      }
+
+      changed = applyWorkflowBusinessNames(
+        template.draft,
+        oldModuleName,
+        oldApprovalTypeName,
+        nextModuleName,
+        nextApprovalTypeName,
+      ) || changed;
+
+      changed = applyWorkflowBusinessNames(
+        template.publishedVersion,
+        oldModuleName,
+        oldApprovalTypeName,
+        nextModuleName,
+        nextApprovalTypeName,
+      ) || changed;
+
+      if (!changed) return;
+      updatedCount += 1;
+      template.moduleName = nextModuleName;
+      template.approvalTypeName = nextApprovalTypeName;
+      template.updatedAt = new Date().toISOString();
+    });
+
+    return updatedCount;
+  });
+
+  return updatedCount;
+}
+
 async function listBusinessRecordFiles() {
   try {
     const entries = await fs.readdir(businessRecordsDir, { withFileTypes: true });
@@ -1533,8 +1730,8 @@ function createSeedAccount(username, role, name) {
     username,
     role,
     name,
-    passwordHash: hashPassword('123456'),
-    enabled: true,
+    passwordHash: createSeedPasswordHash(),
+    enabled: !isProductionRuntime,
     createdAt: now,
     updatedAt: now,
   };
@@ -1578,6 +1775,8 @@ async function writeAccounts(accounts) {
 
 let writeQueue = Promise.resolve();
 let uploadWriteQueue = Promise.resolve();
+let draftWriteQueue = Promise.resolve();
+let efficiencyWriteQueue = Promise.resolve();
 let accountWriteQueue = Promise.resolve();
 let promptWriteQueue = Promise.resolve();
 let assistantConfigWriteQueue = Promise.resolve();
@@ -1646,6 +1845,83 @@ function updateUploads(mutator) {
 
   uploadWriteQueue = operation.catch(() => undefined);
   return operation;
+}
+
+async function readApprovalDrafts() {
+  return readJsonArrayFile(approvalDraftsFile, 'approval drafts', { optional: true });
+}
+
+async function writeApprovalDrafts(drafts) {
+  await writeJsonArrayFile(approvalDraftsFile, drafts);
+}
+
+function updateApprovalDrafts(mutator) {
+  const operation = draftWriteQueue.catch(() => undefined).then(async () => {
+    const drafts = await readApprovalDrafts();
+    const result = await mutator(drafts);
+    await writeApprovalDrafts(drafts);
+    return result;
+  });
+
+  draftWriteQueue = operation.catch(() => undefined);
+  return operation;
+}
+
+async function readWorkflowEvents() {
+  return readJsonArrayFile(workflowEventsFile, 'workflow events', { optional: true });
+}
+
+async function writeWorkflowEvents(events) {
+  await writeJsonArrayFile(workflowEventsFile, events);
+}
+
+async function readWorkflowEfficiencySnapshotStore() {
+  return readJsonObjectFile(workflowEfficiencySnapshotsFile, {
+    updatedAt: null,
+    snapshots: [],
+  });
+}
+
+async function writeWorkflowEfficiencySnapshotStore(store) {
+  await writeJsonObjectFile(workflowEfficiencySnapshotsFile, store);
+}
+
+function updateWorkflowEfficiencyStore(mutator) {
+  const operation = efficiencyWriteQueue.catch(() => undefined).then(async () => {
+    const [events, snapshots] = await Promise.all([
+      readWorkflowEvents(),
+      readWorkflowEfficiencySnapshotStore(),
+    ]);
+    const result = await mutator({ events, snapshots });
+    await Promise.all([
+      writeWorkflowEvents(events),
+      writeWorkflowEfficiencySnapshotStore(snapshots),
+    ]);
+    return result;
+  });
+
+  efficiencyWriteQueue = operation.catch(() => undefined);
+  return operation;
+}
+
+function appendWorkflowEvents(newEvents) {
+  const eventsToAppend = (Array.isArray(newEvents) ? newEvents : [newEvents]).filter(Boolean);
+  if (eventsToAppend.length === 0) return Promise.resolve([]);
+
+  return updateWorkflowEfficiencyStore(({ events, snapshots }) => {
+    events.push(...eventsToAppend);
+    snapshots.updatedAt = null;
+    return eventsToAppend;
+  });
+}
+
+function clearWorkflowEfficiencyStore() {
+  return updateWorkflowEfficiencyStore(({ events, snapshots }) => {
+    events.splice(0);
+    snapshots.updatedAt = null;
+    snapshots.snapshots = [];
+    return null;
+  });
 }
 
 function updateAccounts(mutator) {
@@ -3266,6 +3542,67 @@ function createHttpError(message, statusCode = 400) {
   return error;
 }
 
+const rateLimitBuckets = new Map();
+
+function getClientRateLimitIp(req) {
+  return String(req.ip || req.socket?.remoteAddress || 'unknown');
+}
+
+function pruneRateLimitBuckets(now = Date.now()) {
+  if (rateLimitBuckets.size < 10000) return;
+  for (const [key, bucket] of rateLimitBuckets.entries()) {
+    if (!bucket || bucket.expiresAt <= now) rateLimitBuckets.delete(key);
+  }
+}
+
+function createRateLimit({ name, windowMs, max, message, key }) {
+  return (req, res, next) => {
+    const now = Date.now();
+    const scope = key(req);
+    const bucketKey = `${name}:${scope}`;
+    const existing = rateLimitBuckets.get(bucketKey);
+    const bucket = existing && existing.expiresAt > now
+      ? existing
+      : { count: 0, expiresAt: now + windowMs };
+
+    bucket.count += 1;
+    rateLimitBuckets.set(bucketKey, bucket);
+    pruneRateLimitBuckets(now);
+
+    if (bucket.count > max) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((bucket.expiresAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfterSeconds));
+      return res.status(429).json({ error: message });
+    }
+
+    return next();
+  };
+}
+
+const authLoginRateLimit = createRateLimit({
+  name: 'auth-login',
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  message: 'too many login attempts, please try again later',
+  key: (req) => `${getClientRateLimitIp(req)}:${normalizeWorkflowText(req.body?.username).toLowerCase()}`,
+});
+
+const passkeyLoginRateLimit = createRateLimit({
+  name: 'passkey-login',
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: 'too many passkey attempts, please try again later',
+  key: (req) => `${getClientRateLimitIp(req)}:${normalizeWorkflowText(req.body?.username).toLowerCase()}`,
+});
+
+const backupLoginRateLimit = createRateLimit({
+  name: 'backup-login',
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: 'too many backup login attempts, please try again later',
+  key: getClientRateLimitIp,
+});
+
 function normalizeWorkflowText(value) {
   return String(value || '').trim();
 }
@@ -3300,6 +3637,493 @@ async function findPublishedWorkflow(moduleName, approvalTypeName) {
       normalizeWorkflowText(version.basic?.moduleName || template.moduleName) === normalizeWorkflowText(moduleName) &&
       normalizeWorkflowText(version.basic?.approvalTypeName || template.approvalTypeName) === normalizeWorkflowText(approvalTypeName);
   }) || null;
+}
+
+function findApprovalSchemaType(schema, moduleName, approvalTypeName) {
+  const normalizedModuleName = normalizeWorkflowText(moduleName);
+  const normalizedApprovalTypeName = normalizeWorkflowText(approvalTypeName);
+  const module = (Array.isArray(schema?.modules) ? schema.modules : []).find(
+    (item) => normalizeWorkflowText(item?.name) === normalizedModuleName,
+  );
+  if (!module) return null;
+
+  return (Array.isArray(module.approvalTypes) ? module.approvalTypes : []).find(
+    (item) => normalizeWorkflowText(item?.name) === normalizedApprovalTypeName,
+  ) || null;
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isBlankBusinessValue(value) {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') return normalizeWorkflowText(value) === '';
+  if (Array.isArray(value)) return value.length === 0;
+  if (isPlainObject(value)) {
+    if (isAttachmentLike(value)) return false;
+    const values = Object.values(value);
+    return values.length === 0 || values.every(isBlankBusinessValue);
+  }
+  return false;
+}
+
+function getConfiguredFieldSet(approvalType, key) {
+  return new Set(normalizeStringList(approvalType?.[key]));
+}
+
+function getSelectOptionsByField(approvalType) {
+  const optionsByField = new Map();
+  for (const item of Array.isArray(approvalType?.selectFields) ? approvalType.selectFields : []) {
+    const field = normalizeWorkflowText(item?.field);
+    const options = normalizeStringList(item?.options);
+    if (field && options.length > 0) optionsByField.set(field, options);
+  }
+  return optionsByField;
+}
+
+function getDetailFieldByName(approvalType) {
+  const detailByField = new Map();
+  for (const item of Array.isArray(approvalType?.detailFields) ? approvalType.detailFields : []) {
+    const field = normalizeWorkflowText(item?.field);
+    const columns = Array.isArray(item?.columns) ? item.columns : [];
+    if (field && columns.length > 0) detailByField.set(field, columns);
+  }
+  return detailByField;
+}
+
+function isUploadOnlyBusinessField(approvalType, field) {
+  const attachmentFields = getConfiguredFieldSet(approvalType, 'attachmentFields');
+  if (attachmentFields.has(field)) return true;
+
+  const fileFields = getConfiguredFieldSet(approvalType, 'fileFields');
+  return !fileFields.has(field) && (field.includes('\u9644\u4ef6') || field.includes('\u56fe\u7247'));
+}
+
+function extractUploadIdFromUrl(value) {
+  const text = normalizeWorkflowText(value);
+  const match = text.match(/\/api\/uploads\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
+function getAttachmentUploadId(value) {
+  if (!isPlainObject(value)) return '';
+  return normalizeWorkflowText(value.id) || extractUploadIdFromUrl(value.url);
+}
+
+function isAttachmentLike(value) {
+  return isPlainObject(value) && Boolean(
+    normalizeWorkflowText(value.id) ||
+    normalizeWorkflowText(value.url) ||
+    normalizeWorkflowText(value.name) ||
+    normalizeWorkflowText(value.fileName),
+  );
+}
+
+function normalizeAttachmentList(value) {
+  if (Array.isArray(value)) return value.filter(isAttachmentLike);
+  if (isAttachmentLike(value)) return [value];
+  return [];
+}
+
+function getUploadLookup(uploads) {
+  const lookup = new Map();
+  for (const upload of Array.isArray(uploads) ? uploads : []) {
+    if (upload?.id) lookup.set(String(upload.id), upload);
+  }
+  return lookup;
+}
+
+function canUserUseUploadForSubmission(upload, user) {
+  const role = normalizeRole(user?.role);
+  if (role === 'developer') return true;
+  if (!upload) return false;
+
+  const uploadUsername = normalizeWorkflowText(upload.uploadedByUsername).toLowerCase();
+  if (uploadUsername && uploadUsername === normalizeWorkflowText(user?.username).toLowerCase()) return true;
+
+  const uploadName = normalizeWorkflowText(upload.uploadedBy);
+  if (uploadName && uploadName === normalizeWorkflowText(user?.name)) return true;
+
+  return !uploadUsername && !uploadName;
+}
+
+function validateAttachmentListForSubmission(field, value, uploadLookup, user, errors) {
+  const attachments = normalizeAttachmentList(value);
+  if (attachments.length === 0) {
+    errors.push(`${field} requires at least one attachment`);
+    return;
+  }
+
+  attachments.forEach((attachment, index) => {
+    const uploadId = getAttachmentUploadId(attachment);
+    if (!uploadId) {
+      errors.push(`${field}[${index + 1}] is missing upload id`);
+      return;
+    }
+
+    const upload = uploadLookup.get(uploadId);
+    if (!upload) {
+      errors.push(`${field}[${index + 1}] references a missing upload`);
+      return;
+    }
+
+    if (!canUserUseUploadForSubmission(upload, user)) {
+      errors.push(`${field}[${index + 1}] cannot use an upload from another account`);
+    }
+  });
+}
+
+function isValidDateLike(value) {
+  if (value instanceof Date) return !Number.isNaN(value.getTime());
+  if (typeof value !== 'string') return false;
+  const text = normalizeWorkflowText(value);
+  return Boolean(text) && !Number.isNaN(Date.parse(text));
+}
+
+function validateSelectValue(field, value, options, errors) {
+  const text = normalizeWorkflowText(value);
+  if (!text) {
+    errors.push(`${field} is required`);
+    return;
+  }
+
+  if (options.length > 0 && !options.includes(text)) {
+    errors.push(`${field} must be one of the configured options`);
+  }
+}
+
+function validateAmountValue(field, value, errors) {
+  const amount = parseWorkflowNumber(value);
+  if (!Number.isFinite(amount)) {
+    errors.push(`${field} must be a number`);
+    return;
+  }
+
+  if (isPlainObject(value)) {
+    const currency = normalizeWorkflowText(value.currency || value.currencyValue || value.symbol);
+    if (!currency) errors.push(`${field} is missing currency`);
+  }
+}
+
+function validateDetailFieldRows(field, rows, columns, errors) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    errors.push(`${field} requires at least one detail row`);
+    return;
+  }
+
+  rows.forEach((row, rowIndex) => {
+    if (!isPlainObject(row)) {
+      errors.push(`${field}[${rowIndex + 1}] must be an object`);
+      return;
+    }
+
+    columns.forEach((column) => {
+      const columnName = normalizeWorkflowText(column?.name || column);
+      if (!columnName) return;
+      const columnValue = row[columnName];
+      const label = `${field}[${rowIndex + 1}].${columnName}`;
+      if (isBlankBusinessValue(columnValue)) {
+        errors.push(`${label} is required`);
+        return;
+      }
+
+      if (column?.type === 'number' && !Number.isFinite(parseWorkflowNumber(columnValue))) {
+        errors.push(`${label} must be a number`);
+      }
+
+      if ((column?.type === 'date' || column?.type === 'datetime') && !isValidDateLike(columnValue)) {
+        errors.push(`${label} must be a valid date`);
+      }
+
+      const options = normalizeStringList(column?.options);
+      if (column?.type === 'select' && options.length > 0 && !options.includes(normalizeWorkflowText(columnValue))) {
+        errors.push(`${label} must be one of the configured options`);
+      }
+    });
+  });
+}
+
+function validateDraftDetailFieldRows(field, rows, columns, errors) {
+  if (!Array.isArray(rows)) {
+    errors.push(`${field} must be an array`);
+    return;
+  }
+
+  rows.forEach((row, rowIndex) => {
+    if (!isPlainObject(row)) {
+      errors.push(`${field}[${rowIndex + 1}] must be an object`);
+      return;
+    }
+
+    columns.forEach((column) => {
+      const columnName = normalizeWorkflowText(column?.name || column);
+      if (!columnName) return;
+      const columnValue = row[columnName];
+      if (isBlankBusinessValue(columnValue)) return;
+
+      const label = `${field}[${rowIndex + 1}].${columnName}`;
+      if (column?.type === 'number' && !Number.isFinite(parseWorkflowNumber(columnValue))) {
+        errors.push(`${label} must be a number`);
+      }
+
+      if ((column?.type === 'date' || column?.type === 'datetime') && !isValidDateLike(columnValue)) {
+        errors.push(`${label} must be a valid date`);
+      }
+
+      const options = normalizeStringList(column?.options);
+      if (column?.type === 'select' && options.length > 0 && !options.includes(normalizeWorkflowText(columnValue))) {
+        errors.push(`${label} must be one of the configured options`);
+      }
+    });
+  });
+}
+
+function validateBusinessDataForApprovalType(approvalType, businessData, { uploads = [], user } = {}) {
+  if (!isPlainObject(businessData)) {
+    throw createHttpError('businessData must be an object', 400);
+  }
+
+  const payloadSize = Buffer.byteLength(JSON.stringify(businessData), 'utf8');
+  if (payloadSize > 2 * 1024 * 1024) {
+    throw createHttpError('businessData is too large', 413);
+  }
+
+  const errors = [];
+  const businessFields = normalizeStringList(approvalType?.businessFields);
+  const allowedFields = new Set(businessFields);
+  const optionalFields = getConfiguredFieldSet(approvalType, 'optionalFields');
+  const amountFields = getConfiguredFieldSet(approvalType, 'amountFields');
+  const fileFields = getConfiguredFieldSet(approvalType, 'fileFields');
+  const dateFields = getConfiguredFieldSet(approvalType, 'dateFields');
+  const dateTimeFields = getConfiguredFieldSet(approvalType, 'dateTimeFields');
+  const durationFields = getConfiguredFieldSet(approvalType, 'durationFields');
+  const selectOptionsByField = getSelectOptionsByField(approvalType);
+  const detailByField = getDetailFieldByName(approvalType);
+  const uploadLookup = getUploadLookup(uploads);
+
+  Object.keys(businessData).forEach((field) => {
+    if (!allowedFields.has(field)) {
+      errors.push(`${field} is not configured for this approval type`);
+    }
+  });
+
+  businessFields.forEach((field) => {
+    const value = businessData[field];
+    const required = !optionalFields.has(field);
+
+    if (required && isBlankBusinessValue(value)) {
+      errors.push(`${field} is required`);
+      return;
+    }
+
+    if (!required && isBlankBusinessValue(value)) return;
+
+    if (fileFields.has(field)) {
+      if (!isPlainObject(value)) {
+        errors.push(`${field} must include text and attachments`);
+        return;
+      }
+      if (normalizeWorkflowText(value.text || value.description || value.value) === '') {
+        errors.push(`${field} text is required`);
+      }
+      validateAttachmentListForSubmission(field, value.attachments, uploadLookup, user, errors);
+      return;
+    }
+
+    if (isUploadOnlyBusinessField(approvalType, field)) {
+      validateAttachmentListForSubmission(field, value, uploadLookup, user, errors);
+      return;
+    }
+
+    if (amountFields.has(field)) {
+      validateAmountValue(field, value, errors);
+      return;
+    }
+
+    if (selectOptionsByField.has(field)) {
+      validateSelectValue(field, value, selectOptionsByField.get(field), errors);
+      return;
+    }
+
+    if (detailByField.has(field)) {
+      validateDetailFieldRows(field, value, detailByField.get(field), errors);
+      return;
+    }
+
+    if (dateFields.has(field) || dateTimeFields.has(field)) {
+      if (!isValidDateLike(value)) errors.push(`${field} must be a valid date`);
+      return;
+    }
+
+    if (durationFields.has(field) && !Number.isFinite(parseWorkflowNumber(value))) {
+      errors.push(`${field} must be a number`);
+    }
+  });
+
+  if (errors.length > 0) {
+    throw createHttpError(errors.join('; '), 400);
+  }
+}
+
+function validateDraftBusinessDataForApprovalType(approvalType, businessData, { uploads = [], user } = {}) {
+  if (businessData === undefined || businessData === null) return {};
+  if (!isPlainObject(businessData)) {
+    throw createHttpError('businessData must be an object', 400);
+  }
+
+  const payloadSize = Buffer.byteLength(JSON.stringify(businessData), 'utf8');
+  if (payloadSize > 2 * 1024 * 1024) {
+    throw createHttpError('businessData is too large', 413);
+  }
+
+  const errors = [];
+  const allowedFields = new Set(normalizeStringList(approvalType?.businessFields));
+  const fileFields = getConfiguredFieldSet(approvalType, 'fileFields');
+  const amountFields = getConfiguredFieldSet(approvalType, 'amountFields');
+  const dateFields = getConfiguredFieldSet(approvalType, 'dateFields');
+  const dateTimeFields = getConfiguredFieldSet(approvalType, 'dateTimeFields');
+  const selectOptionsByField = getSelectOptionsByField(approvalType);
+  const detailByField = getDetailFieldByName(approvalType);
+  const uploadLookup = getUploadLookup(uploads);
+
+  Object.entries(businessData).forEach(([field, value]) => {
+    if (!allowedFields.has(field)) {
+      errors.push(`${field} is not configured for this approval type`);
+      return;
+    }
+
+    if (isBlankBusinessValue(value)) return;
+
+    if (fileFields.has(field)) {
+      if (!isPlainObject(value)) {
+        errors.push(`${field} must include text and attachments`);
+        return;
+      }
+      if (!isBlankBusinessValue(value.attachments)) {
+        validateAttachmentListForSubmission(field, value.attachments, uploadLookup, user, errors);
+      }
+      return;
+    }
+
+    if (isUploadOnlyBusinessField(approvalType, field)) {
+      validateAttachmentListForSubmission(field, value, uploadLookup, user, errors);
+      return;
+    }
+
+    if (amountFields.has(field)) {
+      const amountValue = isPlainObject(value) ? value.amount ?? value.value ?? value.number : value;
+      if (!isBlankBusinessValue(amountValue) && !Number.isFinite(parseWorkflowNumber(value))) {
+        errors.push(`${field} must be a number`);
+      }
+      return;
+    }
+
+    if (selectOptionsByField.has(field)) {
+      validateSelectValue(field, value, selectOptionsByField.get(field), errors);
+      return;
+    }
+
+    if (detailByField.has(field)) {
+      validateDraftDetailFieldRows(field, value, detailByField.get(field), errors);
+      return;
+    }
+
+    if ((dateFields.has(field) || dateTimeFields.has(field)) && !isValidDateLike(value)) {
+      errors.push(`${field} must be a valid date`);
+    }
+  });
+
+  if (errors.length > 0) {
+    throw createHttpError(errors.join('; '), 400);
+  }
+
+  return businessData;
+}
+
+function canUserAccessDraft(user, draft) {
+  if (normalizeRole(user?.role) === 'developer') return true;
+  return normalizeWorkflowText(draft?.ownerUsername).toLowerCase() === normalizeWorkflowText(user?.username).toLowerCase();
+}
+
+function toPublicApprovalDraft(draft) {
+  return {
+    id: draft.id,
+    moduleName: draft.moduleName,
+    approvalTypeName: draft.approvalTypeName,
+    businessData: draft.businessData || {},
+    ownerName: draft.ownerName,
+    createdAt: draft.createdAt,
+    updatedAt: draft.updatedAt,
+  };
+}
+
+async function normalizeApprovalDraftPayload(body, user, fallback = {}) {
+  const moduleName = normalizeWorkflowText(body?.moduleName ?? fallback.moduleName);
+  const approvalTypeName = normalizeWorkflowText(body?.approvalTypeName ?? fallback.approvalTypeName);
+  const businessData = Object.prototype.hasOwnProperty.call(body || {}, 'businessData')
+    ? body.businessData
+    : fallback.businessData || {};
+
+  if (!moduleName || !approvalTypeName) {
+    throw createHttpError('missing approval draft target', 400);
+  }
+
+  const [schema, uploads] = await Promise.all([readApprovalSchema(), readUploads()]);
+  const approvalType = findApprovalSchemaType(schema, moduleName, approvalTypeName);
+  if (!approvalType) {
+    throw createHttpError('approval type is not configured', 400);
+  }
+
+  if (approvalType.visibleToUsers === false && normalizeRole(user?.role) !== 'developer') {
+    throw createHttpError('approval type is hidden from users', 403);
+  }
+
+  return {
+    moduleName,
+    approvalTypeName,
+    businessData: validateDraftBusinessDataForApprovalType(approvalType, businessData, {
+      uploads,
+      user,
+    }),
+  };
+}
+
+function getDepartmentLineageIds(directory, departmentId) {
+  const departmentsById = new Map((directory.departments || []).map((department) => [department.id, department]));
+  const lineage = [];
+  let currentId = departmentId;
+  const visited = new Set();
+
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    lineage.push(currentId);
+    currentId = departmentsById.get(currentId)?.parentId;
+  }
+
+  return lineage;
+}
+
+function isWorkflowSubmitAllowed(version, directory, applicantUsername) {
+  const permission = version?.submitPermission || { type: 'all_members' };
+  const type = permission.type || 'all_members';
+  const member = findMemberByAccount(directory, applicantUsername);
+
+  if (!member) return type === 'all_members';
+
+  const excludedMemberIds = new Set(normalizeStringList(permission.excludedMemberIds));
+  if (excludedMemberIds.has(member.id)) return false;
+
+  if (type === 'members') {
+    return new Set(normalizeStringList(permission.memberIds)).has(member.id);
+  }
+
+  if (type === 'departments') {
+    const departmentIds = new Set(normalizeStringList(permission.departmentIds));
+    return getDepartmentLineageIds(directory, member.departmentId).some((id) => departmentIds.has(id));
+  }
+
+  return true;
 }
 
 function parseWorkflowNumber(value) {
@@ -4294,10 +5118,12 @@ async function createWorkflowInstanceForRecord({ moduleName, approvalTypeName, a
 
   const version = getPublishedVersion(template);
   const directory = await readOrganizationDirectory();
+  if (!isWorkflowSubmitAllowed(version, directory, applicantUsername)) {
+    throw createHttpError('Current user is not allowed to submit this workflow.', 403);
+  }
+
   const schema = await readApprovalSchema();
-  const schemaType = schema.modules
-    .find((module) => module.name === moduleName)
-    ?.approvalTypes.find((approvalType) => approvalType.name === approvalTypeName);
+  const schemaType = findApprovalSchemaType(schema, moduleName, approvalTypeName);
   const applicantMember = findMemberByAccount(directory, applicantUsername);
   const ccRecipients = resolveCcRecipientsForRule(version.ccRule, directory);
   const nodes = await getLinearWorkflowNodes(version, {
@@ -4509,6 +5335,266 @@ function canUserSeeRecord(user, record) {
     || hasUserProcessedRecord(user, record)
     || hasUserCcAccess(user, record)
   );
+}
+
+function valueReferencesUpload(value, uploadId, uploadUrl) {
+  if (value === null || value === undefined) return false;
+
+  if (typeof value === 'string') {
+    const text = normalizeWorkflowText(value);
+    return text === uploadUrl || extractUploadIdFromUrl(text) === uploadId;
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((item) => valueReferencesUpload(item, uploadId, uploadUrl));
+  }
+
+  if (!isPlainObject(value)) return false;
+
+  if (normalizeWorkflowText(value.id) === uploadId) return true;
+  const url = normalizeWorkflowText(value.url);
+  if (url && (url === uploadUrl || extractUploadIdFromUrl(url) === uploadId)) return true;
+
+  return Object.values(value).some((item) => valueReferencesUpload(item, uploadId, uploadUrl));
+}
+
+function collectUploadIdsFromValue(value, ids = new Set()) {
+  if (value === null || value === undefined) return ids;
+
+  if (typeof value === 'string') {
+    const uploadId = extractUploadIdFromUrl(value);
+    if (uploadId) ids.add(uploadId);
+    return ids;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectUploadIdsFromValue(item, ids));
+    return ids;
+  }
+
+  if (!isPlainObject(value)) return ids;
+
+  const uploadId = getAttachmentUploadId(value);
+  if (uploadId) ids.add(uploadId);
+  Object.values(value).forEach((item) => collectUploadIdsFromValue(item, ids));
+  return ids;
+}
+
+function collectBusinessDataUploadIds(businessData) {
+  return [...collectUploadIdsFromValue(businessData)].filter(Boolean);
+}
+
+function recordReferencesUpload(record, upload) {
+  const uploadId = normalizeWorkflowText(upload?.id);
+  if (!uploadId) return false;
+
+  const uploadUrl = `/api/uploads/${encodeURIComponent(uploadId)}`;
+  return valueReferencesUpload(record?.businessData, uploadId, uploadUrl);
+}
+
+function canUserAccessUpload(user, upload, records = []) {
+  const role = normalizeRole(user?.role);
+  if (role === 'developer') return true;
+
+  const uploadUsername = normalizeWorkflowText(upload?.uploadedByUsername).toLowerCase();
+  if (uploadUsername && uploadUsername === normalizeWorkflowText(user?.username).toLowerCase()) return true;
+
+  const uploadName = normalizeWorkflowText(upload?.uploadedBy);
+  if (uploadName && uploadName === normalizeWorkflowText(user?.name)) return true;
+
+  const linkedRecordIds = new Set(normalizeStringList(upload?.recordIds));
+  return records.some((record) => (
+    (linkedRecordIds.has(record.id) || recordReferencesUpload(record, upload)) &&
+    canUserSeeRecord(user, record)
+  ));
+}
+
+function toPublicUploadLifecycle(upload) {
+  return {
+    id: upload.id,
+    name: upload.name,
+    type: upload.type,
+    size: upload.size,
+    uploadedAt: upload.uploadedAt,
+    uploadedBy: upload.uploadedBy,
+    recordIds: normalizeStringList(upload.recordIds),
+    url: upload.url,
+  };
+}
+
+async function linkUploadsToRecord(recordId, businessData) {
+  const uploadIds = collectBusinessDataUploadIds(businessData);
+  if (uploadIds.length === 0) return [];
+
+  const uploadIdSet = new Set(uploadIds);
+  return updateUploads((uploads) => {
+    const linked = [];
+    uploads.forEach((upload) => {
+      if (!uploadIdSet.has(upload.id)) return;
+      const recordIds = normalizeStringList(upload.recordIds);
+      if (!recordIds.includes(recordId)) {
+        upload.recordIds = [...recordIds, recordId];
+      }
+      linked.push(upload);
+    });
+    return linked.map(toPublicUploadLifecycle);
+  });
+}
+
+function getReferencedUploadIds(records, drafts = []) {
+  const ids = new Set();
+  (Array.isArray(records) ? records : []).forEach((record) => collectUploadIdsFromValue(record?.businessData, ids));
+  (Array.isArray(drafts) ? drafts : []).forEach((draft) => collectUploadIdsFromValue(draft?.businessData, ids));
+  return ids;
+}
+
+async function getOrphanUploads() {
+  const [uploads, records, drafts] = await Promise.all([
+    readUploads(),
+    readRecords(),
+    readApprovalDrafts(),
+  ]);
+  const referencedIds = getReferencedUploadIds(records, drafts);
+  return uploads.filter((upload) => !referencedIds.has(upload.id));
+}
+
+async function cleanupOrphanUploads() {
+  const [records, drafts] = await Promise.all([readRecords(), readApprovalDrafts()]);
+  const referencedIds = getReferencedUploadIds(records, drafts);
+  const uploadRoot = path.resolve(uploadsDir);
+
+  return updateUploads(async (uploads) => {
+    const removed = [];
+    for (let index = uploads.length - 1; index >= 0; index -= 1) {
+      const upload = uploads[index];
+      if (referencedIds.has(upload.id)) continue;
+
+      const filePath = path.resolve(uploadRoot, upload.storedName || '');
+      if (filePath.startsWith(`${uploadRoot}${path.sep}`)) {
+        await fs.rm(filePath, { force: true });
+      }
+
+      const [deleted] = uploads.splice(index, 1);
+      removed.push(toPublicUploadLifecycle(deleted));
+    }
+
+    return removed;
+  });
+}
+
+function getQueryValue(query, key) {
+  const value = query?.[key];
+  if (Array.isArray(value)) return normalizeWorkflowText(value[0]);
+  return normalizeWorkflowText(value);
+}
+
+function getQuerySet(query, key) {
+  const value = query?.[key];
+  const rawValues = Array.isArray(value) ? value : [value];
+  return new Set(rawValues
+    .flatMap((item) => String(item || '').split(','))
+    .map((item) => normalizeWorkflowText(item).toLowerCase())
+    .filter(Boolean));
+}
+
+function parseQueryDate(value) {
+  const text = normalizeWorkflowText(value);
+  if (!text) return null;
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function matchesRecordQuerySet(value, set) {
+  return set.size === 0 || set.has(normalizeWorkflowText(value).toLowerCase());
+}
+
+function isTruthyQuery(value) {
+  return ['1', 'true', 'yes', 'mine'].includes(normalizeWorkflowText(value).toLowerCase());
+}
+
+function isUserInvolvedInRecord(user, record) {
+  return (
+    normalizeWorkflowText(record.applicantUsername).toLowerCase() === normalizeWorkflowText(user?.username).toLowerCase()
+    || normalizeWorkflowText(record.applicant) === normalizeWorkflowText(user?.name)
+    || canUserApproveRecord(user, record)
+    || hasUserHandledWorkflowRecord(user, record)
+    || canUserProcessRecord(user, record)
+    || hasUserProcessedRecord(user, record)
+    || hasUserCcAccess(user, record)
+  );
+}
+
+function recordMatchesQuery(record, query, user) {
+  if (!matchesRecordQuerySet(record.status, getQuerySet(query, 'status'))) return false;
+  if (!matchesRecordQuerySet(record.moduleName, getQuerySet(query, 'moduleName'))) return false;
+  if (!matchesRecordQuerySet(record.approvalTypeName, getQuerySet(query, 'approvalTypeName'))) return false;
+  if (!matchesRecordQuerySet(record.applicantUsername, getQuerySet(query, 'applicantUsername'))) return false;
+
+  const applicant = getQueryValue(query, 'applicant');
+  if (applicant && !normalizeWorkflowText(record.applicant).toLowerCase().includes(applicant.toLowerCase())) return false;
+
+  const createdFrom = parseQueryDate(getQueryValue(query, 'createdFrom'));
+  if (createdFrom && new Date(record.createdAt || 0) < createdFrom) return false;
+
+  const createdTo = parseQueryDate(getQueryValue(query, 'createdTo'));
+  if (createdTo && new Date(record.createdAt || 0) > createdTo) return false;
+
+  const updatedFrom = parseQueryDate(getQueryValue(query, 'updatedFrom'));
+  if (updatedFrom && new Date(record.updatedAt || record.createdAt || 0) < updatedFrom) return false;
+
+  const updatedTo = parseQueryDate(getQueryValue(query, 'updatedTo'));
+  if (updatedTo && new Date(record.updatedAt || record.createdAt || 0) > updatedTo) return false;
+
+  const mine = getQueryValue(query, 'mine');
+  if (mine && isTruthyQuery(mine) && !isUserInvolvedInRecord(user, record)) return false;
+
+  const keyword = getQueryValue(query, 'keyword') || getQueryValue(query, 'q') || getQueryValue(query, 'search');
+  if (keyword) {
+    const haystack = [
+      record.id,
+      record.moduleName,
+      record.approvalTypeName,
+      record.applicant,
+      record.applicantUsername,
+      record.status,
+      JSON.stringify(record.businessData || {}),
+    ].join(' ').toLowerCase();
+    if (!haystack.includes(keyword.toLowerCase())) return false;
+  }
+
+  return true;
+}
+
+function sortRecordsForQuery(records, query) {
+  const sortBy = getQueryValue(query, 'sortBy');
+  if (!sortBy) return records;
+
+  const direction = getQueryValue(query, 'sortDir').toLowerCase() === 'asc' ? 1 : -1;
+  const allowedSortFields = new Set(['createdAt', 'updatedAt', 'status', 'moduleName', 'approvalTypeName', 'applicant']);
+  if (!allowedSortFields.has(sortBy)) return records;
+
+  return [...records].sort((left, right) => (
+    normalizeWorkflowText(left?.[sortBy]).localeCompare(normalizeWorkflowText(right?.[sortBy])) * direction
+  ));
+}
+
+function shouldPaginateRecords(query) {
+  return ['page', 'pageSize', 'limit', 'offset'].some((key) => query?.[key] !== undefined);
+}
+
+function paginatePublicRecords(items, query) {
+  if (!shouldPaginateRecords(query)) return items;
+
+  const pageSize = Math.min(200, Math.max(1, Number(getQueryValue(query, 'pageSize') || getQueryValue(query, 'limit') || 50)));
+  const page = Math.max(1, Number(getQueryValue(query, 'page') || 1));
+  const offset = Math.max(0, Number(getQueryValue(query, 'offset') || (page - 1) * pageSize));
+  return {
+    items: items.slice(offset, offset + pageSize),
+    total: items.length,
+    page: Math.floor(offset / pageSize) + 1,
+    pageSize,
+    offset,
+  };
 }
 
 function clonePlainObject(value) {
@@ -5012,6 +6098,41 @@ async function findAccount(username) {
 function sanitizeUploadName(name) {
   const baseName = path.basename(String(name || 'attachment'));
   return baseName.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_').slice(0, 180) || 'attachment';
+}
+
+const safeUploadContentTypesByExtension = new Map([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.webp', 'image/webp'],
+  ['.gif', 'image/gif'],
+  ['.pdf', 'application/pdf'],
+  ['.txt', 'text/plain; charset=utf-8'],
+  ['.csv', 'text/csv; charset=utf-8'],
+]);
+
+const safeInlineUploadContentTypes = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+]);
+
+function normalizeUploadContentType(type, name) {
+  const extension = path.extname(String(name || '')).toLowerCase();
+  const byExtension = safeUploadContentTypesByExtension.get(extension);
+  if (byExtension) return byExtension;
+
+  const declared = String(type || '').split(';')[0].trim().toLowerCase();
+  if (safeUploadContentTypesByExtension.has(`.${declared.split('/').pop()}`)) {
+    return safeUploadContentTypesByExtension.get(`.${declared.split('/').pop()}`);
+  }
+
+  return 'application/octet-stream';
+}
+
+function canInlineUploadContentType(type) {
+  return safeInlineUploadContentTypes.has(String(type || '').split(';')[0].trim().toLowerCase());
 }
 
 function getUploadBase64(data) {
@@ -5619,6 +6740,283 @@ function getLocalDateKey(value, timeZone) {
 
   const get = (type) => parts.find((part) => part.type === type)?.value || '';
   return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+function getZonedDateParts(value, timeZone) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+
+  return {
+    weekday: parts.find((part) => part.type === 'weekday')?.value || '',
+    hour: Number(parts.find((part) => part.type === 'hour')?.value || 0),
+  };
+}
+
+function isBusinessTime(value, timeZone) {
+  const parts = getZonedDateParts(value, timeZone);
+  if (!parts) return false;
+  if (parts.weekday === 'Sat' || parts.weekday === 'Sun') return false;
+  return parts.hour >= workflowWorkdayStartHour && parts.hour < workflowWorkdayEndHour;
+}
+
+function calculateBusinessHoursBetween(startValue, endValue, timeZone) {
+  const start = typeof startValue === 'number' ? startValue : parseTimestamp(startValue);
+  const end = typeof endValue === 'number' ? endValue : parseTimestamp(endValue);
+  if (!start || !end || end <= start) return 0;
+
+  const sliceMs = 15 * 60 * 1000;
+  let cursor = start;
+  let totalMs = 0;
+  while (cursor < end) {
+    const next = Math.min(end, cursor + sliceMs);
+    if (isBusinessTime(cursor, timeZone)) {
+      totalMs += next - cursor;
+    }
+    cursor = next;
+  }
+
+  return totalMs / 3600000;
+}
+
+function createWorkflowEvent(type, record, actor, extra = {}) {
+  const version = record?.workflowInstance || {};
+  const at = extra.at || record?.updatedAt || new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    type,
+    recordId: record?.id,
+    moduleName: record?.moduleName,
+    approvalTypeName: record?.approvalTypeName,
+    workflowId: version.workflowId,
+    workflowName: version.workflowName,
+    workflowVersion: version.workflowVersion,
+    actorUsername: actor?.username || '',
+    actorName: actor?.name || 'system',
+    at,
+    createdAt: new Date().toISOString(),
+    ...extra,
+  };
+}
+
+function createWorkflowRecordCreatedEvents(record, actor) {
+  return [createWorkflowEvent('record_created', record, actor, {
+    nextStatus: record?.status,
+    at: record?.createdAt || record?.updatedAt,
+  })];
+}
+
+function createWorkflowTransitionEvents(beforeRecord, afterRecord, actor) {
+  if (!beforeRecord || !afterRecord) return [];
+
+  const events = [createWorkflowEvent('record_updated', afterRecord, actor, {
+    previousStatus: beforeRecord.status,
+    nextStatus: afterRecord.status,
+  })];
+
+  if (beforeRecord.status !== afterRecord.status) {
+    events.push(createWorkflowEvent('status_changed', afterRecord, actor, {
+      previousStatus: beforeRecord.status,
+      nextStatus: afterRecord.status,
+    }));
+  }
+
+  if (!getRecordFinalTime(beforeRecord) && getRecordFinalTime(afterRecord)) {
+    events.push(createWorkflowEvent('record_finalized', afterRecord, actor, {
+      previousStatus: beforeRecord.status,
+      nextStatus: afterRecord.status,
+      finalizedAt: afterRecord.approvedAt || afterRecord.processedAt || afterRecord.rejectedAt || afterRecord.updatedAt,
+    }));
+  }
+
+  if (!beforeRecord.processedAt && afterRecord.processedAt) {
+    events.push(createWorkflowEvent('record_processed', afterRecord, actor, {
+      previousStatus: beforeRecord.status,
+      nextStatus: afterRecord.status,
+      processedAt: afterRecord.processedAt,
+    }));
+  }
+
+  return events;
+}
+
+function getWorkflowEfficiencyCalendar(timeZone) {
+  return {
+    timeZone,
+    workdayStartHour: workflowWorkdayStartHour,
+    workdayEndHour: workflowWorkdayEndHour,
+    workdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+  };
+}
+
+function getSnapshotDay(dayMap, date) {
+  if (!dayMap.has(date)) {
+    dayMap.set(date, {
+      date,
+      createdCount: 0,
+      finalizedCount: 0,
+      approvedCount: 0,
+      completedCount: 0,
+      rejectedCount: 0,
+      eventCount: 0,
+      eventTypes: {},
+      totalCalendarHours: 0,
+      totalBusinessHours: 0,
+      slaBreachedCount: 0,
+    });
+  }
+
+  return dayMap.get(date);
+}
+
+function addWorkflowEventToSnapshot(dayMap, event, timeZone) {
+  const date = getLocalDateKey(event?.at, timeZone);
+  if (!date) return;
+  const day = getSnapshotDay(dayMap, date);
+  day.eventCount += 1;
+  const type = normalizeWorkflowText(event?.type) || 'unknown';
+  day.eventTypes[type] = (day.eventTypes[type] || 0) + 1;
+}
+
+function addRecordToEfficiencySnapshot(dayMap, record, timeZone) {
+  const createdDate = getLocalDateKey(record?.createdAt, timeZone);
+  if (createdDate) {
+    getSnapshotDay(dayMap, createdDate).createdCount += 1;
+  }
+
+  const finalTime = getRecordFinalTime(record);
+  if (!finalTime) return;
+
+  const finalDate = getLocalDateKey(finalTime, timeZone);
+  if (!finalDate) return;
+
+  const day = getSnapshotDay(dayMap, finalDate);
+  day.finalizedCount += 1;
+  if (record.status === STATUS_APPROVED) day.approvedCount += 1;
+  if (record.status === STATUS_COMPLETED) day.completedCount += 1;
+  if (record.status === STATUS_REJECTED) day.rejectedCount += 1;
+
+  const createdAt = parseTimestamp(record.createdAt);
+  if (!createdAt || finalTime < createdAt) return;
+
+  const calendarHours = (finalTime - createdAt) / 3600000;
+  const businessHours = calculateBusinessHoursBetween(record.createdAt, finalTime, timeZone);
+  day.totalCalendarHours += calendarHours;
+  day.totalBusinessHours += businessHours;
+  if (businessHours > workflowSlaBusinessHours) day.slaBreachedCount += 1;
+}
+
+function finalizeEfficiencySnapshotDays(dayMap) {
+  return [...dayMap.values()]
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .map((day) => ({
+      ...day,
+      avgCalendarHours: day.finalizedCount > 0 ? roundMetricValue(day.totalCalendarHours / day.finalizedCount, 2) : 0,
+      avgBusinessHours: day.finalizedCount > 0 ? roundMetricValue(day.totalBusinessHours / day.finalizedCount, 2) : 0,
+      slaBreachRate: day.finalizedCount > 0 ? roundMetricValue((day.slaBreachedCount / day.finalizedCount) * 100, 1) : 0,
+      totalCalendarHours: roundMetricValue(day.totalCalendarHours, 2),
+      totalBusinessHours: roundMetricValue(day.totalBusinessHours, 2),
+    }));
+}
+
+function buildWorkflowEfficiencySnapshot(records, events, timeZone) {
+  const localTimeZone = normalizeTimeZone(timeZone);
+  const dayMap = new Map();
+
+  (Array.isArray(events) ? events : []).forEach((event) => addWorkflowEventToSnapshot(dayMap, event, localTimeZone));
+  (Array.isArray(records) ? records : []).forEach((record) => addRecordToEfficiencySnapshot(dayMap, record, localTimeZone));
+
+  const daily = finalizeEfficiencySnapshotDays(dayMap);
+  const totals = daily.reduce((result, day) => {
+    result.createdCount += day.createdCount;
+    result.finalizedCount += day.finalizedCount;
+    result.approvedCount += day.approvedCount;
+    result.completedCount += day.completedCount;
+    result.rejectedCount += day.rejectedCount;
+    result.eventCount += day.eventCount;
+    result.slaBreachedCount += day.slaBreachedCount;
+    result.totalCalendarHours += day.totalCalendarHours;
+    result.totalBusinessHours += day.totalBusinessHours;
+    return result;
+  }, {
+    createdCount: 0,
+    finalizedCount: 0,
+    approvedCount: 0,
+    completedCount: 0,
+    rejectedCount: 0,
+    eventCount: 0,
+    slaBreachedCount: 0,
+    totalCalendarHours: 0,
+    totalBusinessHours: 0,
+  });
+
+  return {
+    snapshotDate: getLocalDateKey(new Date(), localTimeZone),
+    generatedAt: new Date().toISOString(),
+    source: 'workflow-events-v1',
+    timeZone: localTimeZone,
+    workCalendar: getWorkflowEfficiencyCalendar(localTimeZone),
+    slaBusinessHours: workflowSlaBusinessHours,
+    recordCount: Array.isArray(records) ? records.length : 0,
+    eventCount: Array.isArray(events) ? events.length : 0,
+    totals: {
+      ...totals,
+      avgCalendarHours: totals.finalizedCount > 0 ? roundMetricValue(totals.totalCalendarHours / totals.finalizedCount, 2) : 0,
+      avgBusinessHours: totals.finalizedCount > 0 ? roundMetricValue(totals.totalBusinessHours / totals.finalizedCount, 2) : 0,
+      slaBreachRate: totals.finalizedCount > 0 ? roundMetricValue((totals.slaBreachedCount / totals.finalizedCount) * 100, 1) : 0,
+      totalCalendarHours: roundMetricValue(totals.totalCalendarHours, 2),
+      totalBusinessHours: roundMetricValue(totals.totalBusinessHours, 2),
+    },
+    daily,
+  };
+}
+
+async function refreshWorkflowEfficiencySnapshots(records, timeZone = 'UTC') {
+  const localTimeZone = normalizeTimeZone(timeZone);
+  return updateWorkflowEfficiencyStore(({ events, snapshots }) => {
+    const snapshot = buildWorkflowEfficiencySnapshot(records, events, localTimeZone);
+    const existingSnapshots = Array.isArray(snapshots.snapshots) ? snapshots.snapshots : [];
+    const existingIndex = existingSnapshots.findIndex((item) => (
+      item.snapshotDate === snapshot.snapshotDate && item.timeZone === snapshot.timeZone
+    ));
+
+    if (existingIndex >= 0) {
+      existingSnapshots[existingIndex] = snapshot;
+    } else {
+      existingSnapshots.push(snapshot);
+    }
+
+    snapshots.updatedAt = snapshot.generatedAt;
+    snapshots.current = snapshot;
+    snapshots.snapshots = existingSnapshots
+      .sort((left, right) => normalizeWorkflowText(right.generatedAt).localeCompare(normalizeWorkflowText(left.generatedAt)))
+      .slice(0, 120);
+
+    return snapshot;
+  });
+}
+
+function withWorkflowEfficiencyReporting(summary, snapshot) {
+  return {
+    ...summary,
+    reporting: {
+      source: snapshot.source,
+      snapshotUpdatedAt: snapshot.generatedAt,
+      timeZone: snapshot.timeZone,
+      eventCount: snapshot.eventCount,
+      dailySnapshotCount: snapshot.daily.length,
+      slaBusinessHours: snapshot.slaBusinessHours,
+      slaBreachedCount: snapshot.totals.slaBreachedCount,
+      slaBreachRate: snapshot.totals.slaBreachRate,
+      workCalendar: snapshot.workCalendar,
+    },
+  };
 }
 
 function buildOverview(records, timeZone = 'UTC') {
@@ -6455,26 +7853,40 @@ async function askAiAssistant(question, records, timeZone = 'UTC') {
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
-    dataDir,
   });
 });
 
 app.get('/api/workflow-efficiency/personal', authenticate, async (req, res, next) => {
   try {
+    const timeZone = getRequestTimeZone(req);
     const [records, accounts, directory] = await Promise.all([
       readRecords(),
       readAccounts(),
       readOrganizationDirectory(),
     ]);
+    const snapshot = await refreshWorkflowEfficiencySnapshots(records, timeZone);
 
-    res.json(buildPersonalEfficiencySummary(
-      records,
-      req.user,
-      getRequestTimeZone(req),
-      req.query?.range,
-      accounts,
-      directory,
+    res.json(withWorkflowEfficiencyReporting(
+      buildPersonalEfficiencySummary(
+        records,
+        req.user,
+        timeZone,
+        req.query?.range,
+        accounts,
+        directory,
+      ),
+      snapshot,
     ));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/workflow-efficiency/snapshots', authenticate, requireRoles('boss'), async (req, res, next) => {
+  try {
+    const records = await readRecords();
+    const snapshot = await refreshWorkflowEfficiencySnapshots(records, getRequestTimeZone(req));
+    res.json(snapshot);
   } catch (error) {
     next(error);
   }
@@ -6504,11 +7916,16 @@ app.get('/api/workflow-templates/:id/efficiency', authenticate, async (req, res,
     }
 
     const records = await readRecords();
+    const timeZone = getRequestTimeZone(req);
+    const snapshot = await refreshWorkflowEfficiencySnapshots(records, timeZone);
     const scope = normalizeWorkflowText(req.query?.scope) === 'personal' ? 'personal' : 'enterprise';
-    res.json(buildWorkflowEfficiencySummary(template, records, getRequestTimeZone(req), req.query?.range, {
-      scope,
-      user: req.user,
-    }));
+    res.json(withWorkflowEfficiencyReporting(
+      buildWorkflowEfficiencySummary(template, records, timeZone, req.query?.range, {
+        scope,
+        user: req.user,
+      }),
+      snapshot,
+    ));
   } catch (error) {
     next(error);
   }
@@ -7095,7 +8512,7 @@ app.get('/api/ai-branch-logs', authenticate, requireRoles('developer'), async (_
 });
 
 app.get('/api/account/profile', authenticate, async (req, res) => {
-  res.json(req.user);
+  res.json(toPublicUser(req.user));
 });
 
 app.patch('/api/account/profile', authenticate, async (req, res, next) => {
@@ -7127,9 +8544,7 @@ app.patch('/api/account/profile', authenticate, async (req, res, next) => {
       }
 
       if (hasPassword) {
-        if (nextPassword.length < 6) {
-          throw createHttpError('password must be at least 6 characters', 400);
-        }
+        assertStrongAccountPassword(nextPassword);
 
         if (!isDeveloperOverride && !verifyPassword(currentPassword, account.passwordHash)) {
           throw createHttpError('current password is incorrect', 401);
@@ -7174,12 +8589,15 @@ app.post('/api/accounts', authenticate, requireRoles('developer'), async (req, r
     const username = String(req.body?.username || '').trim();
     const name = String(req.body?.name || username).trim();
     const role = normalizeRole(req.body?.role);
-    const password = String(req.body?.password || '123456');
+    const password = String(req.body?.password || '');
     const avatarUrl = req.body?.avatarUrl === undefined ? '' : normalizeAvatarUrl(req.body.avatarUrl);
+    const permissions = normalizeAccountPermissions(req.body?.permissions);
 
     if (!username || !isManagedRole(role)) {
       return res.status(400).json({ error: 'missing or invalid account fields' });
     }
+
+    assertStrongAccountPassword(password);
 
     if (username === superAdmin.username) {
       return res.status(409).json({ error: 'username already exists' });
@@ -7198,8 +8616,9 @@ app.post('/api/accounts', authenticate, requireRoles('developer'), async (req, r
         username,
         name,
         role,
-        passwordHash: hashPassword(password || '123456'),
+        passwordHash: hashPassword(password),
         enabled: true,
+        ...(permissions.length ? { permissions } : {}),
         ...(avatarUrl ? { avatarUrl } : {}),
         createdAt: now,
         updatedAt: now,
@@ -7262,6 +8681,9 @@ app.patch('/api/accounts/:id', authenticate, requireRoles('developer'), async (r
       }
       account.role = nextRole;
       account.enabled = req.body?.enabled === undefined ? account.enabled !== false : Boolean(req.body.enabled);
+      if (req.body?.permissions !== undefined) {
+        account.permissions = normalizeAccountPermissions(req.body.permissions);
+      }
 
       if (req.body?.password !== undefined) {
         const password = String(req.body.password || '');
@@ -7459,7 +8881,7 @@ app.post('/api/auth/passkey/register/verify', authenticate, async (req, res, nex
   }
 });
 
-app.post('/api/auth/passkey/login/options', async (req, res, next) => {
+app.post('/api/auth/passkey/login/options', passkeyLoginRateLimit, async (req, res, next) => {
   try {
     const username = String(req.body?.username || '').trim();
     const credentials = await readPasskeyCredentials();
@@ -7501,7 +8923,7 @@ app.post('/api/auth/passkey/login/options', async (req, res, next) => {
   }
 });
 
-app.post('/api/auth/passkey/login/verify', async (req, res, next) => {
+app.post('/api/auth/passkey/login/verify', passkeyLoginRateLimit, async (req, res, next) => {
   try {
     const credential = req.body?.credential;
     const credentialId = getCredentialIdFromRequest(credential);
@@ -7555,19 +8977,24 @@ app.post('/api/auth/passkey/login/verify', async (req, res, next) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res, next) => {
+app.post('/api/auth/login', authLoginRateLimit, async (req, res, next) => {
   try {
     const { username, password } = req.body || {};
     const loginName = String(username || '').trim();
     let user = null;
 
-    if (loginName === superAdmin.username && password === superAdminPassword) {
+    if (
+      timingSafeStringEqual(loginName, superAdmin.username) &&
+      timingSafeStringEqual(password, superAdminPassword)
+    ) {
       user = superAdmin;
     } else {
       const accounts = await readAccounts();
       const account = accounts.find((item) => item.username === loginName && item.enabled !== false);
       if (account && verifyPassword(password, account.passwordHash)) {
-        user = account;
+        if (!isProductionRuntime || !weakAccountPasswords.has(String(password).trim().toLowerCase())) {
+          user = account;
+        }
       }
     }
 
@@ -7585,7 +9012,7 @@ app.post('/api/auth/login', async (req, res, next) => {
   }
 });
 
-app.post('/api/backup/login', (req, res) => {
+app.post('/api/backup/login', backupLoginRateLimit, (req, res) => {
   if (!isBackupConfigured()) {
     return res.status(503).json({ error: 'backup access is not configured' });
   }
@@ -7619,6 +9046,10 @@ app.get('/api/backup/download', authenticateBackup, async (_req, res, next) => {
 
 app.post('/api/backup/upload', authenticateBackup, async (req, res, next) => {
   try {
+    if (!backupRestoreEnabled) {
+      throw createHttpError('backup restore is disabled', 403);
+    }
+
     const archive = await readRequestBody(req, maxBackupUploadBytes);
     if (!archive.length) {
       return res.status(400).json({ error: 'missing backup file' });
@@ -7675,21 +9106,43 @@ app.post('/api/uploads', authenticate, requireRoles('employee', 'boss'), async (
       savedUploads.push({
         id,
         name: originalName,
-        type: String(file?.type || 'application/octet-stream'),
+        type: normalizeUploadContentType(file?.type, originalName),
         size: buffer.length,
         storedName,
         uploadedAt: new Date().toISOString(),
         uploadedBy: req.user.name,
+        uploadedByUsername: req.user.username,
         url: `/api/uploads/${id}`,
       });
     }
 
     const publicUploads = await updateUploads((uploads) => {
       uploads.unshift(...savedUploads);
-      return savedUploads.map(({ storedName, uploadedBy, ...upload }) => upload);
+      return savedUploads.map(({ storedName, uploadedBy, uploadedByUsername, recordIds, draftIds, ...upload }) => upload);
     });
 
     res.status(201).json(publicUploads);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/uploads/orphans', authenticate, requireRoles('developer'), async (_req, res, next) => {
+  try {
+    const orphanUploads = await getOrphanUploads();
+    res.json(orphanUploads.map(toPublicUploadLifecycle));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/uploads/orphans/cleanup', authenticate, requireRoles('developer'), async (_req, res, next) => {
+  try {
+    const removed = await cleanupOrphanUploads();
+    res.json({
+      removedCount: removed.length,
+      removed,
+    });
   } catch (error) {
     next(error);
   }
@@ -7704,15 +9157,27 @@ app.get('/api/uploads/:id', authenticate, async (req, res, next) => {
       return res.status(404).json({ error: 'upload file not found' });
     }
 
+    const records = await readRecords();
+    if (!canUserAccessUpload(req.user, upload, records)) {
+      return res.status(403).json({ error: 'upload file is not accessible' });
+    }
+
     const uploadRoot = path.resolve(uploadsDir);
     const filePath = path.resolve(uploadRoot, upload.storedName);
     if (!filePath.startsWith(`${uploadRoot}${path.sep}`)) {
       return res.status(400).json({ error: 'invalid upload file path' });
     }
 
-    const disposition = req.query.disposition === 'inline' ? 'inline' : 'attachment';
+    const contentType = normalizeUploadContentType(upload.type, upload.name || upload.storedName);
+    const disposition = req.query.disposition === 'inline' && canInlineUploadContentType(contentType)
+      ? 'inline'
+      : 'attachment';
     const asciiName = String(upload.name || 'attachment').replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
-    res.setHeader('Content-Type', upload.type || 'application/octet-stream');
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Download-Options', 'noopen');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'");
     res.setHeader(
       'Content-Disposition',
       `${disposition}; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(upload.name || 'attachment')}`,
@@ -7874,12 +9339,121 @@ app.patch('/api/notifications/:id/read', authenticate, async (req, res, next) =>
   }
 });
 
+app.get('/api/approval-drafts', authenticate, requireRoles('employee', 'boss'), async (req, res, next) => {
+  try {
+    const drafts = await readApprovalDrafts();
+    const includeAll = normalizeRole(req.user.role) === 'developer' && isTruthyQuery(req.query?.all);
+    const username = normalizeWorkflowText(req.user.username).toLowerCase();
+    const visibleDrafts = includeAll
+      ? drafts
+      : drafts.filter((draft) => normalizeWorkflowText(draft.ownerUsername).toLowerCase() === username);
+
+    res.json(visibleDrafts
+      .sort((left, right) => normalizeWorkflowText(right.updatedAt).localeCompare(normalizeWorkflowText(left.updatedAt)))
+      .map(toPublicApprovalDraft));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/approval-drafts', authenticate, requireRoles('employee', 'boss'), async (req, res, next) => {
+  try {
+    const payload = await normalizeApprovalDraftPayload(req.body || {}, req.user);
+    const requestedId = normalizeWorkflowText(req.body?.id);
+    const now = new Date().toISOString();
+
+    const draft = await updateApprovalDrafts((drafts) => {
+      const existing = requestedId
+        ? drafts.find((item) => item.id === requestedId && canUserAccessDraft(req.user, item))
+        : null;
+
+      if (requestedId && !existing && drafts.some((item) => item.id === requestedId)) {
+        throw createHttpError('approval draft not found', 404);
+      }
+
+      if (existing) {
+        existing.moduleName = payload.moduleName;
+        existing.approvalTypeName = payload.approvalTypeName;
+        existing.businessData = payload.businessData;
+        existing.ownerName = req.user.name;
+        existing.updatedAt = now;
+        return existing;
+      }
+
+      const nextDraft = {
+        id: requestedId || crypto.randomUUID(),
+        ownerUsername: req.user.username,
+        ownerName: req.user.name,
+        moduleName: payload.moduleName,
+        approvalTypeName: payload.approvalTypeName,
+        businessData: payload.businessData,
+        createdAt: now,
+        updatedAt: now,
+      };
+      drafts.unshift(nextDraft);
+      return nextDraft;
+    });
+
+    res.status(201).json(toPublicApprovalDraft(draft));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/approval-drafts/:id', authenticate, requireRoles('employee', 'boss'), async (req, res, next) => {
+  try {
+    const now = new Date().toISOString();
+    let payload = null;
+
+    const draft = await updateApprovalDrafts(async (drafts) => {
+      const existing = drafts.find((item) => item.id === req.params.id && canUserAccessDraft(req.user, item));
+      if (!existing) {
+        throw createHttpError('approval draft not found', 404);
+      }
+
+      payload = await normalizeApprovalDraftPayload(req.body || {}, req.user, existing);
+      existing.moduleName = payload.moduleName;
+      existing.approvalTypeName = payload.approvalTypeName;
+      existing.businessData = payload.businessData;
+      existing.ownerName = req.user.name;
+      existing.updatedAt = now;
+      return existing;
+    });
+
+    res.json(toPublicApprovalDraft(draft));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/approval-drafts/:id', authenticate, requireRoles('employee', 'boss'), async (req, res, next) => {
+  try {
+    await updateApprovalDrafts((drafts) => {
+      const index = drafts.findIndex((item) => item.id === req.params.id && canUserAccessDraft(req.user, item));
+      if (index < 0) {
+        throw createHttpError('approval draft not found', 404);
+      }
+
+      drafts.splice(index, 1);
+      return null;
+    });
+
+    res.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/records', authenticate, async (req, res, next) => {
   try {
     const records = await readRecords();
-    const visibleRecords = records.filter((record) => canUserSeeRecord(req.user, record));
+    const visibleRecords = sortRecordsForQuery(
+      records.filter((record) => canUserSeeRecord(req.user, record) && recordMatchesQuery(record, req.query, req.user)),
+      req.query,
+    );
 
-    res.json(visibleRecords.map((record) => toPublicRecord(record, req.user)));
+    const publicRecords = visibleRecords.map((record) => toPublicRecord(record, req.user));
+    res.json(paginatePublicRecords(publicRecords, req.query));
   } catch (error) {
     next(error);
   }
@@ -7888,31 +9462,49 @@ app.get('/api/records', authenticate, async (req, res, next) => {
 app.post('/api/records', authenticate, requireRoles('employee', 'boss'), async (req, res, next) => {
   try {
     const { moduleName, approvalTypeName, businessData, applicant } = req.body || {};
+    const normalizedModuleName = normalizeWorkflowText(moduleName);
+    const normalizedApprovalTypeName = normalizeWorkflowText(approvalTypeName);
+    const normalizedApplicant = normalizeWorkflowText(applicant);
 
-    if (!moduleName || !approvalTypeName || !businessData || !applicant) {
+    if (!normalizedModuleName || !normalizedApprovalTypeName || !businessData || !normalizedApplicant) {
       return res.status(400).json({ error: 'missing required approval record fields' });
     }
 
-    if (normalizeRole(req.user.role) !== 'developer' && applicant !== req.user.name) {
+    if (normalizeRole(req.user.role) !== 'developer' && normalizedApplicant !== req.user.name) {
       return res.status(403).json({ error: 'applicant does not match current user' });
     }
+
+    const [schema, uploads] = await Promise.all([readApprovalSchema(), readUploads()]);
+    const schemaType = findApprovalSchemaType(schema, normalizedModuleName, normalizedApprovalTypeName);
+    if (!schemaType) {
+      return res.status(400).json({ error: 'approval type is not configured' });
+    }
+
+    if (schemaType.visibleToUsers === false && normalizeRole(req.user.role) !== 'developer') {
+      return res.status(403).json({ error: 'approval type is hidden from users' });
+    }
+
+    validateBusinessDataForApprovalType(schemaType, businessData, {
+      uploads,
+      user: req.user,
+    });
 
     const now = new Date().toISOString();
     const recordId = `APP-${Date.now()}`;
     const workflow = await createWorkflowInstanceForRecord({
-      moduleName,
-      approvalTypeName,
+      moduleName: normalizedModuleName,
+      approvalTypeName: normalizedApprovalTypeName,
       applicantUsername: req.user.username,
       businessData,
       recordId,
     });
     const record = await createBusinessRecord({
       id: recordId,
-      moduleName,
-      approvalTypeName,
+      moduleName: normalizedModuleName,
+      approvalTypeName: normalizedApprovalTypeName,
       businessData,
       status: workflow.initialStatus,
-      applicant,
+      applicant: normalizedApplicant,
       applicantUsername: req.user.username,
       workflowInstance: workflow.instance,
       ccRecipients: workflow.ccRecipients,
@@ -7927,7 +9519,7 @@ app.post('/api/records', authenticate, requireRoles('employee', 'boss'), async (
         rejectReason: workflow.initialRejectReason || '审批人为空，系统自动拒绝',
       } : {}),
       logs: [
-        createLog('\u53d1\u8d77\u7533\u8bf7', applicant, '\u63d0\u4ea4\u4e86\u5ba1\u6279\u5355'),
+        createLog('\u53d1\u8d77\u7533\u8bf7', normalizedApplicant, '\u63d0\u4ea4\u4e86\u5ba1\u6279\u5355'),
         createLog('\u5339\u914d\u5ba1\u6279\u6d41', 'system', `Matched workflow: ${workflow.instance.workflowName} v${workflow.instance.workflowVersion}`),
         ...(workflow.initialStatus === STATUS_REJECTED
           ? [createLog('自动拒绝', 'system', workflow.initialRejectReason || '审批人为空，系统自动拒绝')]
@@ -7941,7 +9533,9 @@ app.post('/api/records', authenticate, requireRoles('employee', 'boss'), async (
       ],
     });
 
+    await linkUploadsToRecord(record.id, record.businessData);
     await createNotificationsForCreatedRecord(record, req.user);
+    await appendWorkflowEvents(createWorkflowRecordCreatedEvents(record, req.user));
 
     res.status(201).json(toPublicRecord(record, req.user));
     scheduleAiSuggestionGeneration(record);
@@ -8007,6 +9601,7 @@ app.patch('/api/records/:id/status', authenticate, requireRoles('employee', 'bos
     if (previousRecord) {
       await createNotificationsForRecordTransition(previousRecord, updatedRecord, req.user);
       await markStaleActionNotificationsRead(req.user);
+      await appendWorkflowEvents(createWorkflowTransitionEvents(previousRecord, updatedRecord, req.user));
     }
 
     res.json(toPublicRecord(updatedRecord, req.user));
@@ -8029,6 +9624,7 @@ app.patch('/api/records/:id/process', authenticate, requireRoles('employee', 'bo
     if (previousRecord) {
       await createNotificationsForRecordTransition(previousRecord, updatedRecord, req.user);
       await markStaleActionNotificationsRead(req.user);
+      await appendWorkflowEvents(createWorkflowTransitionEvents(previousRecord, updatedRecord, req.user));
     }
 
     res.json(toPublicRecord(updatedRecord, req.user));
@@ -8041,6 +9637,7 @@ app.delete('/api/records', authenticate, requireRoles('developer'), async (_req,
   try {
     await clearRecordFiles();
     await clearNotifications();
+    await clearWorkflowEfficiencyStore();
 
     res.status(204).end();
   } catch (error) {

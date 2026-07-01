@@ -3,6 +3,7 @@ build/
 dist/
 coverage/
 data/
+railway-volume-backups/
 .env*
 !.env.example
 

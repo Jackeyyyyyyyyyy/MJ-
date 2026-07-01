@@ -10,6 +10,7 @@ import {
   CircleHelp,
   Lightbulb,
   Minus,
+  Search,
   TrendingDown,
   TrendingUp,
   UserRound,
@@ -47,6 +48,19 @@ function getTemplateName(template: WorkflowTemplate) {
   const moduleName = template.moduleName || template.draft?.basic?.moduleName || template.publishedVersion?.basic?.moduleName;
   const approvalTypeName = template.approvalTypeName || template.draft?.basic?.approvalTypeName || template.publishedVersion?.basic?.approvalTypeName;
   return moduleName ? `${moduleName} / ${approvalTypeName || moduleName}` : approvalTypeName || template.name || '审批流';
+}
+
+function getTemplateSearchText(template: WorkflowTemplate) {
+  return [
+    getTemplateName(template),
+    template.name,
+    template.moduleName,
+    template.approvalTypeName,
+    template.draft?.basic?.moduleName,
+    template.draft?.basic?.approvalTypeName,
+    template.publishedVersion?.basic?.moduleName,
+    template.publishedVersion?.basic?.approvalTypeName,
+  ].filter(Boolean).join(' ').toLocaleLowerCase('zh-CN');
 }
 
 function sortTemplates(templates: WorkflowTemplate[]) {
@@ -510,7 +524,10 @@ export default function EfficiencyDiagnosis() {
   const [error, setError] = React.useState('');
   const [activeMetricKey, setActiveMetricKey] = React.useState<WorkflowEfficiencyMetricKey>('flowAvg');
   const [rangeMenuOpen, setRangeMenuOpen] = React.useState(false);
+  const [templateMenuOpen, setTemplateMenuOpen] = React.useState(false);
+  const [templateSearch, setTemplateSearch] = React.useState('');
   const [showDataInfo, setShowDataInfo] = React.useState(false);
+  const templateSearchInputRef = React.useRef<HTMLInputElement | null>(null);
   const effectiveScope: WorkflowEfficiencyScope = canUseEnterpriseScope ? scope : 'personal';
   const scopeTabs = React.useMemo(
     () => [
@@ -616,10 +633,29 @@ export default function EfficiencyDiagnosis() {
     };
   }, [effectiveScope, range]);
 
+  React.useEffect(() => {
+    if (effectiveScope !== 'enterprise') {
+      setTemplateMenuOpen(false);
+      setTemplateSearch('');
+    }
+  }, [effectiveScope]);
+
+  React.useEffect(() => {
+    if (!templateMenuOpen) return;
+    const focusTimer = window.setTimeout(() => templateSearchInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [templateMenuOpen]);
+
   const metricMap = getMetricMap(summary);
   const activeMetric = metricMap.get(activeMetricKey) || summary?.metrics[0];
   const periodText = getRangePeriod(range);
   const selectedRangeOption = rangeOptions.find((item) => item.value === range) || rangeOptions[1];
+  const selectedTemplateLabel = selectedTemplate ? getTemplateName(selectedTemplate) : '暂无可统计审批流';
+  const filteredTemplates = React.useMemo(() => {
+    const keyword = templateSearch.trim().toLocaleLowerCase('zh-CN');
+    if (!keyword) return templates;
+    return templates.filter((template) => getTemplateSearchText(template).includes(keyword));
+  }, [templateSearch, templates]);
 
   return (
     <div className="mx-[-16px] mt-[-4px] bg-white pb-[calc(88px+env(safe-area-inset-bottom))] text-midnight-graphite lg:mx-0 lg:mt-0 lg:overflow-hidden lg:rounded-[8px] lg:border lg:border-border-silver lg:pb-8">
@@ -723,18 +759,101 @@ export default function EfficiencyDiagnosis() {
 
       {effectiveScope === 'enterprise' && (
         <div className="border-b border-[#edf0f4] px-4 py-3">
-          <label className="relative block">
-            <select
-              value={selectedTemplateId}
-              onChange={(event) => setSelectedTemplateId(event.target.value)}
-              className="h-10 w-full appearance-none rounded-[8px] border border-[#edf0f4] bg-[#f7f8fa] pl-3 pr-9 text-[13px] font-semibold text-midnight-graphite outline-none"
+          <div
+            className="relative"
+            onBlur={(event) => {
+              const nextFocused = event.relatedTarget;
+              if (!(nextFocused instanceof Node) || !event.currentTarget.contains(nextFocused)) {
+                setTemplateMenuOpen(false);
+                setTemplateSearch('');
+              }
+            }}
+          >
+            <button
+              type="button"
+              data-testid="efficiency-template-selector"
+              aria-haspopup="listbox"
+              aria-expanded={templateMenuOpen}
+              aria-controls="efficiency-template-listbox"
+              disabled={templates.length === 0}
+              onClick={() => setTemplateMenuOpen((open) => !open)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  setTemplateMenuOpen(true);
+                }
+              }}
+              className={cn(
+                "flex h-10 w-full items-center justify-between gap-3 rounded-[8px] border border-[#edf0f4] bg-[#f7f8fa] pl-3 pr-3 text-left text-[13px] font-semibold text-midnight-graphite outline-none transition-colors",
+                templates.length === 0 ? "cursor-not-allowed text-[#9aa0aa]" : "hover:border-[#dce2ea] focus:border-[#1593f4] focus:bg-white",
+              )}
             >
-              {templates.map((template) => (
-                <option key={template.id} value={template.id}>{getTemplateName(template)}</option>
-              ))}
-            </select>
-            <ChevronDown size={16} strokeWidth={2.5} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#8b9099]" />
-          </label>
+              <span className="min-w-0 flex-1 truncate">{selectedTemplateLabel}</span>
+              <ChevronDown
+                size={16}
+                strokeWidth={2.5}
+                className={cn("shrink-0 text-[#8b9099] transition-transform", templateMenuOpen && "rotate-180")}
+              />
+            </button>
+
+            {templateMenuOpen && (
+              <div className="absolute left-0 top-[calc(100%+6px)] z-30 w-full overflow-hidden rounded-[8px] border border-[#edf0f4] bg-white shadow-[0_14px_32px_rgba(15,23,42,0.14)]">
+                <div className="border-b border-[#edf0f4] p-2">
+                  <div className="relative">
+                    <Search size={15} strokeWidth={2.3} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#9aa0aa]" />
+                    <input
+                      ref={templateSearchInputRef}
+                      data-testid="efficiency-template-search"
+                      type="search"
+                      value={templateSearch}
+                      onChange={(event) => setTemplateSearch(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          setTemplateMenuOpen(false);
+                          setTemplateSearch('');
+                        }
+                      }}
+                      placeholder="搜索审批流"
+                      className="h-9 w-full rounded-[7px] border border-[#edf0f4] bg-[#f7f8fa] pl-8 pr-3 text-[13px] font-semibold text-midnight-graphite outline-none transition-colors placeholder:text-[#a5aab3] focus:border-[#1593f4] focus:bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div id="efficiency-template-listbox" data-testid="efficiency-template-listbox" role="listbox" className="max-h-[320px] overflow-y-auto py-1">
+                  {filteredTemplates.length > 0 ? filteredTemplates.map((template) => {
+                    const templateName = getTemplateName(template);
+                    const selected = template.id === selectedTemplateId;
+
+                    return (
+                      <button
+                        key={template.id}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        onClick={() => {
+                          setSelectedTemplateId(template.id);
+                          setTemplateMenuOpen(false);
+                          setTemplateSearch('');
+                        }}
+                        className={cn(
+                          "flex min-h-9 w-full items-center px-3 py-2 text-left text-[13px] font-semibold leading-5",
+                          selected
+                            ? "bg-[#eef7ff] text-interactive-blue"
+                            : "text-midnight-graphite hover:bg-[#f7f8fa]",
+                        )}
+                      >
+                        <span className="min-w-0 truncate">{templateName}</span>
+                      </button>
+                    );
+                  }) : (
+                    <div className="px-3 py-5 text-center text-[13px] font-semibold text-[#8d929b]">
+                      未找到匹配审批流
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
