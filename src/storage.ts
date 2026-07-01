@@ -21,6 +21,8 @@ import {
   WorkflowTemplate,
   WorkflowEfficiencySummary,
   WorkflowEfficiencyRange,
+  WorkflowEfficiencyScope,
+  PersonalEfficiencySummary,
   WorkflowTemplateInput,
   WorkflowVersion,
   Schema,
@@ -234,7 +236,23 @@ export const storage = {
   },
 
   getPasskeys(): Promise<PasskeyCredentialSummary[]> {
-    return request<PasskeyCredentialSummary[]>('/auth/passkeys');
+    return request<unknown>('/auth/passkeys').then((response) => {
+      if (Array.isArray(response)) return response as PasskeyCredentialSummary[];
+
+      if (response && typeof response === 'object') {
+        const payload = response as {
+          passkeys?: unknown;
+          credentials?: unknown;
+          items?: unknown;
+        };
+
+        if (Array.isArray(payload.passkeys)) return payload.passkeys as PasskeyCredentialSummary[];
+        if (Array.isArray(payload.credentials)) return payload.credentials as PasskeyCredentialSummary[];
+        if (Array.isArray(payload.items)) return payload.items as PasskeyCredentialSummary[];
+      }
+
+      return [];
+    });
   },
 
   getPasskeyRegistrationOptions(): Promise<any> {
@@ -272,7 +290,23 @@ export const storage = {
   },
 
   getAccounts(): Promise<SystemAccount[]> {
-    return request<SystemAccount[]>('/accounts', undefined, { skipImpersonation: true });
+    return request<unknown>('/accounts', undefined, { skipImpersonation: true }).then((response) => {
+      if (Array.isArray(response)) return response as SystemAccount[];
+
+      if (response && typeof response === 'object') {
+        const payload = response as {
+          accounts?: unknown;
+          items?: unknown;
+          data?: unknown;
+        };
+
+        if (Array.isArray(payload.accounts)) return payload.accounts as SystemAccount[];
+        if (Array.isArray(payload.items)) return payload.items as SystemAccount[];
+        if (Array.isArray(payload.data)) return payload.data as SystemAccount[];
+      }
+
+      return [];
+    });
   },
 
   getAccountProfile(): Promise<User> {
@@ -370,15 +404,38 @@ export const storage = {
     }, { skipImpersonation: true });
   },
 
-  getWorkflowTemplates(): Promise<WorkflowTemplate[]> {
-    return request<WorkflowTemplate[]>('/workflow-templates', undefined, { skipImpersonation: true });
+  getWorkflowTemplates(options: RequestOptions = { skipImpersonation: true }): Promise<WorkflowTemplate[]> {
+    return request<WorkflowTemplate[]>('/workflow-templates', undefined, options);
   },
 
-  getWorkflowEfficiencySummary(id: string, range: WorkflowEfficiencyRange = '7d'): Promise<WorkflowEfficiencySummary> {
+  getWorkflowEfficiencySummary(
+    id: string,
+    range: WorkflowEfficiencyRange = '7d',
+    scope: WorkflowEfficiencyScope = 'enterprise',
+    options: RequestOptions = { skipImpersonation: true },
+  ): Promise<WorkflowEfficiencySummary> {
+    const params = new URLSearchParams({
+      range,
+      scope,
+    });
+
     return request<WorkflowEfficiencySummary>(
-      `/workflow-templates/${encodeURIComponent(id)}/efficiency?range=${encodeURIComponent(range)}`,
+      `/workflow-templates/${encodeURIComponent(id)}/efficiency?${params.toString()}`,
       undefined,
-      { skipImpersonation: true },
+      options,
+    );
+  },
+
+  getPersonalEfficiencySummary(
+    range: WorkflowEfficiencyRange = '30d',
+    options: RequestOptions = { skipImpersonation: false },
+  ): Promise<PersonalEfficiencySummary> {
+    const params = new URLSearchParams({ range });
+
+    return request<PersonalEfficiencySummary>(
+      `/workflow-efficiency/personal?${params.toString()}`,
+      undefined,
+      options,
     );
   },
 

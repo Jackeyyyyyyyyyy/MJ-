@@ -18,19 +18,22 @@ interface StoredAuthSession {
 }
 
 export function normalizeRole(role?: string | null): Role {
-  if (role === 'applicant' || role === 'approver' || role === 'employee') return 'employee';
-  if (role === 'boss') return 'boss';
-  if (role === 'developer') return 'developer';
+  const value = String(role || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (value === 'applicant' || value === 'approver' || value === 'employee') return 'employee';
+  if (value === 'boss') return 'boss';
+  if (value === 'developer' || value === 'super-admin' || value === 'superadmin' || value === 'system-admin') return 'developer';
   return 'employee';
 }
 
 function normalizeUser(user?: Partial<User> | null): User | null {
-  if (!user?.username || !user.name || !user.role) return null;
+  if (!user?.username || !user.name) return null;
+
+  const userWithFlags = user as Partial<User> & { isSuperAdmin?: boolean };
 
   return {
     username: user.username,
     name: user.name,
-    role: normalizeRole(user.role),
+    role: userWithFlags.isSuperAdmin ? 'developer' : normalizeRole(user.role),
     ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
   };
 }

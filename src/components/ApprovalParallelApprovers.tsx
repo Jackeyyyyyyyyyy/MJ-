@@ -56,7 +56,7 @@ function getApproverStatusStyle(approver: WorkflowApproverSnapshot, approvalMode
   }
 
   return {
-    card: 'border-black/[0.06] bg-white text-medium-gray',
+    card: 'border-black/[0.05] bg-white text-medium-gray',
     dot: 'bg-white text-medium-gray border border-border-silver',
     line: 'bg-slate-200',
   };
@@ -67,7 +67,7 @@ export default function ApprovalParallelApprovers({ approvers, title, approvalMo
 
   return (
     <div className="mt-4 w-full max-w-[520px]">
-      <div className="mb-2 inline-flex h-7 items-center rounded-full bg-black px-3 text-[11px] font-black text-white">
+      <div className="mb-2 inline-flex h-7 items-center rounded-full bg-[#f2f3f6] px-3 text-[11px] font-semibold text-medium-gray">
         {getApprovalModeLabel(approvalMode)}
       </div>
       <div className="relative flex items-stretch gap-3 overflow-x-auto pb-1 pt-5">
@@ -75,7 +75,7 @@ export default function ApprovalParallelApprovers({ approvers, title, approvalMo
           initial={{ scaleX: 0 }}
           animate={{ scaleX: 1 }}
           transition={{ duration: 0.45, ease: 'easeOut' }}
-          className="absolute left-8 right-8 top-[28px] h-[1.5px] origin-left bg-black/15"
+          className="absolute left-8 right-8 top-[28px] h-px origin-left bg-slate-200"
         />
         {approvers.map((approver, index) => {
           const style = getApproverStatusStyle(approver, approvalMode, stepStatus);
@@ -92,11 +92,11 @@ export default function ApprovalParallelApprovers({ approvers, title, approvalMo
               <div className={cn('mx-auto mb-2 h-4 w-[1.5px]', style.line)} />
               <div
                 className={cn(
-                  'relative rounded-2xl border px-3 py-3 shadow-sm transition-all duration-300',
+                  'relative rounded-[14px] border px-3 py-3 transition-all duration-300',
                   style.card,
                 )}
               >
-                <div className={cn('absolute -top-5 left-1/2 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-2xl shadow-sm', style.dot)}>
+                <div className={cn('absolute -top-5 left-1/2 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full', style.dot)}>
                   {approver.status === 'approved' && <Check size={15} strokeWidth={3} />}
                   {approver.status === 'rejected' && <X size={15} strokeWidth={3} />}
                   {isClosed && <Lock size={14} strokeWidth={3} />}
@@ -107,8 +107,8 @@ export default function ApprovalParallelApprovers({ approvers, title, approvalMo
                   ) : null}
                 </div>
                 <div className="pt-2">
-                  <p className="truncate text-center text-[12px] font-black text-black">{approver.name || '未解析'}</p>
-                  <p className="mt-1 text-center text-[10px] font-black uppercase tracking-widest">{getApproverStatusLabel(approver, approvalMode, stepStatus)}</p>
+                  <p className="truncate text-center text-[12px] font-semibold text-midnight-graphite">{approver.name || '未解析'}</p>
+                  <p className="mt-1 text-center text-[10.5px] font-medium">{getApproverStatusLabel(approver, approvalMode, stepStatus)}</p>
                   {approver.comment && (
                     <p className="mt-2 line-clamp-2 text-center text-[10px] font-bold text-medium-gray">{approver.comment}</p>
                   )}

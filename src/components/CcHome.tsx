@@ -68,27 +68,29 @@ export default function CcHome() {
   ];
 
   return (
-    <div className="space-y-5 pb-32 animate-in fade-in duration-700 lg:space-y-8 lg:pb-40">
-      <StatsOverview
-        title="我的抄送"
-        subtitle="流程结果与同步记录"
-        items={summaryItems}
-      />
+    <div className="space-y-3 pb-28 animate-in fade-in duration-700 lg:space-y-8 lg:pb-40">
+      <div className="hidden lg:block">
+        <StatsOverview
+          title="我的抄送"
+          subtitle="流程结果与同步记录"
+          items={summaryItems}
+        />
+      </div>
 
       <div className="space-y-3 lg:space-y-5">
-        <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center lg:gap-4">
-          <h2 className="text-[17px] font-semibold text-midnight-graphite lg:text-[20px] lg:font-bold lg:tracking-tight">抄送记录</h2>
+        <div className="flex flex-col justify-between gap-2.5 lg:flex-row lg:items-center lg:gap-4">
+          <h2 className="text-[17px] font-semibold text-midnight-graphite lg:text-[20px] lg:font-black lg:tracking-tight">抄送记录</h2>
           <div className="-mx-1 overflow-x-auto no-scrollbar px-1 sm:mx-0 sm:px-0">
-            <div className="inline-flex min-w-max rounded-[15px] bg-[#ececf0] p-1 lg:flex lg:w-fit lg:rounded-xl lg:border-0 lg:bg-lightest-gray-background">
+            <div className="inline-flex min-w-max gap-1.5 lg:w-fit lg:gap-0 lg:rounded-xl lg:bg-lightest-gray-background lg:p-1">
             {(['ALL', ApprovalStatus.APPROVED, ApprovalStatus.COMPLETED, ApprovalStatus.REJECTED] as string[]).map((status) => (
               <button
                 key={status}
                 onClick={() => setFilterStatus(status === 'ALL' ? ALL_STATUS : status)}
                 className={cn(
-                  "h-7 rounded-[11px] px-2.5 text-[11px] font-medium transition-all lg:h-auto lg:rounded-lg lg:px-4 lg:py-1.5 lg:text-[11px] lg:font-bold",
+                  "h-8 rounded-full px-2.5 text-[12px] font-medium transition-all lg:h-auto lg:rounded-lg lg:border-b-0 lg:px-4 lg:py-1.5 lg:text-[11px] lg:font-bold",
                   (filterStatus === status || (filterStatus === ALL_STATUS && status === 'ALL'))
-                    ? "bg-white text-midnight-graphite shadow-sm lg:bg-white lg:text-black"
-                    : "text-medium-gray hover:text-black lg:text-light-gray"
+                    ? "bg-white text-midnight-graphite shadow-[0_1px_2px_rgba(20,24,34,0.025)] ring-1 ring-black/[0.02] lg:text-black lg:shadow-sm"
+                    : "bg-transparent text-[#70747d] hover:text-black lg:text-light-gray"
                 )}
               >
                 {status === 'ALL'

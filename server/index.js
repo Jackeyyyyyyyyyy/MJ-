@@ -102,7 +102,7 @@ const STEP_REJECTED = 'rejected';
 const STEP_SKIPPED = 'skipped';
 const DEFAULT_ORGANIZATION_ID = 'default-org';
 const WORKFLOW_BUSINESS_TYPES = new Set(['reimbursement', 'purchase', 'leave', 'general']);
-const WORKFLOW_CONDITION_FIELDS = new Set(['amount', 'currency', 'category', 'project', 'department', 'submitter.member', 'submitter.department']);
+const WORKFLOW_CONDITION_FIELDS = new Set(['amount', 'currency', 'category', 'project', 'department', 'submitter.member', 'submitter.department', 'submitter:member', 'submitter:department']);
 const WORKFLOW_CONDITION_OPERATORS = new Set(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq', 'contains', 'not_contains']);
 const NUMERIC_WORKFLOW_CONDITION_OPERATORS = new Set(['lt', 'lte', 'gt', 'gte', 'between', 'eq', 'neq']);
 const TEXT_WORKFLOW_CONDITION_OPERATORS = new Set(['eq', 'neq', 'contains', 'not_contains']);
@@ -2130,6 +2130,55 @@ function getUnreadNotificationCounts(notifications) {
   return counts;
 }
 
+function isActionRequiredNotification(notification) {
+  return notification?.type === 'approval_pending' || notification?.type === 'approval_processing';
+}
+
+function isActionNotificationStillCurrent(notification, record, user) {
+  if (!notification || !record || !user) return false;
+  if (notification.type === 'approval_pending') return canUserApproveRecord(user, record);
+  if (notification.type === 'approval_processing') return canUserProcessRecord(user, record);
+  return true;
+}
+
+async function markStaleActionNotificationsRead(user) {
+  if (!user?.username) return 0;
+
+  const username = normalizeWorkflowText(user.username).toLowerCase();
+  const records = await readRecords();
+  const recordsById = new Map(records.map((record) => [record.id, record]));
+  const currentNotifications = await readNotifications();
+  const staleNotificationIds = new Set(
+    currentNotifications
+      .filter((notification) => (
+        !notification.readAt &&
+        isActionRequiredNotification(notification) &&
+        normalizeWorkflowText(notification.recipientUsername).toLowerCase() === username &&
+        !isActionNotificationStillCurrent(notification, recordsById.get(notification.recordId), user)
+      ))
+      .map((notification) => notification.id),
+  );
+
+  if (staleNotificationIds.size === 0) return 0;
+
+  const now = new Date().toISOString();
+
+  return updateNotifications((notifications) => {
+    let updated = 0;
+
+    notifications.forEach((notification) => {
+      if (notification.readAt || !staleNotificationIds.has(notification.id)) {
+        return;
+      }
+
+      notification.readAt = now;
+      updated += 1;
+    });
+
+    return updated;
+  });
+}
+
 function createPushPayload(notification, badgeCount = 0) {
   return JSON.stringify({
     title: notification.title,
@@ -3368,9 +3417,65 @@ function findWorkflowCurrencyValue(businessData, context = {}) {
   return undefined;
 }
 
+function getWorkflowConditionFieldKey(field) {
+  const normalized = normalizeWorkflowText(field);
+  if (normalized === 'submitter:department') return 'submitter.department';
+  if (normalized === 'submitter:member') return 'submitter.member';
+  return normalized;
+}
+
+function getDepartmentLineage(directory, departmentId) {
+  const departments = Array.isArray(directory?.departments) ? directory.departments : [];
+  const byId = new Map(departments.map((department) => [department.id, department]));
+  const lineage = [];
+  const seen = new Set();
+  let current = byId.get(departmentId);
+
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    lineage.push(current);
+    current = current.parentId ? byId.get(current.parentId) : null;
+  }
+
+  return lineage;
+}
+
+function departmentLineageMatchesExpectedValue(directory, departmentId, expectedValue) {
+  const expected = normalizeComparableText(expectedValue);
+  if (!expected) return false;
+
+  return getDepartmentLineage(directory, departmentId).some((department) => {
+    const candidates = [department.id, department.name]
+      .map(normalizeComparableText)
+      .filter(Boolean);
+    return candidates.includes(expected);
+  });
+}
+
+function isSubmitterDepartmentCondition(condition) {
+  return getWorkflowConditionFieldKey(condition?.field) === 'submitter.department';
+}
+
+function workflowSubmitterDepartmentConditionMatches(condition, context, actualValue) {
+  const expectedValues = getWorkflowConditionExpectedValues(condition).filter(Boolean);
+  const actual = normalizeComparableText(actualValue);
+  if (expectedValues.length === 0 || !actual) return false;
+
+  const matchesExpected = expectedValues.some((expectedValue) => {
+    const expected = normalizeComparableText(expectedValue);
+    return departmentLineageMatchesExpectedValue(context?.directory, context?.applicantMember?.departmentId, expectedValue)
+      || actual === expected
+      || actual.includes(expected);
+  });
+
+  if (condition.operator === 'neq') return !matchesExpected;
+  if (condition.operator === 'not_contains') return !matchesExpected;
+  return matchesExpected;
+}
+
 function getWorkflowConditionValue(condition, context) {
   const { businessData, applicantMember, directory } = context || {};
-  const field = normalizeWorkflowText(condition?.field);
+  const field = getWorkflowConditionFieldKey(condition?.field);
 
   if (field === 'currency') {
     return findWorkflowCurrencyValue(businessData, context);
@@ -3421,7 +3526,11 @@ function workflowConditionMatches(condition, context) {
   const actualValue = getWorkflowConditionValue(condition, context);
   const actualNumber = parseWorkflowNumber(actualValue);
 
-  if (normalizeWorkflowText(condition.field) === 'currency') {
+  if (isSubmitterDepartmentCondition(condition)) {
+    return workflowSubmitterDepartmentConditionMatches(condition, context, actualValue);
+  }
+
+  if (getWorkflowConditionFieldKey(condition.field) === 'currency') {
     const expectedSymbol = parseWorkflowCurrencySymbol(condition.value) || normalizeWorkflowText(condition.value);
     const actualSymbol = parseWorkflowCurrencySymbol(actualValue) || normalizeWorkflowText(actualValue);
     if (!expectedSymbol || !actualSymbol) return false;
@@ -3476,17 +3585,31 @@ function workflowConditionMatches(condition, context) {
   return false;
 }
 
+function getStructuredWorkflowBranchConditions(branch) {
+  if (Array.isArray(branch?.workflowConditions) && branch.workflowConditions.length > 0) {
+    return branch.workflowConditions;
+  }
+
+  if (Array.isArray(branch?.conditions) && branch.conditions.every((condition) => (
+    condition && typeof condition === 'object' && condition.field && condition.operator
+  ))) {
+    return branch.conditions;
+  }
+
+  return [];
+}
+
 function selectWorkflowBranch(version, context) {
   const branches = Array.isArray(version?.branches) ? version.branches : [];
   if (branches.length === 0) return null;
 
   const defaultBranch = branches.find((branch) => branch?.isDefault) || null;
-  const matchedBranch = branches.find((branch) => (
-    !branch?.isDefault
-    && Array.isArray(branch.conditions)
-    && branch.conditions.length > 0
-    && branch.conditions.every((condition) => workflowConditionMatches(condition, context))
-  ));
+  const matchedBranch = branches.find((branch) => {
+    if (branch?.isDefault) return false;
+    const structuredConditions = getStructuredWorkflowBranchConditions(branch);
+    if (structuredConditions.length === 0) return false;
+    return structuredConditions.every((condition) => workflowConditionMatches(condition, context));
+  });
 
   return matchedBranch || defaultBranch || branches[0];
 }
@@ -3674,7 +3797,11 @@ async function getLinearWorkflowNodes(version, context = {}) {
   const flowNodes = Array.isArray(version?.nodes)
     ? version.nodes.filter((node) => node?.type !== 'start')
     : [];
-  if (flowNodes.some((node) => ['approver', 'condition', 'processor'].includes(node?.type))) {
+  const hasConditionalBranches = Array.isArray(version?.branches) && version.branches.some((branch) => !branch?.isDefault);
+  const hasFlowConditionNode = flowNodes.some((node) => node?.type === 'condition');
+  const hasExecutableFlowNodes = flowNodes.some((node) => ['approver', 'condition', 'processor'].includes(node?.type));
+
+  if (hasExecutableFlowNodes && (hasFlowConditionNode || !hasConditionalBranches)) {
     const nodesWithLegacyProcessor = hasProcessorRule(version?.processorRule) && !containsProcessorFlowNode(flowNodes)
       ? [...flowNodes, createProcessorFlowNode(version.processorRule)]
       : flowNodes;
@@ -3716,7 +3843,7 @@ async function getLinearWorkflowNodesFromFlow(nodes, context = {}) {
       const defaultBranch = branches.find((branch) => branch?.isDefault) || null;
       const matchedBranch = branches.find((branch) => {
         if (branch?.isDefault) return false;
-        const structuredConditions = Array.isArray(branch.workflowConditions) ? branch.workflowConditions : [];
+        const structuredConditions = getStructuredWorkflowBranchConditions(branch);
         if (structuredConditions.length === 0) return false;
         return structuredConditions.every((condition) => workflowConditionMatches(condition, context));
       });
@@ -4143,8 +4270,11 @@ function createSupervisorChainWorkflowSteps(node, startOrder, directory, applica
     throw createHttpError('Cannot resolve supervisor chain because applicant is not bound to organization.', 400);
   }
 
-  const supervisors = getSupervisorsAtLevels(directory, applicantMember, getSupervisorLevels(rule))
-    .filter((item) => normalizeWorkflowText(item.member.accountUsername));
+  const supervisors = getSupervisorsAtLevels(directory, applicantMember, getSupervisorLevels(rule));
+  if (supervisors.some((item) => !normalizeWorkflowText(item.member.accountUsername))) {
+    return [];
+  }
+
   return supervisors.map((item, index) => createWorkflowStep(
     {
       ...node,
@@ -5592,6 +5722,44 @@ function recordMatchesWorkflowScope(record, scope) {
     normalizeWorkflowText(record?.approvalTypeName) === scope.approvalTypeName;
 }
 
+function addNormalizedWorkflowIdentity(identitySet, ...values) {
+  values.forEach((value) => {
+    const text = normalizeWorkflowText(value).toLowerCase();
+    if (text) identitySet.add(text);
+  });
+}
+
+function recordMatchesWorkflowUser(record, user) {
+  const identities = new Set();
+  addNormalizedWorkflowIdentity(identities, user?.username, user?.name);
+  if (identities.size === 0) return false;
+
+  const matchesIdentity = (...values) => values.some((value) => (
+    identities.has(normalizeWorkflowText(value).toLowerCase())
+  ));
+
+  if (matchesIdentity(
+    record?.applicantUsername,
+    record?.applicant,
+    record?.approver,
+    record?.processedByAccountUsername,
+    record?.processedBy,
+  )) {
+    return true;
+  }
+
+  return (Array.isArray(record?.workflowInstance?.steps) ? record.workflowInstance.steps : []).some((step) => (
+    (Array.isArray(step?.approvers) ? step.approvers : []).some((approver) => (
+      matchesIdentity(approver?.accountUsername, approver?.memberId, approver?.name)
+    )) ||
+    (Array.isArray(step?.processors) ? step.processors : []).some((processor) => (
+      matchesIdentity(processor?.accountUsername, processor?.memberId, processor?.name)
+    ))
+  )) || (Array.isArray(record?.ccRecipients) ? record.ccRecipients : []).some((recipient) => (
+    matchesIdentity(recipient?.accountUsername, recipient?.memberId, recipient?.name)
+  ));
+}
+
 function getLatestRecordLogTime(record) {
   return (Array.isArray(record?.logs) ? record.logs : []).reduce((latest, log) => {
     const time = parseTimestamp(log?.time);
@@ -5749,11 +5917,14 @@ function getWorkflowEfficiencyRangeLabel(range, prefix) {
   return `${prefix}${days}天`;
 }
 
-function buildWorkflowEfficiencySummary(template, records, timeZone = 'UTC', rangeInput = '7d') {
+function buildWorkflowEfficiencySummary(template, records, timeZone = 'UTC', rangeInput = '7d', options = {}) {
   const localTimeZone = normalizeTimeZone(timeZone);
   const range = normalizeWorkflowEfficiencyRange(rangeInput);
+  const scopeType = options.scope === 'personal' ? 'personal' : 'enterprise';
   const scope = getWorkflowTemplateEfficiencyScope(template);
-  const scopedRecords = records.filter((record) => recordMatchesWorkflowScope(record, scope));
+  const scopedRecords = records
+    .filter((record) => recordMatchesWorkflowScope(record, scope))
+    .filter((record) => scopeType !== 'personal' || recordMatchesWorkflowUser(record, options.user));
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
   const periodMs = dayMs * workflowEfficiencyRangeDays[range];
@@ -5802,6 +5973,7 @@ function buildWorkflowEfficiencySummary(template, records, timeZone = 'UTC', ran
   }, {});
 
   return {
+    scope: scopeType,
     range,
     metrics,
     deltaPercent: metrics.find((metric) => metric.key === 'flowAvg')?.changePercent || 0,
@@ -5810,6 +5982,369 @@ function buildWorkflowEfficiencySummary(template, records, timeZone = 'UTC', ran
     currentPeriodLabel: getWorkflowEfficiencyRangeLabel(range, '近'),
     previousPeriodLabel: getWorkflowEfficiencyRangeLabel(range, '前'),
     trend,
+  };
+}
+
+const personalEfficiencyMetricDefinitions = {
+  initiated: [
+    { key: 'initiatedCount', label: '发起单量', unit: '', precision: 0 },
+    { key: 'unfinishedInitiatedCount', label: '未完成单量', unit: '', precision: 0 },
+    { key: 'initiatedFlowAvgHours', label: '流程平均耗时', unit: '小时', precision: 1 },
+  ],
+  approved: [
+    { key: 'approvedCount', label: '审批单量', unit: '', precision: 0 },
+    { key: 'pendingApprovalCount', label: '待处理单量', unit: '', precision: 0 },
+    { key: 'approvalAvgHours', label: '审批平均耗时', unit: '小时', precision: 1 },
+  ],
+};
+
+function getWorkflowIdentitySet(...values) {
+  const identitySet = new Set();
+  addNormalizedWorkflowIdentity(identitySet, ...values);
+  return identitySet;
+}
+
+function identitySetMatches(identitySet, ...values) {
+  return values.some((value) => identitySet.has(normalizeWorkflowText(value).toLowerCase()));
+}
+
+function getCurrentApprovalAssignees(record) {
+  if (record?.status !== STATUS_PENDING) return [];
+
+  const currentStep = getCurrentWorkflowStep(record);
+  if (!currentStep || isProcessorWorkflowStep(currentStep)) return [];
+
+  return (Array.isArray(currentStep.approvers) ? currentStep.approvers : []).filter((approver) => (
+    approver?.status !== 'approved' &&
+    approver?.status !== 'rejected' &&
+    approver?.status !== 'closed'
+  ));
+}
+
+function recordInitiatedByIdentity(record, identitySet) {
+  return identitySetMatches(identitySet, record?.applicantUsername, record?.applicant);
+}
+
+function getWorkflowStepStartedTime(record, steps, stepIndex) {
+  for (let index = stepIndex - 1; index >= 0; index -= 1) {
+    const actedTime = parseTimestamp(steps[index]?.actedAt);
+    if (actedTime) return actedTime;
+  }
+
+  return parseTimestamp(record?.createdAt);
+}
+
+function collectApprovalActions(record) {
+  const steps = Array.isArray(record?.workflowInstance?.steps) ? record.workflowInstance.steps : [];
+  const actions = [];
+
+  steps.forEach((step, stepIndex) => {
+    if (isProcessorWorkflowStep(step)) return;
+
+    const startedTime = getWorkflowStepStartedTime(record, steps, stepIndex);
+    (Array.isArray(step?.approvers) ? step.approvers : []).forEach((approver) => {
+      const status = normalizeWorkflowText(approver?.status);
+      if (!['approved', 'rejected'].includes(status)) return;
+
+      const fallbackStepTime = identitySetMatches(
+        getWorkflowIdentitySet(approver?.accountUsername, approver?.memberId, approver?.name),
+        step?.actedByAccountUsername,
+        step?.actedByMemberId,
+        step?.actedByName,
+      ) ? step?.actedAt : '';
+      const actedTime = parseTimestamp(approver?.actedAt) || parseTimestamp(fallbackStepTime);
+      if (!actedTime) return;
+
+      actions.push({
+        accountUsername: approver?.accountUsername || step?.actedByAccountUsername || '',
+        memberId: approver?.memberId || step?.actedByMemberId || '',
+        name: approver?.name || step?.actedByName || '',
+        actedTime,
+        durationHours: startedTime && actedTime >= startedTime ? (actedTime - startedTime) / 3600000 : 0,
+      });
+    });
+  });
+
+  if (actions.length === 0 && record?.approver && isWorkflowClosed(record)) {
+    const actedTime = getRecordFinalTime(record);
+    const startedTime = parseTimestamp(record?.createdAt);
+    if (actedTime) {
+      actions.push({
+        accountUsername: '',
+        memberId: '',
+        name: record.approver,
+        actedTime,
+        durationHours: startedTime && actedTime >= startedTime ? (actedTime - startedTime) / 3600000 : 0,
+      });
+    }
+  }
+
+  return actions;
+}
+
+function aggregateInitiatedEfficiency(records, identitySet, startTime, endTime) {
+  let initiatedCount = 0;
+  let unfinishedInitiatedCount = 0;
+  let measuredCount = 0;
+  let totalFlowHours = 0;
+
+  records.forEach((record) => {
+    if (identitySet && !recordInitiatedByIdentity(record, identitySet)) return;
+
+    const createdTime = parseTimestamp(record?.createdAt);
+    if (!isTimeInRange(createdTime, startTime, endTime)) return;
+
+    initiatedCount += 1;
+    if (!isWorkflowClosed(record)) unfinishedInitiatedCount += 1;
+
+    const finalTime = getRecordFinalTime(record);
+    const measuredEndTime = finalTime && finalTime < endTime ? finalTime : endTime;
+    if (measuredEndTime >= createdTime) {
+      measuredCount += 1;
+      totalFlowHours += (measuredEndTime - createdTime) / 3600000;
+    }
+  });
+
+  return {
+    initiatedCount,
+    unfinishedInitiatedCount,
+    initiatedFlowAvgHours: measuredCount > 0 ? totalFlowHours / measuredCount : 0,
+    initiatedFlowAvgHoursHasData: measuredCount > 0,
+  };
+}
+
+function aggregateApprovalEfficiency(records, identitySet, startTime, endTime) {
+  let approvedCount = 0;
+  let pendingApprovalCount = 0;
+  let measuredApprovalCount = 0;
+  let totalApprovalHours = 0;
+
+  records.forEach((record) => {
+    const createdTime = parseTimestamp(record?.createdAt);
+    const activeInWindow = isRecordActiveInWindow(record, startTime, endTime);
+    if (activeInWindow && getCurrentApprovalAssignees(record).some((approver) => (
+      !identitySet || identitySetMatches(identitySet, approver?.accountUsername, approver?.memberId, approver?.name)
+    ))) {
+      pendingApprovalCount += 1;
+    }
+
+    collectApprovalActions(record).forEach((action) => {
+      if (identitySet && !identitySetMatches(identitySet, action.accountUsername, action.memberId, action.name)) return;
+      if (!isTimeInRange(action.actedTime, startTime, endTime)) return;
+
+      approvedCount += 1;
+      if (action.durationHours >= 0) {
+        measuredApprovalCount += 1;
+        totalApprovalHours += action.durationHours;
+      }
+    });
+
+    if (!record?.workflowInstance && record?.approver && identitySet && identitySetMatches(identitySet, record.approver) && isTimeInRange(createdTime, startTime, endTime)) {
+      pendingApprovalCount += record?.status === STATUS_PENDING ? 1 : 0;
+    }
+  });
+
+  return {
+    approvedCount,
+    pendingApprovalCount,
+    approvalAvgHours: measuredApprovalCount > 0 ? totalApprovalHours / measuredApprovalCount : 0,
+    approvalAvgHoursHasData: measuredApprovalCount > 0,
+  };
+}
+
+function createPersonalEfficiencyMetric(definition, currentAggregate, previousAggregate) {
+  const value = roundMetricValue(currentAggregate[definition.key], definition.precision);
+  const previousValue = roundMetricValue(previousAggregate[definition.key], definition.precision);
+  const hasDataKey = `${definition.key}HasData`;
+  const isTimeValue = Boolean(definition.unit);
+  const hasData = isTimeValue ? Boolean(currentAggregate[hasDataKey]) : true;
+  const previousHasData = isTimeValue ? Boolean(previousAggregate[hasDataKey]) : true;
+
+  return {
+    ...definition,
+    value,
+    previousValue,
+    hasData,
+    previousHasData,
+    changePercent: getMetricChangePercent(value, previousValue, hasData, previousHasData),
+  };
+}
+
+function addEfficiencyParticipant(participants, displayName, ...identityValues) {
+  const identities = [...new Set(identityValues.map((value) => normalizeWorkflowText(value)).filter(Boolean))];
+  if (identities.length === 0) return;
+
+  const key = identities[0].toLowerCase();
+  const existing = participants.get(key);
+  if (existing) {
+    identities.forEach((identity) => existing.identitySet.add(identity.toLowerCase()));
+    if (!existing.name && displayName) existing.name = displayName;
+    return;
+  }
+
+  participants.set(key, {
+    key,
+    name: normalizeWorkflowText(displayName) || identities[0],
+    identitySet: getWorkflowIdentitySet(...identities),
+  });
+}
+
+function collectEfficiencyParticipants(accounts, directory, records, currentUser) {
+  const participants = new Map();
+
+  (Array.isArray(accounts) ? accounts : []).forEach((account) => {
+    if (account?.enabled === false || normalizeRole(account?.role) === 'developer') return;
+    const member = findMemberByAccount(directory, account?.username);
+    addEfficiencyParticipant(participants, member?.name || account?.name, account?.username, account?.name, member?.id, member?.name);
+  });
+
+  (Array.isArray(directory?.members) ? directory.members : []).forEach((member) => {
+    if (member?.enabled === false) return;
+    addEfficiencyParticipant(participants, member?.name, member?.accountUsername, member?.id, member?.name);
+  });
+
+  records.forEach((record) => {
+    addEfficiencyParticipant(participants, record?.applicant, record?.applicantUsername, record?.applicant);
+    getCurrentApprovalAssignees(record).forEach((approver) => {
+      addEfficiencyParticipant(participants, approver?.name, approver?.accountUsername, approver?.memberId, approver?.name);
+    });
+    collectApprovalActions(record).forEach((action) => {
+      addEfficiencyParticipant(participants, action.name, action.accountUsername, action.memberId, action.name);
+    });
+  });
+
+  addEfficiencyParticipant(participants, currentUser?.name, currentUser?.username, currentUser?.name);
+  return [...participants.values()];
+}
+
+function getParticipantRanking(participants, currentUserIdentitySet, scoreFn, options = {}) {
+  const direction = options.direction === 'asc' ? 'asc' : 'desc';
+  const rows = participants.map((participant) => ({
+    key: participant.key,
+    name: participant.name,
+    identitySet: participant.identitySet,
+    value: scoreFn(participant.identitySet),
+  }));
+
+  rows.sort((left, right) => {
+    const valueDelta = direction === 'asc' ? left.value - right.value : right.value - left.value;
+    if (valueDelta !== 0) return valueDelta;
+    return left.name.localeCompare(right.name, 'zh-Hans-CN');
+  });
+
+  const index = rows.findIndex((row) => (
+    [...row.identitySet].some((identity) => currentUserIdentitySet.has(identity))
+  ));
+  const row = rows[Math.max(0, index)] || {
+    name: options.fallbackName || '我',
+    value: 0,
+  };
+
+  return {
+    rank: index >= 0 ? index + 1 : rows.length || 1,
+    total: rows.length || 1,
+    name: row.name || options.fallbackName || '我',
+    value: roundMetricValue(row.value, options.precision || 0),
+  };
+}
+
+function getPendingApprovalCountForIdentity(records, identitySet, startTime, endTime) {
+  return records.filter((record) => (
+    isRecordActiveInWindow(record, startTime, endTime) &&
+    getCurrentApprovalAssignees(record).some((approver) => identitySetMatches(identitySet, approver?.accountUsername, approver?.memberId, approver?.name))
+  )).length;
+}
+
+function getApprovalAverageHoursForIdentity(records, identitySet, startTime, endTime) {
+  let count = 0;
+  let totalHours = 0;
+
+  records.forEach((record) => {
+    collectApprovalActions(record).forEach((action) => {
+      if (!identitySetMatches(identitySet, action.accountUsername, action.memberId, action.name)) return;
+      if (!isTimeInRange(action.actedTime, startTime, endTime)) return;
+      count += 1;
+      totalHours += action.durationHours;
+    });
+  });
+
+  return count > 0 ? totalHours / count : 0;
+}
+
+function getRankingTrend(currentValue, previousValue, lowerIsBetter = false) {
+  if (currentValue === previousValue) return 'flat';
+  if (lowerIsBetter) return currentValue < previousValue ? 'down' : 'up';
+  return currentValue > previousValue ? 'up' : 'down';
+}
+
+function buildPersonalEfficiencySummary(records, user, timeZone = 'UTC', rangeInput = '30d', accounts = [], directory = { members: [] }) {
+  const localTimeZone = normalizeTimeZone(timeZone);
+  const range = normalizeWorkflowEfficiencyRange(rangeInput);
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const periodMs = dayMs * workflowEfficiencyRangeDays[range];
+  const currentStart = now - periodMs;
+  const previousStart = currentStart - periodMs;
+  const previousEnd = currentStart;
+  const currentUserIdentitySet = getWorkflowIdentitySet(user?.username, user?.name);
+
+  const currentInitiated = aggregateInitiatedEfficiency(records, currentUserIdentitySet, currentStart, now);
+  const previousInitiated = aggregateInitiatedEfficiency(records, currentUserIdentitySet, previousStart, previousEnd);
+  const currentEnterpriseInitiated = aggregateInitiatedEfficiency(records, null, currentStart, now);
+  const currentApproved = aggregateApprovalEfficiency(records, currentUserIdentitySet, currentStart, now);
+  const previousApproved = aggregateApprovalEfficiency(records, currentUserIdentitySet, previousStart, previousEnd);
+  const currentEnterpriseApproved = aggregateApprovalEfficiency(records, null, currentStart, now);
+  const participants = collectEfficiencyParticipants(accounts, directory, records, user);
+
+  const pendingRanking = getParticipantRanking(
+    participants,
+    currentUserIdentitySet,
+    (identitySet) => getPendingApprovalCountForIdentity(records, identitySet, currentStart, now),
+    { fallbackName: user?.name, precision: 0 },
+  );
+  const previousPendingCount = getPendingApprovalCountForIdentity(records, currentUserIdentitySet, previousStart, previousEnd);
+  const approvalTimeRanking = getParticipantRanking(
+    participants,
+    currentUserIdentitySet,
+    (identitySet) => getApprovalAverageHoursForIdentity(records, identitySet, currentStart, now),
+    { fallbackName: user?.name, precision: 1 },
+  );
+  const previousApprovalAvgHours = getApprovalAverageHoursForIdentity(records, currentUserIdentitySet, previousStart, previousEnd);
+
+  return {
+    scope: 'personal',
+    range,
+    currentPeriodLabel: getWorkflowEfficiencyRangeLabel(range, '近'),
+    previousPeriodLabel: getWorkflowEfficiencyRangeLabel(range, '前'),
+    periodLabel: formatEfficiencyPeriodLabel(currentStart, now, localTimeZone),
+    initiated: {
+      metrics: personalEfficiencyMetricDefinitions.initiated.map((definition) => (
+        createPersonalEfficiencyMetric(definition, currentInitiated, previousInitiated)
+      )),
+      enterpriseFlowAvgHours: roundMetricValue(currentEnterpriseInitiated.initiatedFlowAvgHours, 1),
+      enterpriseFlowAvgHasData: currentEnterpriseInitiated.initiatedFlowAvgHoursHasData,
+    },
+    approved: {
+      metrics: personalEfficiencyMetricDefinitions.approved.map((definition) => (
+        createPersonalEfficiencyMetric(definition, currentApproved, previousApproved)
+      )),
+      enterpriseApprovalAvgHours: roundMetricValue(currentEnterpriseApproved.approvalAvgHours, 1),
+      enterpriseApprovalAvgHasData: currentEnterpriseApproved.approvalAvgHoursHasData,
+    },
+    rankings: {
+      pending: {
+        ...pendingRanking,
+        label: '待处理单量',
+        unit: '',
+        trend: getRankingTrend(pendingRanking.value, previousPendingCount),
+      },
+      approvalTime: {
+        ...approvalTimeRanking,
+        label: '审批平均耗时(h)',
+        unit: '小时',
+        trend: getRankingTrend(approvalTimeRanking.value, previousApprovalAvgHours, true),
+      },
+    },
   };
 }
 
@@ -5924,25 +6459,56 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-app.get('/api/workflow-templates', authenticate, requireRoles('developer'), async (_req, res, next) => {
+app.get('/api/workflow-efficiency/personal', authenticate, async (req, res, next) => {
   try {
-    res.json(await readWorkflowTemplates());
+    const [records, accounts, directory] = await Promise.all([
+      readRecords(),
+      readAccounts(),
+      readOrganizationDirectory(),
+    ]);
+
+    res.json(buildPersonalEfficiencySummary(
+      records,
+      req.user,
+      getRequestTimeZone(req),
+      req.query?.range,
+      accounts,
+      directory,
+    ));
   } catch (error) {
     next(error);
   }
 });
 
-app.get('/api/workflow-templates/:id/efficiency', authenticate, requireRoles('developer'), async (req, res, next) => {
+app.get('/api/workflow-templates', authenticate, async (req, res, next) => {
+  try {
+    const templates = await readWorkflowTemplates();
+    if (normalizeRole(req.user?.role) === 'developer') {
+      res.json(templates);
+      return;
+    }
+
+    res.json(templates.filter((template) => template.status === 'published'));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/workflow-templates/:id/efficiency', authenticate, async (req, res, next) => {
   try {
     const templates = await readWorkflowTemplates();
     const template = templates.find((item) => item.id === req.params.id);
 
-    if (!template) {
+    if (!template || (normalizeRole(req.user?.role) !== 'developer' && template.status !== 'published')) {
       return res.status(404).json({ error: 'workflow template not found' });
     }
 
     const records = await readRecords();
-    res.json(buildWorkflowEfficiencySummary(template, records, getRequestTimeZone(req), req.query?.range));
+    const scope = normalizeWorkflowText(req.query?.scope) === 'personal' ? 'personal' : 'enterprise';
+    res.json(buildWorkflowEfficiencySummary(template, records, getRequestTimeZone(req), req.query?.range, {
+      scope,
+      user: req.user,
+    }));
   } catch (error) {
     next(error);
   }
@@ -7245,6 +7811,7 @@ app.delete('/api/push/subscriptions', authenticate, async (req, res, next) => {
 app.get('/api/notifications', authenticate, async (req, res, next) => {
   try {
     const username = normalizeWorkflowText(req.user.username).toLowerCase();
+    await markStaleActionNotificationsRead(req.user);
     const notifications = await readNotifications();
     const userNotifications = notifications
       .filter((notification) => normalizeWorkflowText(notification.recipientUsername).toLowerCase() === username)
@@ -7439,6 +8006,7 @@ app.patch('/api/records/:id/status', authenticate, requireRoles('employee', 'bos
 
     if (previousRecord) {
       await createNotificationsForRecordTransition(previousRecord, updatedRecord, req.user);
+      await markStaleActionNotificationsRead(req.user);
     }
 
     res.json(toPublicRecord(updatedRecord, req.user));
@@ -7460,6 +8028,7 @@ app.patch('/api/records/:id/process', authenticate, requireRoles('employee', 'bo
 
     if (previousRecord) {
       await createNotificationsForRecordTransition(previousRecord, updatedRecord, req.user);
+      await markStaleActionNotificationsRead(req.user);
     }
 
     res.json(toPublicRecord(updatedRecord, req.user));

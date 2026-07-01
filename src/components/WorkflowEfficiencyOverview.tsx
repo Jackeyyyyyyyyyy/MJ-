@@ -6,6 +6,7 @@ import {
   WorkflowEfficiencyMetricKey,
   WorkflowEfficiencyPoint,
   WorkflowEfficiencyRange,
+  WorkflowEfficiencyScope,
   WorkflowEfficiencySummary,
   WorkflowTemplate,
 } from '../types';
@@ -112,28 +113,33 @@ function isTimeEfficiencyMetric(metric: Pick<WorkflowEfficiencyMetric, 'key'>) {
   return metric.key === 'flowAvg' || metric.key === 'nodeAvg';
 }
 
-function getEfficiencyNotice(summary: WorkflowEfficiencySummary, metric: WorkflowEfficiencyMetric) {
+function getEfficiencyNotice(summary: WorkflowEfficiencySummary, metric: WorkflowEfficiencyMetric, scope: WorkflowEfficiencyScope) {
   const metricName = isTimeEfficiencyMetric(metric) ? '平均耗时' : metric.label;
   const previousText = `${formatEfficiencyValue(metric, metric.previousValue)}${metric.unit && (!isTimeEfficiencyMetric(metric) || metric.previousHasData) ? metric.unit : ''}`;
   const periodLabel = summary.currentPeriodLabel;
+  const scopePrefix = scope === 'personal' ? '我的' : '';
 
   if (!metric.hasData) {
-    return `${periodLabel}${metricName}暂无真实数据${summary.recordCount === 0 ? '，当前审批流还没有匹配的审批单' : ''}`;
+    return `${periodLabel}${scopePrefix}${metricName}暂无真实数据${summary.recordCount === 0 ? '，当前审批流还没有匹配的审批单' : ''}`;
   }
 
   if (!metric.previousHasData) {
-    return `${periodLabel}${metricName} ${formatEfficiencyValue(metric)}${metric.unit}，${summary.previousPeriodLabel}暂无对比数据`;
+    return `${periodLabel}${scopePrefix}${metricName} ${formatEfficiencyValue(metric)}${metric.unit}，${summary.previousPeriodLabel}暂无对比数据`;
   }
 
   const changePercent = Math.abs(metric.changePercent);
   const direction = metric.changePercent > 0 ? (isTimeEfficiencyMetric(metric) ? '增加' : '提升') : metric.changePercent < 0 ? '下降' : '持平';
-  return `${periodLabel}${metricName}${direction} ${changePercent.toLocaleString('zh-CN', { maximumFractionDigits: 1 })}%，${summary.previousPeriodLabel} ${previousText}`;
+  return `${periodLabel}${scopePrefix}${metricName}${direction} ${changePercent.toLocaleString('zh-CN', { maximumFractionDigits: 1 })}%，${summary.previousPeriodLabel} ${previousText}`;
 }
 
 export default function WorkflowEfficiencyOverview({
   template,
+  scope = 'enterprise',
+  skipImpersonation = true,
 }: {
   template: WorkflowTemplate;
+  scope?: WorkflowEfficiencyScope;
+  skipImpersonation?: boolean;
 }) {
   const [summary, setSummary] = React.useState<WorkflowEfficiencySummary | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
@@ -147,7 +153,7 @@ export default function WorkflowEfficiencyOverview({
     setIsLoading(true);
     setError('');
 
-    storage.getWorkflowEfficiencySummary(template.id, range)
+    storage.getWorkflowEfficiencySummary(template.id, range, scope, { skipImpersonation })
       .then((nextSummary) => {
         if (!active) return;
         setSummary(nextSummary);
@@ -164,16 +170,17 @@ export default function WorkflowEfficiencyOverview({
     return () => {
       active = false;
     };
-  }, [template.id, range]);
+  }, [template.id, range, scope, skipImpersonation]);
 
   const activeMetric = summary?.metrics.find((metric) => metric.key === activeMetricKey) || summary?.metrics[0] || null;
   const chartData = getEfficiencyChartData(activeMetric && summary ? summary.trend[activeMetric.key] || [] : []);
-  const noticeText = summary && activeMetric ? getEfficiencyNotice(summary, activeMetric) : '正在读取真实审批数据';
+  const noticeText = summary && activeMetric ? getEfficiencyNotice(summary, activeMetric, scope) : '正在读取真实审批数据';
+  const title = scope === 'personal' ? '个人效率总览' : '企业效率总览';
 
   return (
     <section className="overflow-hidden rounded-xl border border-border-silver bg-white shadow-sm">
       <div className="flex flex-col gap-3 px-5 pt-5 lg:flex-row lg:items-center lg:justify-between">
-        <h2 className="text-[18px] font-black text-midnight-graphite">效率总览</h2>
+        <h2 className="text-[18px] font-black text-midnight-graphite">{title}</h2>
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-full bg-lightest-gray-background p-1">
             {workflowEfficiencyRangeOptions.map((option) => (

@@ -8,9 +8,9 @@
   --color-medium-gray: #4f4f4f;
   --color-light-gray: #666666;
   --color-light-silver: #7f7f7f;
-  --color-border-silver: #c8c8c8;
-  --color-lightest-gray-background: #ededf0;
-  --color-canvas-white: #f5f5f7;
+  --color-border-silver: #e1e1e6;
+  --color-lightest-gray-background: #f4f5f8;
+  --color-canvas-white: #f6f7fa;
   --color-pure-white: #ffffff;
   --color-true-black: #000000;
   --color-interactive-blue: #0071e3;
@@ -76,6 +76,33 @@
   }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
+  .mj-mobile-card {
+    background: rgba(255, 255, 255, 0.98);
+    border: 1px solid rgba(20, 24, 34, 0.024);
+    border-radius: 20px;
+    box-shadow: 0 1px 1px rgba(20, 24, 34, 0.01);
+  }
+
+  .mj-mobile-card-soft {
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(20, 24, 34, 0.02);
+    border-radius: 20px;
+    box-shadow: 0 1px 1px rgba(20, 24, 34, 0.012);
+  }
+
+  .mj-mobile-pill {
+    background: rgba(235, 236, 242, 0.86);
+    border-radius: 999px;
+  }
+
+  .mj-mobile-divider {
+    border-color: rgba(20, 24, 34, 0.045);
+  }
+
+  .mj-mobile-row-divider {
+    border-color: rgba(20, 24, 34, 0.045);
+  }
+
   .diagram-fullscreen-surface:fullscreen {
     width: 100vw;
     height: 100vh;
@@ -115,5 +142,86 @@
     height: 100%;
     max-height: none;
     overflow-y: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  body {
+    background: #f5f6fa;
+  }
+
+  #root {
+    min-height: 100dvh;
+    background: #f5f6fa;
+  }
+
+  .btn-primary {
+    min-height: 46px;
+    border-radius: 999px;
+    font-weight: 600;
+    box-shadow: 0 5px 12px rgba(0, 113, 227, 0.12);
+  }
+
+  .btn-secondary {
+    min-height: 44px;
+    border-radius: 999px;
+    background: #ffffff;
+  }
+
+  .input-field {
+    min-height: 42px;
+    border-radius: 0;
+    background: transparent;
+    border-color: transparent;
+    padding: 7px 0 0;
+    font-size: 14.5px;
+    font-weight: 500;
+    box-shadow: none;
+  }
+
+  .input-field::placeholder {
+    color: #9ca0aa;
+    font-weight: 500;
+  }
+
+  textarea.input-field {
+    border-radius: 14px;
+    background: #f7f8fa;
+    padding: 11px 12px;
+    line-height: 1.52;
+  }
+
+  select.input-field {
+    appearance: none;
+  }
+
+  .status-tag {
+    min-height: 24px;
+    border-radius: 999px;
+    letter-spacing: 0;
+  }
+
+  .mj-mobile-card {
+    border-radius: 20px;
+  }
+
+  .mj-mobile-card-soft {
+    border-radius: 20px;
+    box-shadow: 0 1px 1px rgba(20, 24, 34, 0.012);
+  }
+
+  .mj-mobile-form-list .input-field {
+    border-bottom-color: transparent !important;
+  }
+
+  .mj-mobile-form-list .h-12.items-center.justify-between {
+    height: 42px;
+    min-height: 42px;
+    border-bottom-color: transparent !important;
+    background: transparent;
+  }
+
+  .mj-mobile-form-list textarea.input-field {
+    margin-top: 8px;
   }
 }

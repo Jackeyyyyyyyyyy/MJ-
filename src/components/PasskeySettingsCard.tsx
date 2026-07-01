@@ -93,59 +93,64 @@ export default function PasskeySettingsCard({ activeUsername }: PasskeySettingsC
   };
 
   return (
-    <section className="rounded-[8px] border border-border-silver bg-white p-5 shadow-sm">
-      <div className="flex items-start gap-4">
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-lightest-gray-background text-midnight-graphite">
-          <Fingerprint size={21} strokeWidth={2.5} />
+    <section className="mj-mobile-card overflow-hidden sm:rounded-[8px] sm:border-border-silver sm:p-4 sm:shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:gap-3">
+        <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-lightest-gray-background text-midnight-graphite sm:flex">
+          <Fingerprint size={18} strokeWidth={2.4} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-[16px] font-black text-midnight-graphite">Face ID / 通行密钥</h2>
-              <p className="mt-1 text-[13px] font-semibold leading-5 text-medium-gray">
-                {supported
-                  ? isPlatformAvailable
-                    ? '绑定后可用 Face ID、Touch ID 或设备密码登录。'
-                    : '当前设备可使用通行密钥，是否支持 Face ID 由系统决定。'
-                  : '通行密钥需要 HTTPS 或本机安全地址，并使用支持的浏览器。'}
-              </p>
+          <div className="flex items-center justify-between gap-3 border-b border-black/[0.045] px-4 py-3 sm:border-b-0 sm:px-0 sm:py-0">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[12px] bg-[#eef5ff] text-[#1677ff] sm:hidden">
+                <Fingerprint size={18} strokeWidth={2.4} />
+              </span>
+              <div className="min-w-0">
+                <h2 className="truncate text-[16px] font-semibold text-midnight-graphite sm:text-[15px] sm:font-bold">Face ID / 通行密钥</h2>
+                <p className="mt-0.5 line-clamp-2 text-[12px] font-medium leading-[18px] text-light-gray sm:text-medium-gray">
+                  {supported
+                    ? isPlatformAvailable
+                      ? '绑定后可用 Face ID、Touch ID 或设备密码登录。'
+                      : '当前设备可使用通行密钥，是否支持 Face ID 由系统决定。'
+                    : '通行密钥需要 HTTPS 或本机安全地址，并使用支持的浏览器。'}
+                </p>
+              </div>
             </div>
             <button
               type="button"
               onClick={() => void handleRegister()}
               disabled={!supported || isUpdating}
-              className="flex h-9 shrink-0 items-center justify-center gap-2 rounded-full bg-midnight-graphite px-4 text-[12px] font-black text-white transition-colors hover:bg-deep-gray disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex h-8 shrink-0 items-center justify-center gap-1 text-[12px] font-semibold text-interactive-blue transition-colors hover:text-action-blue disabled:cursor-not-allowed disabled:text-light-silver sm:gap-1.5 sm:rounded-full sm:bg-midnight-graphite sm:px-4 sm:text-white sm:shadow-none sm:hover:bg-deep-gray"
             >
-              {isUpdating ? <Loader2 size={14} strokeWidth={2.5} className="animate-spin" /> : <KeyRound size={14} strokeWidth={2.5} />}
-              配置通行密钥
+              {isUpdating ? <Loader2 size={14} strokeWidth={2.5} className="animate-spin" /> : <KeyRound size={14} strokeWidth={2.5} className="hidden sm:block" />}
+              配置
             </button>
           </div>
 
           {(message || error) && (
-            <p className={`mt-4 text-[12px] font-bold ${error ? 'text-[#c62828]' : 'text-[#2e7d32]'}`}>
+            <p className={`mx-4 mt-3 text-[12px] font-semibold sm:mx-0 ${error ? 'text-[#c62828]' : 'text-[#2e7d32]'}`}>
               {error || message}
             </p>
           )}
 
-          <div className="mt-5 overflow-hidden rounded-[8px] border border-border-silver">
+          <div className="overflow-hidden bg-white sm:mt-4 sm:rounded-[8px] sm:border sm:border-border-silver">
             {isLoading && (
-              <div className="flex h-16 items-center justify-center gap-2 text-[12px] font-bold text-medium-gray">
+              <div className="flex h-14 items-center justify-center gap-2 text-[12px] font-semibold text-medium-gray">
                 <Loader2 size={14} strokeWidth={2.5} className="animate-spin" />
                 读取通行密钥
               </div>
             )}
 
             {!isLoading && passkeys.length === 0 && (
-              <div className="px-4 py-4 text-[12px] font-bold text-medium-gray">
+              <div className="px-4 py-2.5 text-[12px] font-medium text-light-gray">
                 还没有绑定通行密钥
               </div>
             )}
 
             {!isLoading && passkeys.map((passkey) => (
-              <div key={passkey.id} className="flex items-center justify-between gap-3 border-b border-border-silver px-4 py-3 last:border-b-0">
+              <div key={passkey.id} className="flex items-center justify-between gap-3 border-b border-black/[0.045] px-4 py-3 last:border-b-0 sm:border-border-silver">
                 <div className="min-w-0">
-                  <p className="truncate text-[13px] font-black text-midnight-graphite">{passkey.name}</p>
-                  <p className="mt-1 text-[11px] font-semibold text-medium-gray">
+                  <p className="truncate text-[13px] font-semibold text-midnight-graphite">{passkey.name}</p>
+                  <p className="mt-1 text-[11px] font-medium text-light-gray">
                     {passkey.lastUsedAt
                       ? `上次使用：${formatLocalDateTime(passkey.lastUsedAt, 'date-time')}`
                       : `绑定时间：${formatLocalDateTime(passkey.createdAt, 'date-time')}`}

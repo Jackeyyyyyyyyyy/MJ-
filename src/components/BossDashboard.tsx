@@ -146,42 +146,42 @@ export default function BossDashboard() {
   ];
 
   return (
-    <div className="space-y-8 pb-40 animate-in fade-in duration-700">
+    <div className="space-y-4 pb-32 animate-in fade-in duration-700 lg:space-y-8 lg:pb-40">
       <StatsOverview
         title="概览"
         subtitle="实时运营状态"
         items={summaryItems}
       />
 
-      <div className="space-y-5">
-        <div className="flex flex-col lg:flex-row gap-6 lg:items-center justify-between">
+      <div className="space-y-4 lg:space-y-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:gap-6 lg:items-center justify-between">
           <div className="flex flex-col gap-1">
-            <h2 className="text-[20px] font-bold tracking-tight">流水明细</h2>
+            <h2 className="text-[18px] font-bold tracking-tight lg:text-[20px]">流水明细</h2>
             {canClearRecords && (
               <p className="text-[12px] font-semibold text-medium-gray">超管可清空全部审批记录</p>
             )}
           </div>
           
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-4">
             <div className="relative group">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-light-silver w-3.5 h-3.5 transition-colors group-focus-within:text-black" />
               <input 
                 type="text" 
                 placeholder="搜索..." 
-                className="bg-transparent border-b border-border-silver py-2 pl-9 pr-2 text-[13px] focus:border-black outline-none w-48 transition-all"
+                className="h-10 w-full rounded-[18px] bg-white py-2 pl-9 pr-3 text-[13px] font-semibold outline-none ring-1 ring-black/[0.03] transition-all focus:ring-black/[0.12] lg:w-48 lg:rounded-none lg:bg-transparent lg:border-b lg:border-border-silver lg:pr-2 lg:focus:border-black lg:ring-0"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
 
-            <div className="flex bg-lightest-gray-background p-1 rounded-xl">
+            <div className="flex overflow-x-auto no-scrollbar rounded-[18px] bg-white p-1 shadow-[0_8px_24px_rgba(16,24,40,0.05)] lg:bg-lightest-gray-background lg:rounded-xl lg:shadow-none">
               {(['ALL', ApprovalStatus.PENDING, ApprovalStatus.PROCESSING, ApprovalStatus.APPROVED, ApprovalStatus.COMPLETED, ApprovalStatus.REJECTED] as string[]).map((s) => (
                 <button
                   key={s}
                   onClick={() => setFilterStatus(s === 'ALL' ? '全部状态' : s)}
                   className={cn(
-                    "px-4 py-1.5 text-[11px] font-bold rounded-lg transition-all",
-                    (filterStatus === s || (filterStatus === '全部状态' && s === 'ALL')) ? "bg-white text-black shadow-sm" : "text-light-gray hover:text-black"
+                    "h-8 shrink-0 px-3 text-[11px] font-bold rounded-[13px] transition-all lg:h-auto lg:px-4 lg:py-1.5 lg:rounded-lg",
+                    (filterStatus === s || (filterStatus === '全部状态' && s === 'ALL')) ? "bg-[#f0f0f2] text-black lg:bg-white lg:shadow-sm" : "text-light-gray hover:text-black"
                   )}
                 >
                   {s === 'ALL'

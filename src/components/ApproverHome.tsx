@@ -93,26 +93,28 @@ export default function ApproverHome() {
   };
 
   return (
-    <div className="space-y-5 pb-32 animate-in fade-in duration-700 lg:space-y-8 lg:pb-40">
-      <StatsOverview
-        title="审批"
-        subtitle="待办事宜与处理记录"
-        items={summaryItems}
-      />
+    <div className="space-y-3 pb-28 animate-in fade-in duration-700 lg:space-y-8 lg:pb-40">
+      <div className="hidden lg:block">
+        <StatsOverview
+          title="审批"
+          subtitle="待办事宜与处理记录"
+          items={summaryItems}
+        />
+      </div>
 
-      <div className="-mx-1 flex gap-1 overflow-x-auto no-scrollbar rounded-[16px] bg-[#ececf0] p-1 lg:mx-0 lg:w-fit lg:gap-0 lg:rounded-xl lg:bg-lightest-gray-background">
+      <div className="flex gap-6 overflow-x-auto border-b border-black/[0.045] no-scrollbar lg:mx-0 lg:w-fit lg:gap-0 lg:rounded-xl lg:border-0 lg:bg-lightest-gray-background lg:p-1">
         <button 
           onClick={() => setActiveTab('pending')}
           className={cn(
-            "h-8 shrink-0 rounded-[12px] px-3 text-[11px] font-medium transition-all flex items-center justify-center gap-1.5 lg:h-auto lg:flex-1 lg:border-0 lg:rounded-lg lg:px-8 lg:py-2.5 lg:text-[13px] lg:font-bold lg:gap-3",
+            "flex h-9 shrink-0 items-center justify-center gap-1.5 border-b-2 px-0 text-[13.5px] font-medium transition-all lg:h-auto lg:flex-1 lg:gap-3 lg:rounded-lg lg:border-0 lg:px-8 lg:py-2.5 lg:text-[13px] lg:font-bold",
             activeTab === 'pending'
-              ? "bg-white text-midnight-graphite shadow-sm lg:bg-white lg:text-black lg:shadow-sm"
-              : "text-medium-gray hover:text-black lg:bg-transparent lg:text-light-gray"
+              ? "border-midnight-graphite text-midnight-graphite lg:bg-white lg:text-black lg:shadow-sm"
+              : "border-transparent text-light-gray hover:text-black lg:bg-transparent lg:text-light-gray"
           )}
         >
           待处理
           {pendingRecords.length > 0 && (
-            <span className="px-1.5 min-w-[16px] h-[16px] bg-lightest-gray-background text-current lg:bg-black lg:text-white text-[10px] flex items-center justify-center rounded-full">
+            <span className="flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-[#f2f3f6] px-1 text-[9px] text-current lg:h-[16px] lg:min-w-[16px] lg:bg-black lg:text-[10px] lg:text-white">
               {pendingRecords.length}
             </span>
           )}
@@ -120,10 +122,10 @@ export default function ApproverHome() {
         <button 
           onClick={() => setActiveTab('processed')}
           className={cn(
-            "h-8 shrink-0 rounded-[12px] px-3 text-[11px] font-medium transition-all lg:h-auto lg:flex-1 lg:border-0 lg:rounded-lg lg:px-8 lg:py-2.5 lg:text-[13px] lg:font-bold",
+            "h-9 shrink-0 border-b-2 px-0 text-[13.5px] font-medium transition-all lg:h-auto lg:flex-1 lg:rounded-lg lg:border-0 lg:px-8 lg:py-2.5 lg:text-[13px] lg:font-bold",
             activeTab === 'processed'
-              ? "bg-white text-midnight-graphite shadow-sm lg:bg-white lg:text-black lg:shadow-sm"
-              : "text-medium-gray hover:text-black lg:bg-transparent lg:text-light-gray"
+              ? "border-midnight-graphite text-midnight-graphite lg:bg-white lg:text-black lg:shadow-sm"
+              : "border-transparent text-light-gray hover:text-black lg:bg-transparent lg:text-light-gray"
           )}
         >
           历史记录
@@ -157,29 +159,28 @@ export default function ApproverHome() {
         />
       )}
 
-      {/* 确认框使用 Apple 风格 */}
       <AnimatePresence>
         {isApproving && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4">
             <motion.div 
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setIsApproving(false)}
-              className="absolute inset-0 bg-midnight-graphite/40 backdrop-blur-md"
+              className="absolute inset-0 bg-black/25 backdrop-blur-sm sm:bg-midnight-graphite/35"
             />
             <motion.div
-              initial={{ opacity: 0, scale: 0.98, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, y: 10 }}
-              className="bg-pure-white rounded-apple-img w-full max-w-sm relative p-10 shadow-apple-xl text-center"
+              initial={{ opacity: 0, scale: 0.98, y: 22 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, y: 22 }}
+              className="relative w-full rounded-t-[22px] bg-white px-5 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-[18px] text-center shadow-[0_-4px_16px_rgba(20,24,34,0.055)] sm:max-w-sm sm:rounded-[18px] sm:p-8 sm:shadow-[0_14px_34px_rgba(20,24,34,0.12)]"
             >
-              <div className="w-16 h-16 bg-[#e8f5e9] rounded-full flex items-center justify-center mx-auto mb-6 text-[#2e7d32]">
-                <CheckCircle2 size={32} strokeWidth={2} />
+              <div className="mx-auto mb-3.5 flex h-11 w-11 items-center justify-center rounded-full bg-[#e8f5e9] text-[#2e7d32] sm:mb-5 sm:h-14 sm:w-14">
+                <CheckCircle2 size={26} strokeWidth={2.2} />
               </div>
-              <h3 className="text-[21px] font-bold text-midnight-graphite mb-3">确认批准</h3>
-              <p className="text-[15px] text-medium-gray mb-8 px-2 font-medium">审批一旦通过将向全链路提交，确定要批准该笔申请吗？</p>
-              <div className="flex flex-col gap-3">
-                <button onClick={confirmApprove} className="btn-primary w-full bg-[#2e7d32] hover:bg-[#256629]">
+              <h3 className="mb-2 text-[17px] font-semibold text-midnight-graphite sm:text-[20px]">确认批准</h3>
+              <p className="mb-6 px-2 text-[14px] font-medium leading-6 text-medium-gray sm:mb-7">审批通过后会进入后续流程，确定批准该笔申请吗？</p>
+              <div className="flex flex-col gap-2.5">
+                <button onClick={confirmApprove} className="flex h-11 w-full items-center justify-center rounded-full bg-[#2e7d32] px-4 text-[14.5px] font-semibold text-white transition-colors hover:bg-[#256629] active:scale-[0.99]">
                   确定批准
                 </button>
-                <button onClick={() => setIsApproving(false)} className="w-full h-[44px] text-[15px] font-semibold text-medium-gray hover:text-midnight-graphite">
+                <button onClick={() => setIsApproving(false)} className="h-10 w-full text-[14px] font-semibold text-medium-gray hover:text-midnight-graphite">
                   取消
                 </button>
               </div>
@@ -188,37 +189,39 @@ export default function ApproverHome() {
         )}
 
         {isRejecting && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4">
             <motion.div 
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setIsRejecting(false)}
-              className="absolute inset-0 bg-midnight-graphite/40 backdrop-blur-md"
+              className="absolute inset-0 bg-black/25 backdrop-blur-sm sm:bg-midnight-graphite/35"
             />
             <motion.div
-              initial={{ opacity: 0, scale: 0.98, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, y: 10 }}
-              className="bg-pure-white rounded-apple-img w-full max-w-md relative p-10 shadow-apple-xl"
+              initial={{ opacity: 0, scale: 0.98, y: 22 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, y: 22 }}
+              className="relative w-full rounded-t-[22px] bg-white px-5 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-[18px] shadow-[0_-4px_16px_rgba(20,24,34,0.055)] sm:max-w-md sm:rounded-[18px] sm:p-8 sm:shadow-[0_14px_34px_rgba(20,24,34,0.12)]"
             >
-              <div className="flex items-center gap-4 text-[#c62828] mb-6">
-                <AlertCircle size={24} />
-                <h3 className="text-[21px] font-bold">拒绝申请确认</h3>
+              <div className="mb-4 flex items-center gap-3 text-[#c62828] sm:mb-5">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#fff0f0]">
+                  <AlertCircle size={20} strokeWidth={2.3} />
+                </span>
+                <h3 className="text-[17px] font-semibold text-midnight-graphite sm:text-[20px]">拒绝申请确认</h3>
               </div>
-              <p className="text-[15px] text-medium-gray mb-6 font-medium">请输入拒绝原因，该信息将被记录并同步：</p>
+              <p className="mb-4 text-[14px] font-medium leading-6 text-medium-gray">请输入拒绝原因，该信息将被记录并同步。</p>
               <textarea 
-                className="input-field min-h-[120px] mb-8 bg-canvas-white p-4 font-medium"
+                className="mb-5 min-h-[104px] w-full resize-none rounded-[16px] border border-transparent bg-[#f6f7fb] p-3.5 text-[13.5px] font-medium leading-6 text-midnight-graphite outline-none transition-colors placeholder:text-light-gray focus:border-interactive-blue"
                 placeholder="详细拒绝理由..."
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}
                 autoFocus
               />
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2.5">
                 <button 
                   onClick={handleRejectSubmit}
                   disabled={!rejectReason.trim()}
-                  className="btn-primary w-full bg-[#c62828] hover:bg-[#a52121] disabled:opacity-30"
+                  className="flex h-11 w-full items-center justify-center rounded-full bg-[#c62828] px-4 text-[14.5px] font-semibold text-white transition-colors hover:bg-[#a52121] active:scale-[0.99] disabled:opacity-30"
                 >
                   确认拒绝
                 </button>
-                <button onClick={() => setIsRejecting(false)} className="w-full h-[44px] text-[15px] font-semibold text-medium-gray hover:text-midnight-graphite">
+                <button onClick={() => setIsRejecting(false)} className="h-10 w-full text-[14px] font-semibold text-medium-gray hover:text-midnight-graphite">
                   返回
                 </button>
               </div>

@@ -73,6 +73,7 @@ async function fileToAvatarDataUrl(file: File) {
 
 export default function AccountProfileSettingsCard({ activeUsername }: AccountProfileSettingsCardProps) {
   const sessionUser = auth.getSessionUser();
+  const currentUser = auth.getCurrentUser();
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const [profile, setProfile] = React.useState<User | null>(null);
   const [avatarUrl, setAvatarUrl] = React.useState('');
@@ -108,7 +109,15 @@ export default function AccountProfileSettingsCard({ activeUsername }: AccountPr
     setMessage('');
 
     try {
-      const nextProfile = await storage.getAccountProfile();
+      const accountProfile = await storage.getAccountProfile();
+      const nextProfile = accountProfile?.username && accountProfile.name
+        ? accountProfile
+        : auth.getCurrentUser();
+
+      if (!nextProfile) {
+        throw new Error('账号资料加载失败');
+      }
+
       setProfile(nextProfile);
       setAvatarUrl(nextProfile.avatarUrl || '');
       setInitialAvatarUrl(nextProfile.avatarUrl || '');
@@ -196,56 +205,64 @@ export default function AccountProfileSettingsCard({ activeUsername }: AccountPr
     }
   };
 
-  const initial = getInitial(profile?.name, profile?.username);
+  const displayName = profile?.name || currentUser?.name || activeUsername || '当前账号';
+  const displayUsername = profile?.username || currentUser?.username || activeUsername || '';
+  const cardSummary = '头像与密码';
+  const initial = getInitial(displayName, displayUsername);
 
   return (
-    <section className="rounded-[8px] border border-border-silver bg-white p-5 shadow-sm">
-      <div className="flex items-start gap-4">
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-lightest-gray-background text-midnight-graphite">
-          <UserRound size={21} strokeWidth={2.5} />
+    <section className="mj-mobile-card overflow-hidden sm:rounded-[8px] sm:border-border-silver sm:p-4 sm:shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:gap-3">
+        <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-lightest-gray-background text-midnight-graphite sm:flex">
+          <UserRound size={18} strokeWidth={2.4} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-[16px] font-black text-midnight-graphite">账号资料</h2>
-              <p className="mt-1 text-[13px] font-semibold leading-5 text-medium-gray">
-                {profile ? `${profile.name} · ${profile.username}` : '读取账号资料中...'}
-              </p>
+          <div className="flex items-center justify-between gap-3 border-b border-black/[0.045] px-4 py-2.5 sm:border-b-0 sm:px-0 sm:py-0">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[12px] bg-[#f1f6ff] text-interactive-blue sm:hidden">
+                <UserRound size={18} strokeWidth={2.4} />
+              </span>
+              <div className="min-w-0">
+                <h2 className="text-[16px] font-semibold text-midnight-graphite sm:text-[15px] sm:font-bold">账号资料</h2>
+                <p className="mt-1 truncate text-[12px] font-medium leading-5 text-light-gray sm:font-semibold sm:text-medium-gray">
+                  {profile || currentUser ? cardSummary : '读取账号资料中...'}
+                </p>
+              </div>
             </div>
             <button
               type="button"
               onClick={() => void handleSave()}
               disabled={isLoading || isSaving || !canSave}
-              className="flex h-9 shrink-0 items-center justify-center gap-2 rounded-full bg-midnight-graphite px-4 text-[12px] font-black text-white transition-colors hover:bg-deep-gray disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex h-8 shrink-0 items-center justify-center gap-1 text-[12px] font-semibold text-interactive-blue transition-colors hover:text-action-blue disabled:cursor-not-allowed disabled:text-light-silver sm:gap-1.5 sm:rounded-full sm:bg-midnight-graphite sm:px-3.5 sm:text-white sm:shadow-none sm:hover:bg-deep-gray"
             >
-              {isSaving ? <Loader2 size={14} strokeWidth={2.5} className="animate-spin" /> : <Save size={14} strokeWidth={2.5} />}
-              保存资料
+              {isSaving ? <Loader2 size={14} strokeWidth={2.5} className="animate-spin" /> : <Save size={14} strokeWidth={2.5} className="hidden sm:block" />}
+              保存
             </button>
           </div>
 
           {(message || error) && (
-            <p className={`mt-4 text-[12px] font-bold ${error ? 'text-[#c62828]' : 'text-[#2e7d32]'}`}>
+            <p className={`mx-4 mt-3 text-[12px] font-semibold sm:mx-0 ${error ? 'text-[#c62828]' : 'text-[#2e7d32]'}`}>
               {error || message}
             </p>
           )}
 
-          <div className="mt-5 grid gap-5 lg:grid-cols-[220px_1fr]">
-            <div className="flex flex-col items-start gap-3">
-              <div className="h-24 w-24 overflow-hidden rounded-full border border-border-silver bg-lightest-gray-background text-midnight-graphite shadow-sm">
+          <div className="grid gap-0 sm:mt-4 sm:gap-4 lg:grid-cols-[220px_1fr]">
+            <div className="flex items-center gap-3 border-b border-black/[0.045] px-4 py-2.5 sm:flex-col sm:items-start sm:gap-3 sm:border-b-0 sm:px-0 sm:py-0">
+              <div className="h-12 w-12 overflow-hidden rounded-[15px] border border-black/[0.04] bg-lightest-gray-background text-midnight-graphite sm:h-24 sm:w-24 sm:rounded-full sm:border-border-silver">
                 {avatarUrl ? (
                   <img src={avatarUrl} alt="账号头像" className="h-full w-full object-cover" />
                 ) : (
-                  <div className="flex h-full w-full items-center justify-center text-[30px] font-black">
+                  <div className="flex h-full w-full items-center justify-center text-[22px] font-semibold sm:text-[30px]">
                     {initial}
                   </div>
                 )}
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex min-w-0 flex-1 flex-wrap gap-2 sm:flex-none">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isLoading || isSaving || isSuperAdminProfile}
-                  className="flex h-9 items-center justify-center gap-2 rounded-full border border-border-silver bg-white px-4 text-[12px] font-black text-midnight-graphite transition-colors hover:bg-lightest-gray-background disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-black/[0.06] bg-[#f6f7fb] px-3.5 text-[12px] font-semibold text-midnight-graphite transition-colors hover:bg-lightest-gray-background disabled:cursor-not-allowed disabled:opacity-50 sm:h-9 sm:border-border-silver sm:bg-white sm:px-4"
                 >
                   <Camera size={14} strokeWidth={2.5} />
                   选择头像
@@ -255,7 +272,7 @@ export default function AccountProfileSettingsCard({ activeUsername }: AccountPr
                     type="button"
                     onClick={() => setAvatarUrl('')}
                     disabled={isLoading || isSaving || isSuperAdminProfile}
-                    className="flex h-9 w-9 items-center justify-center rounded-full border border-border-silver bg-white text-medium-gray transition-colors hover:bg-lightest-gray-background hover:text-[#c62828] disabled:opacity-50"
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-black/[0.06] bg-[#f6f7fb] text-medium-gray transition-colors hover:bg-lightest-gray-background hover:text-[#c62828] disabled:opacity-50 sm:h-9 sm:w-9 sm:border-border-silver sm:bg-white"
                     aria-label="移除头像"
                     title="移除头像"
                   >
@@ -272,8 +289,8 @@ export default function AccountProfileSettingsCard({ activeUsername }: AccountPr
               </div>
             </div>
 
-            <div className={cn("grid gap-3", isSuperAdminProfile && "opacity-60")}>
-              <div className="flex items-center gap-2 text-[12px] font-black uppercase tracking-wider text-light-gray">
+            <div className={cn("grid gap-0 px-4 py-0.5 sm:gap-3 sm:px-0 sm:py-0", isSuperAdminProfile && "opacity-60")}>
+              <div className="flex items-center gap-2 py-1.5 text-[12px] font-semibold text-light-gray sm:py-0">
                 <KeyRound size={14} strokeWidth={2.5} />
                 密码
               </div>
@@ -283,7 +300,7 @@ export default function AccountProfileSettingsCard({ activeUsername }: AccountPr
                   value={currentPassword}
                   onChange={(event) => setCurrentPassword(event.target.value)}
                   disabled={isLoading || isSaving || isSuperAdminProfile}
-                  className="input-field"
+                  className="input-field min-h-[39px] border-b border-black/[0.045] py-2 text-[14px] sm:border-border-silver"
                   placeholder="当前密码"
                   autoComplete="current-password"
                 />
@@ -293,7 +310,7 @@ export default function AccountProfileSettingsCard({ activeUsername }: AccountPr
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
                 disabled={isLoading || isSaving || isSuperAdminProfile}
-                className="input-field"
+                className="input-field min-h-[39px] border-b border-black/[0.045] py-2 text-[14px] sm:border-border-silver"
                 placeholder={isDeveloperOverride ? '设置新密码' : '新密码'}
                 autoComplete="new-password"
               />
@@ -302,7 +319,7 @@ export default function AccountProfileSettingsCard({ activeUsername }: AccountPr
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
                 disabled={isLoading || isSaving || isSuperAdminProfile}
-                className="input-field"
+                className="input-field min-h-[39px] py-2 text-[14px] sm:border-border-silver"
                 placeholder="再次输入新密码"
                 autoComplete="new-password"
               />

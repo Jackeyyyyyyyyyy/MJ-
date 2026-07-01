@@ -159,72 +159,75 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
         <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+          className="absolute inset-0 bg-black/25 backdrop-blur-[2px]"
         />
         <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 30 }}
+          initial={{ opacity: 0, scale: 0.98, y: 36 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 30 }}
-          className="bg-white rounded-[40px] w-full max-w-md relative flex flex-col shadow-2xl overflow-hidden border border-black/[0.03]"
+          exit={{ opacity: 0, scale: 0.98, y: 36 }}
+          className="relative flex max-h-[88dvh] w-full max-w-md flex-col overflow-hidden rounded-t-[24px] border border-white/70 bg-white shadow-[0_-4px_18px_rgba(15,23,42,0.055)] sm:rounded-[22px] sm:shadow-[0_10px_30px_rgba(15,23,42,0.11)]"
         >
-          <div className="px-10 py-8 border-b border-black/[0.02] flex items-center justify-between bg-[#fbfbfd]">
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10 bg-black rounded-2xl flex items-center justify-center">
-                <CheckCircle2 className="text-white w-5 h-5" strokeWidth={3} />
+          <div className="border-b border-black/[0.045] bg-white px-4 pb-3.5 pt-2.5 sm:px-6 sm:pt-3.5">
+            <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-black/[0.12] sm:hidden" />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-[11px] bg-[#eef5ff] text-[#1677ff]">
+                <CheckCircle2 className="h-5 w-5" strokeWidth={2.5} />
               </div>
-              <h2 className="text-[20px] font-black text-black tracking-tight uppercase">审批流进度汇总</h2>
+              <h2 className="text-[17px] font-semibold tracking-tight text-midnight-graphite">审批流进度汇总</h2>
+              </div>
+              <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full text-medium-gray transition-colors hover:bg-[#f5f6f8] hover:text-midnight-graphite">
+                <X size={20} strokeWidth={2.5} />
+              </button>
             </div>
-            <button onClick={onClose} className="w-10 h-10 flex items-center justify-center hover:bg-black/[0.05] rounded-full transition-all text-medium-gray">
-              <X size={20} strokeWidth={2.5} />
-            </button>
           </div>
 
-          <div className="p-12">
-            <div className="space-y-0 relative">
+          <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-8 sm:py-7">
+            <div className="relative space-y-0">
               {steps.map((step, idx) => (
-                <div key={idx} className="relative flex gap-8 pb-16 last:pb-0">
+                <div key={idx} className="relative flex gap-3.5 pb-8 last:pb-0">
                   {/* Line */}
                   {idx !== steps.length - 1 && (
                     <div className={cn(
-                      "absolute top-10 left-5 w-[1.5px] h-full transition-all duration-700",
-                      step.status === 'completed' ? "bg-black" : "bg-slate-100"
+                      "absolute left-4 top-8 h-full w-px transition-all duration-700",
+                      step.status === 'completed' ? "bg-[#1677ff]/24" : "bg-slate-100"
                     )} />
                   )}
 
                   {/* Icon Container */}
-                  <div className="shrink-0 z-10">
+                  <div className="z-10 shrink-0">
                     <div className={cn(
-                      "w-10 h-10 rounded-2xl flex items-center justify-center border-2 transition-all duration-500",
-                      step.isFinal && step.status === 'completed' ? "bg-[#2e7d32] border-[#2e7d32] text-white" :
-                      step.status === 'completed' ? "bg-black border-black text-white" : 
-                      (step.status === 'current' ? "bg-white border-black text-black shadow-xl shadow-black/10" : 
+                      "flex h-8 w-8 items-center justify-center rounded-full border transition-all duration-500",
+                      step.isFinal && step.status === 'completed' ? "bg-[#1677ff] border-[#1677ff] text-white" :
+                      step.status === 'completed' ? "bg-[#1677ff] border-[#1677ff] text-white" :
+                      (step.status === 'current' ? "bg-white border-[#1677ff] text-[#1677ff] shadow-[0_6px_16px_rgba(22,119,255,0.10)]" :
                       (step.status === 'failed' ? "bg-rose-500 border-rose-500 text-white" : "bg-white border-border-silver text-light-gray"))
                     )}>
-                      {step.status === 'completed' && <Check size={18} strokeWidth={3} />}
-                      {step.status === 'current' && <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 4, ease: 'linear' }}><Clock size={18} strokeWidth={3} /></motion.div>}
-                      {step.status === 'failed' && <X size={18} strokeWidth={3} />}
-                      {step.status === 'pending' && <div className="w-2 h-2 rounded-full bg-slate-100" />}
+                      {step.status === 'completed' && <Check size={16} strokeWidth={2.7} />}
+                      {step.status === 'current' && <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 4, ease: 'linear' }}><Clock size={16} strokeWidth={2.7} /></motion.div>}
+                      {step.status === 'failed' && <X size={16} strokeWidth={2.7} />}
+                      {step.status === 'pending' && <div className="h-1.5 w-1.5 rounded-full bg-slate-200" />}
                     </div>
                   </div>
 
                   {/* Text Content */}
-                  <div className="flex flex-col gap-1.5 pt-1.5">
+                  <div className="min-w-0 flex flex-col gap-1 pt-1">
                     <h3 className={cn(
-                      "text-[15px] font-black uppercase tracking-tight",
-                      step.status === 'completed' ? "text-black" : (step.status === 'current' ? "text-black" : "text-medium-gray")
+                      "text-[15px] font-semibold tracking-tight",
+                      step.status === 'completed' ? "text-midnight-graphite" : (step.status === 'current' ? "text-midnight-graphite" : "text-medium-gray")
                     )}>{step.title}</h3>
-                    <p className="text-[12px] font-bold text-medium-gray">{step.desc}</p>
+                    <p className="text-[12.5px] font-medium leading-5 text-medium-gray">{step.desc}</p>
                     {step.approvers && step.approvers.length > 1 && (
                       <ApprovalParallelApprovers approvers={step.approvers} title={step.title} approvalMode={step.approvalMode} stepStatus={step.stepStatus} />
                     )}
                     {step.time && (
-                      <p className="text-[10px] font-black text-light-gray font-mono mt-2 uppercase tracking-widest">
+                      <p className="mt-1.5 font-mono text-[10.5px] font-medium text-light-gray">
                         {formatLocalDateTime(step.time, 'date-time-seconds')}
                       </p>
                     )}
@@ -234,8 +237,14 @@ export default function ApprovalProgressModal({ record, onClose }: ApprovalProgr
             </div>
           </div>
 
-          <div className="p-8 bg-[#fbfbfd] border-t border-black/[0.02] flex items-center justify-center">
-            <span className="text-[9px] font-black text-medium-gray uppercase tracking-[0.24em]">由 Matrix Core 驱动解析</span>
+          <div className="border-t border-black/[0.04] bg-white px-5 py-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-11 w-full items-center justify-center rounded-full bg-[#1677ff] text-[14px] font-semibold text-white shadow-[0_5px_12px_rgba(22,119,255,0.12)] transition-colors hover:bg-action-blue"
+            >
+              知道了
+            </button>
           </div>
         </motion.div>
       </div>

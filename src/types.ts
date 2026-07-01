@@ -306,6 +306,7 @@ export interface WorkflowTemplateInput {
 
 export type WorkflowEfficiencyMetricKey = 'flowAvg' | 'nodeAvg' | 'volume' | 'users';
 export type WorkflowEfficiencyRange = '7d' | '30d' | '90d';
+export type WorkflowEfficiencyScope = 'enterprise' | 'personal';
 
 export interface WorkflowEfficiencyMetric {
   key: WorkflowEfficiencyMetricKey;
@@ -334,6 +335,60 @@ export interface WorkflowEfficiencySummary {
   currentPeriodLabel: string;
   previousPeriodLabel: string;
   trend: Record<WorkflowEfficiencyMetricKey, WorkflowEfficiencyPoint[]>;
+}
+
+export type PersonalEfficiencyMetricKey =
+  | 'initiatedCount'
+  | 'unfinishedInitiatedCount'
+  | 'initiatedFlowAvgHours'
+  | 'approvedCount'
+  | 'pendingApprovalCount'
+  | 'approvalAvgHours';
+
+export interface PersonalEfficiencyMetric {
+  key: PersonalEfficiencyMetricKey;
+  label: string;
+  value: number;
+  unit: string;
+  precision: number;
+  previousValue: number;
+  changePercent: number;
+  hasData: boolean;
+  previousHasData: boolean;
+}
+
+export type PersonalEfficiencyTrend = 'up' | 'down' | 'flat';
+
+export interface PersonalEfficiencyRanking {
+  label: string;
+  rank: number;
+  total: number;
+  name: string;
+  value: number;
+  unit: string;
+  trend: PersonalEfficiencyTrend;
+}
+
+export interface PersonalEfficiencySummary {
+  scope: 'personal';
+  range: WorkflowEfficiencyRange;
+  currentPeriodLabel: string;
+  previousPeriodLabel: string;
+  periodLabel: string;
+  initiated: {
+    metrics: PersonalEfficiencyMetric[];
+    enterpriseFlowAvgHours: number;
+    enterpriseFlowAvgHasData: boolean;
+  };
+  approved: {
+    metrics: PersonalEfficiencyMetric[];
+    enterpriseApprovalAvgHours: number;
+    enterpriseApprovalAvgHasData: boolean;
+  };
+  rankings: {
+    pending: PersonalEfficiencyRanking;
+    approvalTime: PersonalEfficiencyRanking;
+  };
 }
 
 export interface User {

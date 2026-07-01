@@ -857,16 +857,21 @@ function flowNodesFromDraft(draft: WorkflowVersion): WorkflowNode[] {
   if (draft.flowMode !== 'flexible') return [];
 
   const nodes = Array.isArray(draft.nodes) ? draft.nodes.filter((node) => node.type !== 'start') : [];
-  if (nodes.some((node) => node.type === 'approver' || node.type === 'condition' || node.type === 'cc' || node.type === 'processor')) {
+  const branches = draft.branches || [];
+  const defaultBranch = branches.find((branch) => branch.isDefault) || branches[branches.length - 1];
+  const hasConditionalBranches = branches.some((branch) => !branch.isDefault);
+  const hasFlowConditionNode = nodes.some((node) => node.type === 'condition');
+  const hasExecutableFlowNodes = nodes.some((node) => (
+    node.type === 'approver' || node.type === 'condition' || node.type === 'cc' || node.type === 'processor'
+  ));
+
+  if (hasExecutableFlowNodes && (hasFlowConditionNode || !hasConditionalBranches)) {
     if (isProcessorTaskEnabled(draft.processorRule) && !containsProcessorNode(nodes)) {
       return [...nodes, createProcessorFlowNode(draft.processorRule)];
     }
     return nodes;
   }
 
-  const branches = draft.branches || [];
-  const defaultBranch = branches.find((branch) => branch.isDefault) || branches[branches.length - 1];
-  const hasConditionalBranches = branches.some((branch) => !branch.isDefault);
   if (!hasConditionalBranches) {
     const linearNodes = (defaultBranch?.approvalSteps || []).map(stepToFlowNode);
     return isProcessorTaskEnabled(draft.processorRule)
@@ -1040,8 +1045,14 @@ function normalizeStep(step: Partial<ApprovalStep> | undefined, index: number): 
   };
 }
 
+function normalizeConditionFieldAlias(field: WorkflowConditionField | undefined): WorkflowConditionField {
+  if (field === 'submitter.department') return `${SUBMITTER_FIELD_PREFIX}department`;
+  if (field === 'submitter.member') return `${SUBMITTER_FIELD_PREFIX}member`;
+  return String(field || `${SUBMITTER_FIELD_PREFIX}department`) as WorkflowConditionField;
+}
+
 function normalizeCondition(condition: Partial<WorkflowCondition> | undefined): WorkflowCondition {
-  const field = String(condition?.field || `${SUBMITTER_FIELD_PREFIX}department`) as WorkflowConditionField;
+  const field = normalizeConditionFieldAlias(condition?.field);
   const operatorOptions = getConditionOperatorOptions(field);
   const operator = operatorOptions.some((option) => option.value === condition?.operator)
     ? condition?.operator as WorkflowConditionOperator
@@ -1073,14 +1084,15 @@ function getFallbackConditionField(scope: BusinessScopeOption | null): WorkflowC
 
 function rebaseConditionToScope(condition: WorkflowCondition, scope: BusinessScopeOption): WorkflowCondition {
   const allowedFields = getAllowedConditionFields(scope);
-  if (allowedFields.has(condition.field)) return normalizeCondition(condition);
+  const normalizedCondition = normalizeCondition(condition);
+  if (allowedFields.has(normalizedCondition.field)) return normalizedCondition;
 
   const nextField = getFallbackConditionField(scope);
-  if (!nextField) return normalizeCondition(condition);
+  if (!nextField) return normalizedCondition;
 
   return {
     ...defaultCondition(nextField),
-    id: condition.id,
+    id: normalizedCondition.id,
   };
 }
 
@@ -1611,10 +1623,13 @@ function patchSupervisorLevels(rule: ApproverRule, value: string): ApproverRule 
 
 function getEligibleSubmitterMembers(permission: SubmitPermissionRule, directory: OrganizationDirectory) {
   const excludedMemberIds = new Set(permission.excludedMemberIds || []);
+  const submitterDepartmentIds = new Set(permission.departmentIds || []);
   return directory.members.filter((member) => {
     if (member.enabled === false || excludedMemberIds.has(member.id)) return false;
     if (permission.type === 'members') return permission.memberIds.includes(member.id);
-    if (permission.type === 'departments') return permission.departmentIds.includes(member.departmentId);
+    if (permission.type === 'departments') {
+      return getDepartmentLineage(directory, member.departmentId).some((department) => submitterDepartmentIds.has(department.id));
+    }
     return true;
   });
 }
@@ -1861,6 +1876,338 @@ function getApprovalModeLabel(mode: ApprovalMode) {
 function getEmptyApproverActionLabel(action: ApprovalStep['emptyApproverAction']) {
   const normalizedAction = getConfigurableEmptyApproverAction(action);
   return emptyApproverActionOptions.find((option) => option.value === normalizedAction)?.label || '自动通过';
+}
+
+type ConditionPreviewResult = 'match' | 'miss' | 'unknown';
+type FlowRoutePreviewState = 'certain' | 'possible';
+
+interface FlowRoutePreviewPath {
+  id: string;
+  segments: string[];
+  state: FlowRoutePreviewState;
+}
+
+interface FlowRoutePreview {
+  branchIds: Set<string>;
+  nodeIds: Set<string>;
+  branchStates: Map<string, FlowRoutePreviewState>;
+  nodeStates: Map<string, FlowRoutePreviewState>;
+  hasPreview: boolean;
+  isUncertain: boolean;
+  pathCount: number;
+  paths: FlowRoutePreviewPath[];
+}
+
+function createEmptyFlowRoutePreview(hasPreview = false): FlowRoutePreview {
+  return {
+    branchIds: new Set<string>(),
+    nodeIds: new Set<string>(),
+    branchStates: new Map<string, FlowRoutePreviewState>(),
+    nodeStates: new Map<string, FlowRoutePreviewState>(),
+    hasPreview,
+    isUncertain: false,
+    pathCount: hasPreview ? 1 : 0,
+    paths: [],
+  };
+}
+
+function mergeRoutePreviewState(
+  current: FlowRoutePreviewState | undefined,
+  next: FlowRoutePreviewState,
+): FlowRoutePreviewState {
+  if (current === 'possible' || next === 'possible') return 'possible';
+  return 'certain';
+}
+
+function markRoutePreviewNode(routePreview: FlowRoutePreview, nodeId: string, state: FlowRoutePreviewState) {
+  routePreview.nodeIds.add(nodeId);
+  routePreview.nodeStates.set(nodeId, mergeRoutePreviewState(routePreview.nodeStates.get(nodeId), state));
+}
+
+function markRoutePreviewBranch(routePreview: FlowRoutePreview, branchId: string, state: FlowRoutePreviewState) {
+  routePreview.branchIds.add(branchId);
+  routePreview.branchStates.set(branchId, mergeRoutePreviewState(routePreview.branchStates.get(branchId), state));
+}
+
+function getPreviewBranchSegment(branch: WorkflowConditionBranch) {
+  return branch.title || branch.expression || (branch.isDefault ? '其余情况' : '条件分支');
+}
+
+function normalizeRoutePreviewPaths(
+  paths: Array<{ segments: string[]; state: FlowRoutePreviewState }>,
+): FlowRoutePreviewPath[] {
+  const byLabel = new Map<string, FlowRoutePreviewPath>();
+
+  paths.forEach((path, index) => {
+    const segments = path.segments.map((segment) => segment.trim()).filter(Boolean);
+    const label = segments.length > 0 ? segments.join(' → ') : '直达流程';
+    const existing = byLabel.get(label);
+
+    if (existing) {
+      existing.state = mergeRoutePreviewState(existing.state, path.state);
+      return;
+    }
+
+    byLabel.set(label, {
+      id: `${label}-${index}`,
+      segments,
+      state: path.state,
+    });
+  });
+
+  return Array.from(byLabel.values());
+}
+
+function normalizePreviewComparable(value: unknown) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getDepartmentLineage(directory: OrganizationDirectory, departmentId?: string) {
+  const departmentsById = new Map(directory.departments.map((department) => [department.id, department]));
+  const lineage: OrganizationDirectory['departments'] = [];
+  const seen = new Set<string>();
+  let current = departmentId ? departmentsById.get(departmentId) : undefined;
+
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    lineage.push(current);
+    current = current.parentId ? departmentsById.get(current.parentId) : undefined;
+  }
+
+  return lineage;
+}
+
+function doesPreviewSubmitterMatchDepartment(
+  expectedValue: string,
+  directory: OrganizationDirectory,
+  previewSubmitter: OrganizationDirectory['members'][number],
+) {
+  const expected = normalizePreviewComparable(expectedValue);
+  if (!expected) return false;
+
+  return getDepartmentLineage(directory, previewSubmitter.departmentId).some((department) => (
+    [department.id, department.name].map(normalizePreviewComparable).includes(expected)
+  ));
+}
+
+function doesPreviewSubmitterMatchMember(
+  expectedValue: string,
+  previewSubmitter: OrganizationDirectory['members'][number],
+) {
+  const expected = normalizePreviewComparable(expectedValue);
+  if (!expected) return false;
+
+  return [previewSubmitter.id, previewSubmitter.name, previewSubmitter.accountUsername]
+    .map(normalizePreviewComparable)
+    .filter(Boolean)
+    .includes(expected);
+}
+
+function applyKnownConditionOperator(condition: WorkflowCondition, matchesExpected: boolean): ConditionPreviewResult {
+  if (condition.operator === 'neq' || condition.operator === 'not_contains') {
+    return matchesExpected ? 'miss' : 'match';
+  }
+
+  if (condition.operator === 'eq' || condition.operator === 'contains') {
+    return matchesExpected ? 'match' : 'miss';
+  }
+
+  return 'unknown';
+}
+
+function evaluatePreviewCondition(
+  condition: WorkflowCondition,
+  directory: OrganizationDirectory,
+  previewSubmitter: OrganizationDirectory['members'][number] | null,
+): ConditionPreviewResult {
+  if (!previewSubmitter) return 'unknown';
+
+  const field = condition.field;
+  const values = getConditionSelectedValues(condition);
+  if (values.length === 0) return 'unknown';
+
+  if (field === 'submitter.department' || field === `${SUBMITTER_FIELD_PREFIX}department`) {
+    const matchesExpected = values.some((value) => doesPreviewSubmitterMatchDepartment(value, directory, previewSubmitter));
+    return applyKnownConditionOperator(condition, matchesExpected);
+  }
+
+  if (field === 'submitter.member' || field === `${SUBMITTER_FIELD_PREFIX}member`) {
+    const matchesExpected = values.some((value) => doesPreviewSubmitterMatchMember(value, previewSubmitter));
+    return applyKnownConditionOperator(condition, matchesExpected);
+  }
+
+  return 'unknown';
+}
+
+function evaluatePreviewBranch(
+  branch: WorkflowConditionBranch,
+  directory: OrganizationDirectory,
+  previewSubmitter: OrganizationDirectory['members'][number] | null,
+): ConditionPreviewResult {
+  const conditions = branch.workflowConditions || [];
+  if (conditions.length === 0) return 'unknown';
+
+  let hasUnknownCondition = false;
+  for (const condition of conditions) {
+    const result = evaluatePreviewCondition(condition, directory, previewSubmitter);
+    if (result === 'miss') return 'miss';
+    if (result === 'unknown') hasUnknownCondition = true;
+  }
+
+  return hasUnknownCondition ? 'unknown' : 'match';
+}
+
+function getPossiblePreviewBranches(
+  node: WorkflowNode,
+  directory: OrganizationDirectory,
+  previewSubmitter: OrganizationDirectory['members'][number] | null,
+) {
+  const branches = node.conditions || [];
+  if (branches.length === 0) return { branches: [], isUncertain: false };
+
+  if (node.conditionMode === 'ai') {
+    return {
+      branches: branches.map((branch) => ({ branch, state: 'possible' as FlowRoutePreviewState })),
+      isUncertain: true,
+    };
+  }
+
+  const defaultBranch = branches.find((branch) => branch.isDefault) || null;
+  const possibleBranches: Array<{ branch: WorkflowConditionBranch; state: FlowRoutePreviewState }> = [];
+  let isUncertain = false;
+  let stoppedByKnownMatch = false;
+
+  for (const branch of branches) {
+    if (branch.isDefault) continue;
+
+    const result = evaluatePreviewBranch(branch, directory, previewSubmitter);
+    if (result === 'miss') continue;
+
+    if (result === 'unknown') {
+      possibleBranches.push({ branch, state: 'possible' });
+      isUncertain = true;
+      continue;
+    }
+
+    possibleBranches.push({ branch, state: isUncertain ? 'possible' : 'certain' });
+    stoppedByKnownMatch = true;
+    break;
+  }
+
+  if (!stoppedByKnownMatch && defaultBranch) {
+    possibleBranches.push({ branch: defaultBranch, state: isUncertain ? 'possible' : 'certain' });
+  }
+
+  return {
+    branches: possibleBranches,
+    isUncertain: isUncertain || possibleBranches.some((item) => item.state === 'possible'),
+  };
+}
+
+function mergeFlowRoutePreview(target: FlowRoutePreview, source: FlowRoutePreview) {
+  source.branchIds.forEach((branchId) => target.branchIds.add(branchId));
+  source.nodeIds.forEach((nodeId) => target.nodeIds.add(nodeId));
+  source.branchStates.forEach((state, branchId) => markRoutePreviewBranch(target, branchId, state));
+  source.nodeStates.forEach((state, nodeId) => markRoutePreviewNode(target, nodeId, state));
+  target.isUncertain = target.isUncertain || source.isUncertain;
+}
+
+function traceFlowRoutePreview(
+  nodes: WorkflowNode[],
+  directory: OrganizationDirectory,
+  previewSubmitter: OrganizationDirectory['members'][number] | null,
+  routeState: FlowRoutePreviewState = 'certain',
+): FlowRoutePreview {
+  const routePreview = createEmptyFlowRoutePreview(Boolean(previewSubmitter));
+  if (!previewSubmitter) return routePreview;
+
+  let activePaths: Array<{ segments: string[]; state: FlowRoutePreviewState }> = [{
+    segments: [],
+    state: routeState,
+  }];
+
+  nodes.forEach((node) => {
+    if (node.type !== 'condition') {
+      activePaths.forEach((activePath) => {
+        markRoutePreviewNode(routePreview, node.id, activePath.state);
+      });
+      return;
+    }
+
+    const decision = getPossiblePreviewBranches(node, directory, previewSubmitter);
+    routePreview.isUncertain = routePreview.isUncertain || decision.isUncertain;
+
+    if (decision.branches.length === 0) return;
+
+    const nextActivePaths: Array<{ segments: string[]; state: FlowRoutePreviewState }> = [];
+    activePaths.forEach((activePath) => {
+      decision.branches.forEach(({ branch, state }) => {
+        const childRouteState = mergeRoutePreviewState(activePath.state, state);
+        markRoutePreviewBranch(routePreview, branch.id, childRouteState);
+
+        const childPreview = traceFlowRoutePreview(branch.nodes || [], directory, previewSubmitter, childRouteState);
+        mergeFlowRoutePreview(routePreview, childPreview);
+
+        const childPaths = childPreview.paths.length > 0
+          ? childPreview.paths
+          : [{ segments: [], state: childRouteState }];
+        childPaths.forEach((childPath) => {
+          nextActivePaths.push({
+            segments: [
+              ...activePath.segments,
+              getPreviewBranchSegment(branch),
+              ...childPath.segments,
+            ],
+            state: mergeRoutePreviewState(childRouteState, childPath.state),
+          });
+        });
+      });
+    });
+
+    if (nextActivePaths.length > 0) {
+      activePaths = nextActivePaths;
+    }
+  });
+
+  routePreview.paths = normalizeRoutePreviewPaths(activePaths);
+  routePreview.pathCount = Math.max(1, routePreview.paths.length);
+  routePreview.isUncertain = routePreview.isUncertain || routePreview.paths.some((path) => path.state === 'possible');
+
+  return routePreview;
+}
+
+function getRoutePreviewLabel(routePreview: FlowRoutePreview) {
+  if (!routePreview.hasPreview) return undefined;
+  return routePreview.isUncertain ? '所有可能路径' : '确定路径';
+}
+
+function getRoutePreviewStateLabel(state?: FlowRoutePreviewState) {
+  if (!state) return undefined;
+  return state === 'possible' ? '可能会走' : '会走';
+}
+
+function getRoutePreviewPathLabel(path: FlowRoutePreviewPath) {
+  return path.segments.length > 0 ? path.segments.join(' → ') : '直达流程';
+}
+
+function getRoutePreviewPathCount(routePreview: FlowRoutePreview) {
+  return Math.max(1, routePreview.paths.length || routePreview.pathCount);
+}
+
+function countFlowConditionBranches(nodes: WorkflowNode[]): number {
+  return nodes.reduce((total, node) => {
+    if (node.type !== 'condition') return total;
+
+    const branches = node.conditions || [];
+    return total + branches.length + branches.reduce((branchTotal, branch) => (
+      branchTotal + countFlowConditionBranches(branch.nodes || [])
+    ), 0);
+  }, 0);
+}
+
+function getExcludedRoutePreviewBranchCount(routePreview: FlowRoutePreview, nodes: WorkflowNode[]) {
+  if (!routePreview.hasPreview) return 0;
+  return Math.max(0, countFlowConditionBranches(nodes) - routePreview.branchStates.size);
 }
 
 type FlowAnchorSide = 'top' | 'bottom' | 'left' | 'right';
@@ -2272,6 +2619,9 @@ function FlowNode({
   icon,
   selected,
   hasError,
+  routeState,
+  routeLabel,
+  routeExcluded,
   onClick,
   children,
 }: {
@@ -2283,9 +2633,14 @@ function FlowNode({
   icon: React.ReactNode;
   selected?: boolean;
   hasError?: boolean;
+  routeState?: FlowRoutePreviewState;
+  routeLabel?: string;
+  routeExcluded?: boolean;
   onClick?: () => void;
   children?: React.ReactNode;
 }) {
+  const isRouteMarked = Boolean(routeState);
+  const isRouteExcluded = Boolean(routeExcluded) && !isRouteMarked;
   const toneClass = {
     submit: 'border-[#7d89b0] bg-white',
     approval: 'border-[#e2b56c] bg-white',
@@ -2302,37 +2657,61 @@ function FlowNode({
       className={cn(
         "w-full rounded-lg border p-0 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-sky-blue-highlight",
         toneClass,
+        isRouteMarked && "border-[#ff3b30] bg-[#fff8f7] shadow-[0_0_0_3px_rgba(255,59,48,0.14)]",
+        routeState === 'possible' && "border-dashed",
+        isRouteExcluded && "border-[#e5e5ea] bg-white/65 opacity-45 shadow-none grayscale-[0.25] hover:translate-y-0 hover:shadow-none",
         selected && "ring-2 ring-interactive-blue ring-offset-2",
         hasError && "border-[#c62828] bg-[#fffafa]"
       )}
     >
       <div className={cn(
         "h-7 rounded-t-[6px] px-3 flex items-center justify-between text-[11px] font-black",
+        isRouteMarked && "bg-[#ffe5e2] text-[#c9251d]",
+        isRouteExcluded && "bg-[#f4f4f5] text-[#8e8e93]",
         tone === 'approval' && "bg-[#fff7e6] text-[#8a5a12]",
         tone === 'submit' && "bg-[#7d89b0] text-white",
         tone === 'condition' && "bg-[#edf7ed] text-[#2e7d32]",
         tone === 'cc' && "bg-[#e7f1ff] text-[#2267ad]",
         tone === 'processor' && "bg-[#fff7e0] text-[#7b5b18]",
-        tone === 'end' && "bg-lightest-gray-background text-medium-gray"
+        tone === 'end' && "bg-lightest-gray-background text-medium-gray",
+        isRouteMarked && "bg-[#ffe5e2] text-[#c9251d]",
+        isRouteExcluded && "bg-[#f4f4f5] text-[#8e8e93]"
       )}>
         <span>{kicker}</span>
-        {hasError && <AlertCircle size={14} />}
+        <span className="flex items-center gap-1.5">
+          {(isRouteMarked || isRouteExcluded) && routeLabel && (
+            <span className={cn(
+              "rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black",
+              isRouteExcluded ? "text-[#8e8e93]" : "text-[#ff3b30]"
+            )}>
+              {routeLabel}
+            </span>
+          )}
+          {hasError && <AlertCircle size={14} />}
+        </span>
       </div>
       <div className="p-3">
         <div className="flex items-start gap-2.5">
           <span className={cn(
             "mt-0.5 h-8 w-8 rounded-full flex shrink-0 items-center justify-center",
+            isRouteMarked && "bg-[#ffe5e2] text-[#ff3b30]",
+            isRouteExcluded && "bg-[#f4f4f5] text-[#8e8e93]",
             tone === 'approval' && "bg-[#fff7e6] text-[#8a5a12]",
             tone === 'submit' && "bg-lightest-gray-background text-midnight-graphite",
             tone === 'condition' && "bg-[#edf7ed] text-[#2e7d32]",
             tone === 'cc' && "bg-[#e7f1ff] text-[#2267ad]",
             tone === 'processor' && "bg-[#fff7e0] text-[#7b5b18]",
-            tone === 'end' && "bg-lightest-gray-background text-medium-gray"
+            tone === 'end' && "bg-lightest-gray-background text-medium-gray",
+            isRouteMarked && "bg-[#ffe5e2] text-[#ff3b30]",
+            isRouteExcluded && "bg-[#f4f4f5] text-[#8e8e93]"
           )}>
             {icon}
           </span>
           <span className="min-w-0">
-            <span className="block text-[14px] font-black text-midnight-graphite truncate">{title}</span>
+            <span className={cn(
+              "block truncate text-[14px] font-black text-midnight-graphite",
+              isRouteExcluded && "text-medium-gray"
+            )}>{title}</span>
             <span className="mt-1 block text-[11px] font-bold text-medium-gray leading-5">{subtitle}</span>
             {meta && <span className="hidden">{meta}</span>}
           </span>
@@ -2654,6 +3033,7 @@ function FlowSequence({
   path,
   directory,
   previewSubmitter,
+  routePreview,
   selection,
   validation,
   onSelect,
@@ -2666,6 +3046,7 @@ function FlowSequence({
   path: string[];
   directory: OrganizationDirectory;
   previewSubmitter: OrganizationDirectory['members'][number] | null;
+  routePreview: FlowRoutePreview;
   selection: DesignerSelection;
   validation: ValidationState;
   onSelect: (selection: DesignerSelection) => void;
@@ -2686,6 +3067,10 @@ function FlowSequence({
         <React.Fragment key={node.id}>
           {shouldRenderStandaloneFlowNode(node) && (
             <div className="w-[300px]">
+            {(() => {
+              const routeState = routePreview.nodeStates.get(node.id);
+              const routeExcluded = routePreview.hasPreview && !routeState;
+              return (
             <FlowNode
               tone={getFlowNodeTone(node)}
               kicker={node.type === 'condition' ? (node.conditionMode === 'ai' ? 'AI 条件分化' : '条件分化') : node.type === 'cc' ? '抄送' : node.type === 'processor' ? '办理' : `审批 ${index + 1}`}
@@ -2694,6 +3079,9 @@ function FlowSequence({
               icon={getFlowNodeIcon(node)}
               selected={selection.type === 'flow-node' && selection.nodeId === node.id}
               hasError={node.type === 'processor' && Boolean(validation.sections.processor?.length)}
+              routeState={routeState}
+              routeLabel={getRoutePreviewStateLabel(routeState)}
+              routeExcluded={routeExcluded}
               onClick={() => onSelect({ type: 'flow-node', nodeId: node.id })}
             >
               {node.type === 'approver' && (
@@ -2706,6 +3094,8 @@ function FlowSequence({
                 />
               )}
             </FlowNode>
+              );
+            })()}
             </div>
           )}
 
@@ -2730,6 +3120,10 @@ function FlowSequence({
                       showBottomConnector={conditionBranches.length > 1}
                     >
                       <div className="w-[300px]">
+                        {(() => {
+                          const routeState = routePreview.branchStates.get(condition.id);
+                          const routeExcluded = routePreview.hasPreview && !routeState;
+                          return (
                         <FlowNode
                           tone="condition"
                           kicker={condition.isDefault ? '其余情况' : `条件 ${conditionIndex + 1}`}
@@ -2737,14 +3131,20 @@ function FlowSequence({
                           subtitle={getFlowBranchSubtitle(condition, directory)}
                           icon={<GitBranch size={17} strokeWidth={2.5} />}
                           selected={selection.type === 'flow-node' && selection.nodeId === node.id}
+                          routeState={routeState}
+                          routeLabel={getRoutePreviewStateLabel(routeState)}
+                          routeExcluded={routeExcluded}
                           onClick={() => onSelect({ type: 'flow-node', nodeId: node.id })}
                         />
+                          );
+                        })()}
                       </div>
                       <FlowSequence
                         nodes={condition.nodes || []}
                         path={[...path, condition.id]}
                         directory={directory}
                         previewSubmitter={previewSubmitter}
+                        routePreview={routePreview}
                         selection={selection}
                         validation={validation}
                         onSelect={onSelect}
@@ -2923,6 +3323,22 @@ function WorkflowFlowDesigner({
     }
   }, [eligibleSubmitters, previewSubmitterId]);
 
+  const routePreview = React.useMemo(
+    () => traceFlowRoutePreview(flowNodes, directory, previewSubmitter),
+    [flowNodes, directory, previewSubmitter],
+  );
+  const routePreviewLabel = getRoutePreviewLabel(routePreview);
+  const routeCertainLabel = getRoutePreviewStateLabel('certain');
+  const routePreviewPathCount = getRoutePreviewPathCount(routePreview);
+  const excludedRouteBranchCount = getExcludedRoutePreviewBranchCount(routePreview, flowNodes);
+  const routePreviewPaths = routePreview.paths.length > 0
+    ? routePreview.paths
+    : [{
+        id: 'direct-route-preview',
+        segments: [],
+        state: 'certain' as FlowRoutePreviewState,
+      }];
+
   const fitWorkflowCanvas = React.useCallback(() => {
     const frame = canvasFrameRef.current;
     const flow = canvasFlowRef.current;
@@ -3086,6 +3502,17 @@ function WorkflowFlowDesigner({
               <span className="text-[12px] font-black text-light-gray">暂无成员</span>
             )}
           </div>
+          {routePreview.hasPreview && (
+            <div className="flex h-9 items-center gap-2 rounded-full border border-[#fecaca] bg-[#fff7f7] px-3 text-[12px] font-black text-[#dc2626]">
+              <GitBranch size={14} strokeWidth={2.4} />
+              <span>{routePreviewLabel} · {routePreviewPathCount} 条</span>
+              {excludedRouteBranchCount > 0 && (
+                <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] text-medium-gray">
+                  排除 {excludedRouteBranchCount}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -3129,6 +3556,47 @@ function WorkflowFlowDesigner({
               {isCanvasFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
             </button>
           </div>
+          {routePreview.hasPreview && (
+            <div className="pointer-events-none absolute left-5 top-5 z-20 max-w-[360px] rounded-[18px] border border-black/[0.06] bg-white/95 p-3 shadow-[0_10px_30px_rgba(15,23,42,0.08)] backdrop-blur">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-black text-midnight-graphite">
+                    {formatPreviewSubmitter(previewSubmitter, directory)}
+                  </p>
+                  <p className="mt-0.5 text-[11px] font-bold text-medium-gray">
+                    {routePreviewLabel} · {routePreviewPathCount} 条
+                    {excludedRouteBranchCount > 0 ? ` · 排除 ${excludedRouteBranchCount} 条` : ''}
+                  </p>
+                </div>
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#ffe5e2] text-[#ff3b30]">
+                  <GitBranch size={15} strokeWidth={2.5} />
+                </span>
+              </div>
+              <div className="mt-3 space-y-1.5">
+                {routePreviewPaths.slice(0, 3).map((path) => (
+                  <div
+                    key={path.id}
+                    className={cn(
+                      "rounded-[12px] border px-3 py-2 text-[11px] font-black leading-5",
+                      path.state === 'possible'
+                        ? "border-[#fecaca] bg-[#fff7f7] text-[#d92d20]"
+                        : "border-[#ffd8d4] bg-[#fff8f7] text-[#c9251d]"
+                    )}
+                  >
+                    <span className="mr-2 text-[10px] text-medium-gray">
+                      {path.state === 'possible' ? '可能' : '确定'}
+                    </span>
+                    {getRoutePreviewPathLabel(path)}
+                  </div>
+                ))}
+                {routePreviewPaths.length > 3 && (
+                  <div className="rounded-[12px] bg-lightest-gray-background px-3 py-2 text-[11px] font-bold text-medium-gray">
+                    还有 {routePreviewPaths.length - 3} 条可能路径已在图中标出
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <div
             ref={canvasContentRef}
             className="absolute left-0 top-0 px-10 py-8"
@@ -3156,6 +3624,8 @@ function WorkflowFlowDesigner({
                   icon={<UserRound size={17} strokeWidth={2.5} />}
                   selected={isDesignerSelected(activeSelection, 'submit')}
                   hasError={Boolean(validation.sections.submit?.length)}
+                  routeState={routePreview.hasPreview ? 'certain' : undefined}
+                  routeLabel={routeCertainLabel}
                   onClick={() => onSelect({ type: 'submit' })}
                 >
                   <div className="mt-3 flex items-center justify-between gap-2 rounded-md bg-lightest-gray-background px-3 py-2 text-[11px] font-black">
@@ -3172,6 +3642,7 @@ function WorkflowFlowDesigner({
                 path={[]}
                 directory={directory}
                 previewSubmitter={previewSubmitter}
+                routePreview={routePreview}
                 selection={activeSelection}
                 validation={validation}
                 onSelect={onSelect}
@@ -3187,6 +3658,8 @@ function WorkflowFlowDesigner({
                   title="流程完成"
                   subtitle="完成"
                   icon={<CheckCircle2 size={17} strokeWidth={2.5} />}
+                  routeState={routePreview.hasPreview ? 'certain' : undefined}
+                  routeLabel={routeCertainLabel}
                 />
               </div>
             </div>

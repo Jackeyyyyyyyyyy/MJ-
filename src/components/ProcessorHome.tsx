@@ -70,26 +70,28 @@ export default function ProcessorHome() {
   };
 
   return (
-    <div className="space-y-5 pb-32 animate-in fade-in duration-700 lg:space-y-8 lg:pb-40">
-      <StatsOverview
-        title="办理"
-        subtitle="审批通过后的后续处理"
-        items={summaryItems}
-      />
+    <div className="space-y-3 pb-28 animate-in fade-in duration-700 lg:space-y-8 lg:pb-40">
+      <div className="hidden lg:block">
+        <StatsOverview
+          title="办理"
+          subtitle="审批通过后的后续处理"
+          items={summaryItems}
+        />
+      </div>
 
-      <div className="-mx-1 flex gap-1 overflow-x-auto no-scrollbar rounded-[16px] bg-[#ececf0] p-1 lg:mx-0 lg:w-fit lg:gap-0 lg:rounded-xl lg:bg-lightest-gray-background">
+      <div className="flex gap-6 overflow-x-auto border-b border-black/[0.045] no-scrollbar lg:mx-0 lg:w-fit lg:gap-0 lg:rounded-xl lg:border-0 lg:bg-lightest-gray-background lg:p-1">
         <button
           onClick={() => setActiveTab('pending')}
           className={cn(
-            "h-8 shrink-0 rounded-[12px] px-3 text-[11px] font-medium transition-all flex items-center justify-center gap-1.5 lg:h-auto lg:flex-1 lg:border-0 lg:rounded-lg lg:px-8 lg:py-2.5 lg:text-[13px] lg:font-bold lg:gap-3",
+            "flex h-9 shrink-0 items-center justify-center gap-1.5 border-b-2 px-0 text-[13.5px] font-medium transition-all lg:h-auto lg:flex-1 lg:gap-3 lg:rounded-lg lg:border-0 lg:px-8 lg:py-2.5 lg:text-[13px] lg:font-bold",
             activeTab === 'pending'
-              ? "bg-white text-midnight-graphite shadow-sm lg:bg-white lg:text-black lg:shadow-sm"
-              : "text-medium-gray hover:text-black lg:bg-transparent lg:text-light-gray"
+              ? "border-midnight-graphite text-midnight-graphite lg:bg-white lg:text-black lg:shadow-sm"
+              : "border-transparent text-light-gray hover:text-black lg:bg-transparent lg:text-light-gray"
           )}
         >
           待办理
           {pendingRecords.length > 0 && (
-            <span className="px-1.5 min-w-[16px] h-[16px] bg-lightest-gray-background text-current lg:bg-black lg:text-white text-[10px] flex items-center justify-center rounded-full">
+            <span className="flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-[#f2f3f6] px-1 text-[9px] text-current lg:h-[16px] lg:min-w-[16px] lg:bg-black lg:text-[10px] lg:text-white">
               {pendingRecords.length}
             </span>
           )}
@@ -97,10 +99,10 @@ export default function ProcessorHome() {
         <button
           onClick={() => setActiveTab('processed')}
           className={cn(
-            "h-8 shrink-0 rounded-[12px] px-3 text-[11px] font-medium transition-all lg:h-auto lg:flex-1 lg:border-0 lg:rounded-lg lg:px-8 lg:py-2.5 lg:text-[13px] lg:font-bold",
+            "h-9 shrink-0 border-b-2 px-0 text-[13.5px] font-medium transition-all lg:h-auto lg:flex-1 lg:rounded-lg lg:border-0 lg:px-8 lg:py-2.5 lg:text-[13px] lg:font-bold",
             activeTab === 'processed'
-              ? "bg-white text-midnight-graphite shadow-sm lg:bg-white lg:text-black lg:shadow-sm"
-              : "text-medium-gray hover:text-black lg:bg-transparent lg:text-light-gray"
+              ? "border-midnight-graphite text-midnight-graphite lg:bg-white lg:text-black lg:shadow-sm"
+              : "border-transparent text-light-gray hover:text-black lg:bg-transparent lg:text-light-gray"
           )}
         >
           已办理
@@ -133,35 +135,37 @@ export default function ProcessorHome() {
 
       <AnimatePresence>
         {isCompleting && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4">
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setIsCompleting(false)}
-              className="absolute inset-0 bg-midnight-graphite/40 backdrop-blur-md"
+              className="absolute inset-0 bg-black/25 backdrop-blur-sm sm:bg-midnight-graphite/35"
             />
             <motion.div
-              initial={{ opacity: 0, scale: 0.98, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, y: 10 }}
-              className="bg-pure-white rounded-apple-img w-full max-w-md relative p-10 shadow-apple-xl"
+              initial={{ opacity: 0, scale: 0.98, y: 22 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, y: 22 }}
+              className="relative w-full rounded-t-[22px] bg-white px-5 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-[18px] shadow-[0_-4px_16px_rgba(20,24,34,0.055)] sm:max-w-md sm:rounded-[18px] sm:p-8 sm:shadow-[0_14px_34px_rgba(20,24,34,0.12)]"
             >
-              <div className="flex items-center gap-4 text-[#2e7d32] mb-6">
-                <CheckCircle2 size={24} />
-                <h3 className="text-[21px] font-bold">完成办理</h3>
+              <div className="mb-4 flex items-center gap-3 text-[#2e7d32] sm:mb-5">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#e8f5e9]">
+                  <CheckCircle2 size={20} strokeWidth={2.3} />
+                </span>
+                <h3 className="text-[17px] font-semibold text-midnight-graphite sm:text-[20px]">完成办理</h3>
               </div>
-              <p className="text-[15px] text-medium-gray mb-6 font-medium">
+              <p className="mb-4 text-[14px] font-medium leading-6 text-medium-gray">
                 确认已完成{selectedRecord?.processorTaskName || '办理任务'}，可填写备注。
               </p>
               <textarea
-                className="input-field min-h-[120px] mb-8 bg-canvas-white p-4 font-medium"
+                className="mb-5 min-h-[104px] w-full resize-none rounded-[16px] border border-transparent bg-[#f6f7fb] p-3.5 text-[13.5px] font-medium leading-6 text-midnight-graphite outline-none transition-colors placeholder:text-light-gray focus:border-interactive-blue"
                 placeholder="例如：已完成付款，流水号..."
                 value={completeComment}
                 onChange={(event) => setCompleteComment(event.target.value)}
                 autoFocus
               />
-              <div className="flex flex-col gap-3">
-                <button onClick={handleCompleteSubmit} className="btn-primary w-full bg-[#2e7d32] hover:bg-[#256629]">
+              <div className="flex flex-col gap-2.5">
+                <button onClick={handleCompleteSubmit} className="flex h-11 w-full items-center justify-center rounded-full bg-[#2e7d32] px-4 text-[14.5px] font-semibold text-white transition-colors hover:bg-[#256629] active:scale-[0.99]">
                   确认完成
                 </button>
-                <button onClick={() => setIsCompleting(false)} className="w-full h-[44px] text-[15px] font-semibold text-medium-gray hover:text-midnight-graphite">
+                <button onClick={() => setIsCompleting(false)} className="h-10 w-full text-[14px] font-semibold text-medium-gray hover:text-midnight-graphite">
                   返回
                 </button>
               </div>

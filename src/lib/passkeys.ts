@@ -11,18 +11,25 @@ type PublicKeyCredentialWithAvailability = typeof PublicKeyCredential & {
 };
 
 export function isPasskeySupported() {
-  return Boolean(
-    window.isSecureContext &&
-    window.PublicKeyCredential &&
-    navigator.credentials?.create &&
-    navigator.credentials?.get,
-  );
+  try {
+    return Boolean(
+      typeof window !== 'undefined' &&
+      typeof navigator !== 'undefined' &&
+      window.isSecureContext &&
+      window.PublicKeyCredential &&
+      navigator.credentials?.create &&
+      navigator.credentials?.get,
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function isPlatformPasskeyAvailable() {
   if (!isPasskeySupported()) return false;
 
   try {
+    if (typeof window === 'undefined') return false;
     const checker = (window.PublicKeyCredential as PublicKeyCredentialWithAvailability)
       .isUserVerifyingPlatformAuthenticatorAvailable;
     return checker ? checker.call(window.PublicKeyCredential) : true;
@@ -89,7 +96,12 @@ function decodeLoginOptions(options: any): PublicKeyCredentialRequestOptions {
 }
 
 function assertPublicKeyCredential(credential: Credential | null): PublicKeyCredential {
-  if (!credential || !window.PublicKeyCredential || !(credential instanceof window.PublicKeyCredential)) {
+  if (
+    !credential ||
+    typeof window === 'undefined' ||
+    !window.PublicKeyCredential ||
+    !(credential instanceof window.PublicKeyCredential)
+  ) {
     throw new Error('没有拿到通行密钥凭证。');
   }
 

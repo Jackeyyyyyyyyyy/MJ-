@@ -73,38 +73,38 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     }
   };
 
+  const inputClassName = "h-[52px] w-full rounded-2xl border border-transparent bg-[#f1f2f6] px-4 text-[15px] font-medium text-midnight-graphite outline-none transition-all placeholder:text-light-gray focus:border-[#b8d7ff] focus:bg-white focus:ring-4 focus:ring-[#1677ff]/10";
+
   return (
-    <div className="min-h-screen flex flex-col items-center bg-[#fafafa] font-sans antialiased text-midnight-graphite px-6 py-10">
-      <div className="w-full max-w-[360px] flex-1 flex flex-col justify-center">
-        
-        {/* Logo 极其简约 */}
+    <div className="flex min-h-screen flex-col items-center bg-[#f5f5f8] px-5 py-8 font-sans text-midnight-graphite antialiased">
+      <div className="flex w-full max-w-[360px] flex-1 flex-col justify-center">
         <motion.div 
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
-          className="flex flex-col items-center mb-16"
+          transition={{ duration: 0.42 }}
+          className="mb-10 flex flex-col items-center"
         >
           <img
             src="/mj-logo.png"
             alt="MJ 审批"
-            className="mb-5 h-20 w-20 object-contain"
+            className="mb-4 h-[68px] w-[68px] object-contain"
           />
-          <h1 className="text-[24px] font-bold tracking-tight">MJ 审批</h1>
+          <h1 className="text-[23px] font-semibold tracking-tight">MJ 审批</h1>
+          <p className="mt-2 text-[13px] font-medium text-medium-gray">欢迎回来</p>
         </motion.div>
 
         <motion.div 
-          initial={{ opacity: 0, scale: 0.99 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.8, delay: 0.1 }}
-          className="space-y-8"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.36, delay: 0.08 }}
         >
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="space-y-0">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-3">
               <input
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full bg-transparent border-b border-border-silver py-4 text-[15px] focus:border-black outline-none transition-colors placeholder:text-light-silver font-medium"
+                className={inputClassName}
                 placeholder="账号"
                 autoComplete="username"
                 required
@@ -113,28 +113,28 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-transparent border-b border-border-silver py-4 text-[15px] focus:border-black outline-none transition-colors placeholder:text-light-silver font-medium mt-2"
+                className={inputClassName}
                 placeholder="密码"
                 autoComplete="current-password"
                 required
               />
             </div>
 
-            <label className="flex cursor-pointer select-none items-center gap-3 text-[13px] font-semibold text-medium-gray">
+            <label className="flex cursor-pointer select-none items-center gap-2.5 px-1 text-[13px] font-medium text-medium-gray">
               <input
                 type="checkbox"
                 checked={rememberDevice}
                 onChange={(e) => setRememberDevice(e.target.checked)}
                 className="peer sr-only"
               />
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border border-border-silver bg-white transition-colors peer-checked:border-black peer-checked:bg-black">
+              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px] border border-[#d7d9df] bg-white transition-colors peer-checked:border-[#1677ff] peer-checked:bg-[#1677ff]">
                 <span className={`${rememberDevice ? 'block' : 'hidden'} h-2 w-1 rotate-45 border-b-2 border-r-2 border-white`} />
               </span>
               <span>记住此设备</span>
             </label>
 
             {error && (
-              <p className="text-[12px] text-rose-500 font-bold text-center animate-in fade-in slide-in-from-top-1">
+              <p className="rounded-2xl bg-[#fff1f1] px-3 py-2 text-center text-[12px] font-semibold text-[#d32f2f] animate-in fade-in slide-in-from-top-1">
                 {error}
               </p>
             )}
@@ -142,7 +142,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             <button 
               type="submit" 
               disabled={isSubmitting || isPasskeySubmitting}
-              className="w-full h-12 bg-black text-white rounded-xl text-[14px] font-bold hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 mt-4"
+              className="mt-2 h-[50px] w-full rounded-full bg-[#1677ff] text-[15px] font-semibold text-white shadow-[0_8px_18px_rgba(22,119,255,0.18)] transition-all hover:bg-[#0f6fe8] active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-[#b7c9e8] disabled:shadow-none"
             >
               {isSubmitting ? '认证中' : '安全登录'}
             </button>
@@ -151,7 +151,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
               type="button"
               onClick={() => void handlePasskeyLogin()}
               disabled={!canUsePasskey || isSubmitting || isPasskeySubmitting}
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-border-silver bg-white text-[14px] font-bold text-midnight-graphite transition-all hover:bg-lightest-gray-background active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45"
+              className="flex h-[48px] w-full items-center justify-center gap-2 rounded-full border border-transparent bg-white text-[14px] font-semibold text-midnight-graphite shadow-[0_1px_2px_rgba(16,24,40,0.04)] ring-1 ring-black/[0.035] transition-all hover:bg-[#fbfbfd] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
             >
               {isPasskeySubmitting ? (
                 <Loader2 size={17} strokeWidth={2.5} className="animate-spin" />
@@ -165,7 +165,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
       </div>
       <footer className="w-full text-center">
-        <p className="text-[11px] font-bold text-light-gray">
+        <p className="text-[11px] font-medium text-light-gray">
           © 2026 MJ审批. All rights reserved.
         </p>
       </footer>

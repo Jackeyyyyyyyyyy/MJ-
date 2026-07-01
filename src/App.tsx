@@ -5,16 +5,16 @@ import WorkHome, { WorkTab } from './components/WorkHome';
 import AccountPermissionAdmin from './components/AccountPermissionAdmin';
 import OrganizationAdmin from './components/OrganizationAdmin';
 import WorkflowAdmin from './components/WorkflowAdmin';
-import WorkflowStatsAdmin from './components/WorkflowStatsAdmin';
 import BusinessFormAdmin from './components/BusinessFormAdmin';
 import AiBranchLogs from './components/AiBranchLogs';
 import ApprovalTable from './components/ApprovalTable';
 import ApprovalDetailModal from './components/ApprovalDetailModal';
 import ApprovalProgressModal from './components/ApprovalProgressModal';
+import CreateApprovalModal from './components/CreateApprovalModal';
 import AiPromptEditor from './components/AiPromptEditor';
 import AiAssistantHome from './components/AiAssistantHome';
 import BackupPage from './components/BackupPage';
-import SettingsPage from './components/SettingsPage';
+import SettingsPage, { type SettingsPanel } from './components/SettingsPage';
 import { auth } from './auth';
 import { storage } from './storage';
 import { AdminView, Role, ApprovalNotification, ApprovalRecord, ApprovalStatus } from './types';
@@ -23,11 +23,12 @@ import { setApprovalAppBadge } from './lib/pushNotifications';
 
 type AppRoute =
   | { kind: 'work'; tab: WorkTab }
-  | { kind: 'admin'; view: AdminView }
+  | { kind: 'admin'; view: AdminView; settingsPanel?: SettingsPanel }
   | { kind: 'module'; moduleName: string; typeName: string };
 
-const adminRouteViews: AdminView[] = ['settings', 'accounts', 'ai-assistant', 'organization', 'stats', 'workflows', 'business-forms', 'ai-branch-logs'];
-const workRouteTabs: WorkTab[] = ['requests', 'approvals', 'processing', 'cc', 'global'];
+const adminRouteViews: AdminView[] = ['settings', 'accounts', 'ai-assistant', 'organization', 'workflows', 'business-forms', 'ai-branch-logs'];
+const settingsRoutePanels: SettingsPanel[] = ['home', 'profile', 'notifications', 'passkeys'];
+const workRouteTabs: WorkTab[] = ['requests', 'approvals', 'processing', 'processed', 'efficiency', 'cc', 'global'];
 
 function decodeRoutePart(part?: string) {
   if (!part) return '';
@@ -43,8 +44,16 @@ function parseRoute(pathname = window.location.pathname): AppRoute {
   const parts = pathname.split('/').filter(Boolean).map(decodeRoutePart);
   const [section, first, second] = parts;
 
+  if (section === 'admin' && first === 'stats') {
+    return { kind: 'work', tab: 'efficiency' };
+  }
+
   if (section === 'admin' && adminRouteViews.includes(first as AdminView)) {
-    return { kind: 'admin', view: first as AdminView };
+    const settingsPanel = first === 'settings' && settingsRoutePanels.includes(second as SettingsPanel)
+      ? second as SettingsPanel
+      : undefined;
+
+    return { kind: 'admin', view: first as AdminView, settingsPanel };
   }
 
   if (section === 'module' && first && second) {
@@ -65,6 +74,10 @@ function parseRoute(pathname = window.location.pathname): AppRoute {
 
 function routeToPath(route: AppRoute) {
   if (route.kind === 'admin') {
+    if (route.view === 'settings' && route.settingsPanel && route.settingsPanel !== 'home') {
+      return `/admin/settings/${route.settingsPanel}`;
+    }
+
     return `/admin/${route.view}`;
   }
 
@@ -125,11 +138,11 @@ function getNotificationSearch(notificationId?: string, recordId?: string, type?
 
 function getNotificationWorkTab(type?: ApprovalNotification['type'] | null, record?: ApprovalRecord | null): WorkTab {
   if (type === 'approval_pending') return 'approvals';
-  if (type === 'approval_processing') return 'processing';
+  if (type === 'approval_processing') return 'approvals';
   if (type === 'approval_cc') return 'cc';
 
-  if (record?.currentUserCanApprove || record?.currentUserHasApproved) return 'approvals';
-  if (record?.currentUserCanProcess || record?.currentUserHasProcessed) return 'processing';
+  if (record?.currentUserCanApprove || record?.currentUserCanProcess) return 'approvals';
+  if (record?.currentUserHasApproved || record?.currentUserHasProcessed) return 'processed';
   if (record?.currentUserIsCc) return 'cc';
   return 'requests';
 }
@@ -151,6 +164,11 @@ function MainApp() {
   const [selectedModule, setSelectedModule] = useState<string>(initialRoute.kind === 'module' ? initialRoute.moduleName : '');
   const [selectedType, setSelectedType] = useState<string>(initialRoute.kind === 'module' ? initialRoute.typeName : '');
   const [activeAdminView, setActiveAdminView] = useState<AdminView | null>(initialRoute.kind === 'admin' ? initialRoute.view : null);
+  const [activeSettingsPanel, setActiveSettingsPanel] = useState<SettingsPanel>(
+    initialRoute.kind === 'admin' && initialRoute.view === 'settings'
+      ? initialRoute.settingsPanel || 'home'
+      : 'home',
+  );
   const [activeWorkTab, setActiveWorkTab] = useState<WorkTab>(initialRoute.kind === 'work' ? initialRoute.tab : 'requests');
   const [schemaVersion, setSchemaVersion] = useState(0);
   
@@ -160,6 +178,7 @@ function MainApp() {
   const [notificationRecord, setNotificationRecord] = useState<ApprovalRecord | null>(null);
   const [showD, setShowD] = useState(false);
   const [showP, setShowP] = useState(false);
+  const [quickCreateTarget, setQuickCreateTarget] = useState<{ moduleName?: string; typeName?: string } | null>(null);
   const handledNotificationLaunchRef = React.useRef('');
 
   const handleLogin = () => {
@@ -213,11 +232,6 @@ function MainApp() {
     pushRoute({ kind: 'admin', view: 'organization' });
   };
 
-  const handleOpenStatsAdmin = () => {
-    applyRoute({ kind: 'admin', view: 'stats' });
-    pushRoute({ kind: 'admin', view: 'stats' });
-  };
-
   const handleOpenWorkflowAdmin = () => {
     applyRoute({ kind: 'admin', view: 'workflows' });
     pushRoute({ kind: 'admin', view: 'workflows' });
@@ -233,9 +247,9 @@ function MainApp() {
     pushRoute({ kind: 'admin', view: 'ai-branch-logs' });
   };
 
-  const handleOpenSettings = () => {
-    applyRoute({ kind: 'admin', view: 'settings' });
-    pushRoute({ kind: 'admin', view: 'settings' });
+  const handleOpenSettings = (panel: SettingsPanel = 'home') => {
+    applyRoute({ kind: 'admin', view: 'settings', settingsPanel: panel });
+    pushRoute({ kind: 'admin', view: 'settings', settingsPanel: panel });
   };
 
   const handleWorkTabChange = (tab: WorkTab) => {
@@ -259,11 +273,18 @@ function MainApp() {
     setNotificationRecord(record);
   };
 
+  const handleQuickCreate = (moduleName?: string, typeName?: string) => {
+    setQuickCreateTarget({ moduleName, typeName });
+  };
+
   function applyRoute(route: AppRoute) {
     if (route.kind === 'admin') {
       setSelectedModule('');
       setSelectedType('');
       setActiveAdminView(route.view);
+      if (route.view === 'settings') {
+        setActiveSettingsPanel(route.settingsPanel || 'home');
+      }
       return;
     }
 
@@ -456,7 +477,24 @@ function MainApp() {
     }
 
     if (activeAdminView === 'settings') {
-      return <SettingsPage activeUsername={activeUsername} />;
+      return (
+        <SettingsPage
+          activeUsername={activeUsername}
+          activePanel={activeSettingsPanel}
+          onPanelChange={handleOpenSettings}
+          isSuperAdmin={isSuperAdminPerspective}
+          selectedModule={selectedModule}
+          selectedType={selectedType}
+          onOpenAccountAdmin={handleOpenAccountAdmin}
+          onOpenAiAssistant={handleOpenAiAssistant}
+          onOpenOrganizationAdmin={handleOpenOrganizationAdmin}
+          onOpenWorkflowAdmin={handleOpenWorkflowAdmin}
+          onOpenBusinessFormAdmin={handleOpenBusinessFormAdmin}
+          onOpenAiBranchLogs={handleOpenAiBranchLogs}
+          onSelectType={handleSelectType}
+          onLogout={handleLogout}
+        />
+      );
     }
 
     if (activeAdminView === 'ai-assistant' && canUseAiAssistant) {
@@ -465,10 +503,6 @@ function MainApp() {
 
     if (activeAdminView === 'organization' && isSuperAdminPerspective) {
       return <OrganizationAdmin />;
-    }
-
-    if (activeAdminView === 'stats' && isSuperAdminPerspective) {
-      return <WorkflowStatsAdmin />;
     }
 
     if (activeAdminView === 'workflows' && isSuperAdminPerspective) {
@@ -528,12 +562,12 @@ function MainApp() {
 
     switch (perspective) {
       case 'employee':
-        return <WorkHome activeUsername={activeUsername} activeTab={activeWorkTab} onTabChange={handleWorkTabChange} />;
+        return <WorkHome activeUsername={activeUsername} activeTab={activeWorkTab} onTabChange={handleWorkTabChange} onQuickCreate={handleQuickCreate} />;
       case 'boss':
       case 'developer':
-        return <WorkHome showGlobal activeUsername={activeUsername} activeTab={activeWorkTab} onTabChange={handleWorkTabChange} />;
+        return <WorkHome showGlobal activeUsername={activeUsername} activeTab={activeWorkTab} onTabChange={handleWorkTabChange} onQuickCreate={handleQuickCreate} />;
       default:
-        return <WorkHome activeUsername={activeUsername} activeTab={activeWorkTab} onTabChange={handleWorkTabChange} />;
+        return <WorkHome activeUsername={activeUsername} activeTab={activeWorkTab} onTabChange={handleWorkTabChange} onQuickCreate={handleQuickCreate} />;
     }
   };
 
@@ -546,7 +580,6 @@ function MainApp() {
       onOpenAccountAdmin={handleOpenAccountAdmin}
       onOpenAiAssistant={handleOpenAiAssistant}
       onOpenOrganizationAdmin={handleOpenOrganizationAdmin}
-      onOpenStatsAdmin={handleOpenStatsAdmin}
       onOpenWorkflowAdmin={handleOpenWorkflowAdmin}
       onOpenBusinessFormAdmin={handleOpenBusinessFormAdmin}
       onOpenAiBranchLogs={handleOpenAiBranchLogs}
@@ -555,6 +588,8 @@ function MainApp() {
       selectedModule={selectedModule}
       selectedType={selectedType}
       onSelectType={handleSelectType}
+      activeWorkTab={activeWorkTab}
+      onWorkTabChange={handleWorkTabChange}
     >
       <React.Fragment key={schemaVersion}>{renderContent()}</React.Fragment>
       <ApprovalDetailModal
@@ -565,6 +600,16 @@ function MainApp() {
         onApprove={notificationRecord?.currentUserCanApprove ? (record) => void handleNotificationApprove(record) : undefined}
         onReject={notificationRecord?.currentUserCanApprove ? (record) => void handleNotificationReject(record) : undefined}
         onCompleteProcess={notificationRecord?.currentUserCanProcess ? (record) => void handleNotificationCompleteProcess(record) : undefined}
+      />
+      <CreateApprovalModal
+        isOpen={!!quickCreateTarget}
+        initialModuleName={quickCreateTarget?.moduleName}
+        initialTypeName={quickCreateTarget?.typeName}
+        onClose={() => setQuickCreateTarget(null)}
+        onSuccess={() => {
+          setActiveWorkTab('requests');
+          void setApprovalAppBadge(0);
+        }}
       />
     </AppLayout>
   );

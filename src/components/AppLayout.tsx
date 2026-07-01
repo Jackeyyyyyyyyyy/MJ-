@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { Component } from 'react';
 import { auth } from '../auth';
 import { storage } from '../storage';
 import Sidebar from './Sidebar';
-import { ChevronDown, LogOut, PanelLeftClose, PanelLeftOpen, Search, ShieldCheck, UserRound } from 'lucide-react';
+import { BarChart3, ChevronDown, ClipboardCheck, LogOut, PanelLeftClose, PanelLeftOpen, Search, Settings, ShieldCheck, UserRound, UsersRound, X } from 'lucide-react';
 import { AdminView, ApprovalNotification, ApprovalRecord, Role, SystemAccount } from '../types';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import NotificationCenter from './NotificationCenter';
+import type { WorkTab } from './WorkHome';
+import type { SettingsPanel } from './SettingsPage';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -17,15 +19,16 @@ interface AppLayoutProps {
   onOpenAccountAdmin: () => void;
   onOpenAiAssistant: () => void;
   onOpenOrganizationAdmin: () => void;
-  onOpenStatsAdmin: () => void;
   onOpenWorkflowAdmin: () => void;
   onOpenBusinessFormAdmin: () => void;
   onOpenAiBranchLogs: () => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (panel?: SettingsPanel) => void;
   onOpenNotificationRecord?: (notification: ApprovalNotification, record: ApprovalRecord) => void;
   selectedModule?: string;
   selectedType?: string;
   onSelectType: (module: string, type: string) => void;
+  activeWorkTab?: WorkTab;
+  onWorkTabChange?: (tab: WorkTab) => void;
 }
 
 function getPerspectiveLabel(role: Role) {
@@ -234,7 +237,7 @@ function AccountSwitcher({
                     selected={selectedAccount?.username === account.username}
                   />
                   <span className="min-w-0">
-                    <span className="block text-[13px] font-black truncate">
+                    <span className="block truncate text-[13px] font-semibold">
                       {getAccountPrimaryLabel(account)}
                     </span>
                     <span className={cn(
@@ -255,17 +258,196 @@ function AccountSwitcher({
 }
 
 function MobileAccountSwitcher({ activeAccount, accounts, isLoading, onChange }: AccountSwitcherProps) {
-  return (
-    <AccountSwitcher
-      activeAccount={activeAccount}
-      accounts={accounts}
-      isLoading={isLoading}
-      onChange={onChange}
-      className="w-full"
-      buttonClassName="h-10 rounded-2xl bg-white/80 text-[12px] border-black/[0.06] shadow-sm hover:bg-white"
-      menuClassName="w-full max-w-full"
-    />
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [query, setQuery] = React.useState('');
+  const enabledAccounts = React.useMemo(
+    () => accounts.filter((account) => account.enabled || account.isSuperAdmin),
+    [accounts],
   );
+  const filteredAccounts = React.useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return enabledAccounts;
+
+    return enabledAccounts.filter((account) => {
+      const linkedMember = account.linkedMember;
+      const haystack = [
+        account.name,
+        account.accountName,
+        account.username,
+        account.roleLabel,
+        linkedMember?.name,
+        linkedMember?.departmentName,
+        linkedMember?.title,
+      ].filter(Boolean).join(' ').toLowerCase();
+
+      return haystack.includes(keyword);
+    });
+  }, [enabledAccounts, query]);
+  const selectedAccount = activeAccount || enabledAccounts.find((account) => account.isSuperAdmin) || null;
+  const selectedLabel = selectedAccount ? getAccountPrimaryLabel(selectedAccount) : '超管端';
+  const selectedSummary = isLoading
+    ? '正在读取员工账号'
+    : selectedAccount
+      ? getMobileAccountLabel(selectedAccount)
+      : '选择员工账号';
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        className="flex min-h-[34px] w-full items-center justify-between gap-2.5 rounded-[16px] border border-white/68 bg-white/64 px-3 py-1 text-left shadow-none backdrop-blur transition-all active:scale-[0.99]"
+        aria-label="切换员工账号"
+        aria-expanded={isOpen}
+      >
+        <span className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[9px] bg-[#eef5ff] text-interactive-blue">
+            <UsersRound size={15} strokeWidth={2.45} />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[12px] font-semibold text-midnight-graphite">切换员工</span>
+            <span className="block truncate text-[10px] font-medium text-light-gray">
+              {selectedSummary}
+            </span>
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#f0f1f5] px-2.5 py-0.5 text-[10px] font-semibold text-midnight-graphite">
+          {selectedLabel}
+          <ChevronDown size={12} strokeWidth={2.5} />
+        </span>
+      </button>
+
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0, y: -4 }}
+            animate={{ opacity: 1, height: 'auto', y: 0 }}
+            exit={{ opacity: 0, height: 0, y: -4 }}
+            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            className="relative mt-2 overflow-hidden rounded-[20px] border border-white/85 bg-white shadow-[0_6px_18px_rgba(16,24,40,0.075)] lg:hidden"
+          >
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-[#f3f4f7] text-medium-gray"
+              aria-label="关闭"
+            >
+              <X size={15} strokeWidth={2.5} />
+            </button>
+
+            <div className="border-b border-black/[0.04] px-3.5 py-2.5 pr-12">
+              <div className="relative">
+                <Search className="absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-light-silver" />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  className="h-9 w-full rounded-[14px] bg-[#f5f6f8] pl-10 pr-3.5 text-[12.5px] font-medium outline-none focus:ring-2 focus:ring-sky-blue-highlight"
+                  placeholder="搜索姓名、账号或部门"
+                />
+              </div>
+            </div>
+
+            <div
+              className="no-scrollbar overflow-y-auto px-2.5 py-2.5"
+              style={{ maxHeight: 'min(190px, 36dvh)' }}
+            >
+              {isLoading && (
+                <div className="px-3 py-7 text-center text-[12.5px] font-semibold text-medium-gray">正在读取员工账号...</div>
+              )}
+
+              {!isLoading && filteredAccounts.length === 0 && (
+                <div className="px-3 py-7 text-center text-[12.5px] font-semibold text-medium-gray">没有匹配的员工账号</div>
+              )}
+
+              {!isLoading && filteredAccounts.map((account) => {
+                const isSelected = selectedAccount?.username === account.username;
+
+                return (
+                  <button
+                    key={account.id}
+                    type="button"
+                    onClick={() => {
+                      onChange(account);
+                      setQuery('');
+                      setIsOpen(false);
+                    }}
+                    className={cn(
+                      'mb-1 flex min-h-[48px] w-full items-center gap-2.5 rounded-[15px] px-3 py-2 text-left transition-all last:mb-0',
+                      isSelected ? 'bg-interactive-blue text-white' : 'text-midnight-graphite hover:bg-[#f5f6f8]',
+                    )}
+                  >
+                    <AccountAvatar
+                      account={account}
+                      label={getAccountPrimaryLabel(account)}
+                      selected={isSelected}
+                      sizeClassName="h-8 w-8"
+                      iconSize={15}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12.5px] font-semibold">
+                        {account.isSuperAdmin ? '超管端' : getAccountPrimaryLabel(account)}
+                      </span>
+                      <span className={cn(
+                        'mt-0.5 block truncate text-[10.5px] font-medium',
+                        isSelected ? 'text-white/78' : 'text-medium-gray',
+                      )}>
+                        {account.isSuperAdmin ? '返回独立管理入口' : getMobileAccountLabel(account)}
+                      </span>
+                    </span>
+                    {isSelected && (
+                      <span className="rounded-full bg-white/18 px-2 py-0.5 text-[10px] font-semibold">当前</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+interface RouteErrorBoundaryProps {
+  children: React.ReactNode;
+  resetKey: string;
+}
+
+interface RouteErrorBoundaryState {
+  error: Error | null;
+}
+
+class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, RouteErrorBoundaryState> {
+  declare readonly props: RouteErrorBoundaryProps;
+
+  state: RouteErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): RouteErrorBoundaryState {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <section className="rounded-[18px] border border-white/70 bg-white p-4 shadow-[0_8px_22px_rgba(16,24,40,0.05)] sm:rounded-[8px] sm:border-border-silver sm:shadow-sm">
+          <p className="text-[12px] font-black uppercase tracking-wider text-light-gray">Page Error</p>
+          <h1 className="mt-2 text-[18px] font-bold text-midnight-graphite">页面加载失败</h1>
+          <p className="mt-2 text-[13px] font-semibold leading-6 text-medium-gray">
+            当前页面组件加载时遇到异常。返回工作台后可以继续使用审批系统。
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.assign('/work/requests')}
+            className="mt-4 flex h-10 items-center justify-center rounded-full bg-interactive-blue px-5 text-[12px] font-bold text-white"
+          >
+            返回工作台
+          </button>
+        </section>
+      );
+    }
+
+    return this.props.children;
+  }
 }
 
 export default function AppLayout({
@@ -277,7 +459,6 @@ export default function AppLayout({
   onOpenAccountAdmin,
   onOpenAiAssistant,
   onOpenOrganizationAdmin,
-  onOpenStatsAdmin,
   onOpenWorkflowAdmin,
   onOpenBusinessFormAdmin,
   onOpenAiBranchLogs,
@@ -285,7 +466,9 @@ export default function AppLayout({
   onOpenNotificationRecord,
   selectedModule,
   selectedType,
-  onSelectType
+  onSelectType,
+  activeWorkTab,
+  onWorkTabChange
 }: AppLayoutProps) {
   const user = auth.getCurrentUser();
   const sessionUser = auth.getSessionUser();
@@ -340,15 +523,35 @@ export default function AppLayout({
   const displayName = activeAccount ? getAccountPrimaryLabel(activeAccount) : user?.name || currentUsername || displayRole;
   const displayInitial = displayName.trim().charAt(0) || displayRole.charAt(0);
   const displayAvatarUrl = activeAccount?.avatarUrl || user?.avatarUrl || '';
+  const routeResetKey = `${currentUsername}:${activeAdminView || 'work'}:${selectedModule || ''}:${selectedType || ''}`;
+  const mobileNavItems = [
+    { id: 'approvals' as WorkTab, label: '审批中心', icon: ClipboardCheck },
+    { id: 'efficiency' as WorkTab, label: '效率诊断', icon: BarChart3 },
+  ];
+  const handleMobileWorkTab = (tab: WorkTab) => {
+    if (onWorkTabChange) {
+      onWorkTabChange(tab);
+      return;
+    }
+
+    if (tab === 'requests') {
+      onSelectType('', '');
+    }
+  };
 
   return (
-    <div className="flex h-screen bg-canvas-white overflow-hidden relative">
+    <div className="flex h-screen bg-[#f5f6fa] lg:bg-canvas-white overflow-hidden relative">
       <Sidebar
         currentPerspective={perspective || 'employee'}
         selectedModule={selectedModule}
         selectedType={selectedType}
         isSuperAdmin={isDeveloper}
         activeAdminView={activeAdminView}
+        activeWorkTab={activeWorkTab}
+        onWorkTabChange={(tab) => {
+          onWorkTabChange?.(tab);
+          setIsSidebarOpen(false);
+        }}
         onOpenAccountAdmin={() => {
           onOpenAccountAdmin();
           setIsSidebarOpen(false);
@@ -359,10 +562,6 @@ export default function AppLayout({
         }}
         onOpenOrganizationAdmin={() => {
           onOpenOrganizationAdmin();
-          setIsSidebarOpen(false);
-        }}
-        onOpenStatsAdmin={() => {
-          onOpenStatsAdmin();
           setIsSidebarOpen(false);
         }}
         onOpenWorkflowAdmin={() => {
@@ -381,6 +580,7 @@ export default function AppLayout({
           onOpenSettings();
           setIsSidebarOpen(false);
         }}
+        onLogout={onLogout}
         onSelectType={(m, t) => {
           onSelectType(m, t);
           setIsSidebarOpen(false);
@@ -397,14 +597,39 @@ export default function AppLayout({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setIsSidebarOpen(false)}
-            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-30 lg:hidden"
+            className="fixed inset-0 bg-black/16 backdrop-blur-[2px] z-30 lg:hidden"
           />
         )}
       </AnimatePresence>
 
       <div className="flex-1 flex flex-col min-w-0 relative h-full overflow-hidden">
-        <header className="glass grow-0 shrink-0 z-30">
-          <div className="h-14 lg:h-20 flex items-center justify-between px-5 lg:px-12">
+        <header className="grow-0 shrink-0 z-30 border-b border-transparent bg-[#f5f6fa]/92 backdrop-blur-xl lg:glass lg:border-border-silver">
+          <div className="flex min-h-[52px] items-center justify-between gap-3 px-4 pb-1 pt-2.5 lg:hidden">
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(true)}
+              className="flex min-w-0 items-center gap-3 text-left"
+              aria-label="打开导航"
+            >
+              <img
+                src="/mj-logo.png"
+                alt="MJ 审批"
+                className="h-6 w-6 shrink-0 object-contain"
+              />
+              <span className="truncate text-[21px] font-bold tracking-normal text-midnight-graphite">
+                MJ 审批
+              </span>
+            </button>
+
+            <div className="flex shrink-0 items-center gap-2">
+              <NotificationCenter
+                activeUsername={currentUsername}
+                onOpenRecord={onOpenNotificationRecord}
+              />
+            </div>
+          </div>
+
+          <div className="hidden h-20 items-center justify-between px-12 lg:flex">
             <div className="flex items-center gap-4 lg:gap-6 min-w-0">
               <button
                 type="button"
@@ -427,7 +652,7 @@ export default function AppLayout({
                 </div>
               </button>
               {isDeveloper && (
-                <div className="hidden sm:block">
+                <div className="hidden min-w-[260px] sm:block">
                   <AccountSwitcher
                     activeAccount={activeAccount}
                     accounts={accounts}
@@ -471,7 +696,7 @@ export default function AppLayout({
           </div>
 
           {isDeveloper && (
-            <div className="sm:hidden px-5 pb-2">
+            <div className="px-4 pb-2 lg:hidden">
               <MobileAccountSwitcher
                 activeAccount={activeAccount}
                 accounts={accounts}
@@ -482,7 +707,7 @@ export default function AppLayout({
           )}
         </header>
 
-        <main className="flex-1 overflow-y-auto no-scrollbar pt-5 lg:pt-16 px-5 lg:px-20 pb-28 lg:pb-40">
+        <main className="flex-1 overflow-y-auto no-scrollbar bg-[#f5f6fa] px-4 pb-[calc(84px+env(safe-area-inset-bottom))] pt-1 lg:bg-transparent lg:px-20 lg:pb-40 lg:pt-16">
           <div className="max-w-[1680px] mx-auto min-h-full flex flex-col">
             <AnimatePresence mode="wait">
               <motion.div
@@ -493,16 +718,70 @@ export default function AppLayout({
                 transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
                 className="flex-1"
               >
-                {children}
+                <RouteErrorBoundary key={routeResetKey} resetKey={routeResetKey}>
+                  {children}
+                </RouteErrorBoundary>
               </motion.div>
             </AnimatePresence>
-            <footer className="pt-8 lg:pt-12 text-center">
+            <footer className="hidden pt-8 text-center lg:block lg:pt-12">
               <p className="text-[11px] font-bold text-light-gray">
                 © 2026 MJ审批. All rights reserved.
               </p>
             </footer>
           </div>
         </main>
+
+        <nav
+          className={cn(
+            "fixed inset-x-5 bottom-[calc(9px+env(safe-area-inset-bottom))] z-40 grid h-[54px] grid-cols-3 items-center rounded-[27px] border border-white/75 bg-white/94 px-1.5 shadow-[0_5px_14px_rgba(20,24,34,0.045)] backdrop-blur-xl transition-all duration-200 lg:hidden",
+            isSidebarOpen ? "pointer-events-none translate-y-3 opacity-0" : "translate-y-0 opacity-100",
+          )}
+        >
+          {mobileNavItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = !selectedModule && !selectedType && !activeAdminView && (
+              item.id === 'approvals'
+                ? activeWorkTab !== 'efficiency'
+                : activeWorkTab === item.id
+            );
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => handleMobileWorkTab(item.id)}
+                className={cn(
+                  "mx-auto flex min-w-[62px] flex-col items-center justify-center gap-0.5 rounded-[22px] px-1 py-1 text-[10px] font-medium transition-all",
+                  isActive ? "text-midnight-graphite" : "text-[#6f737c]",
+                )}
+              >
+                <span className={cn(
+                  "flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 transition-colors",
+                  isActive ? "bg-[#f0f1f5]" : "bg-transparent",
+                )}>
+                  <Icon size={18} strokeWidth={2.25} />
+                </span>
+                <span className="leading-none">{item.label}</span>
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className={cn(
+              "mx-auto flex min-w-[62px] flex-col items-center justify-center gap-0.5 rounded-[22px] px-1 py-1 text-[10px] font-medium transition-all",
+              activeAdminView === 'settings' ? "text-midnight-graphite" : "text-[#6f737c]",
+            )}
+          >
+            <span className={cn(
+              "flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 transition-colors",
+              activeAdminView === 'settings' ? "bg-[#f0f1f5]" : "bg-transparent",
+            )}>
+              <Settings size={18} strokeWidth={2.25} />
+            </span>
+            <span className="leading-none">设置</span>
+          </button>
+        </nav>
       </div>
     </div>
   );

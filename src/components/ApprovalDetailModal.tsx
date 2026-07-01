@@ -460,13 +460,13 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
     return (
       <div className="min-w-0 flex-1 space-y-3">
         <div className="rounded-2xl border border-border-silver bg-white p-4">
-          <p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-medium-gray">填写内容</p>
-          <p className="text-[15px] font-black text-black break-all">
+          <p className="mb-2 text-[11px] font-medium text-light-gray">填写内容</p>
+          <p className="break-all text-[15px] font-semibold text-midnight-graphite">
             {String(value.text || '').trim() || '-'}
           </p>
         </div>
         <div className="rounded-2xl border border-border-silver bg-white p-4">
-          <p className="mb-3 text-[10px] font-black uppercase tracking-[0.16em] text-medium-gray">附件</p>
+          <p className="mb-3 text-[11px] font-medium text-light-gray">附件</p>
           {renderAttachmentList(value.attachments)}
         </div>
       </div>
@@ -488,7 +488,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
         )}>
           <div className={cn("grid border-b border-border-silver bg-canvas-white", gridClass)}>
             {columns.map((column) => (
-              <div key={column.key} className="px-3 py-3 text-[11px] font-black text-medium-gray">
+              <div key={column.key} className="px-3 py-3 text-[11px] font-semibold text-medium-gray">
                 {column.label}
               </div>
             ))}
@@ -496,7 +496,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
           {rows.map((row, rowIndex) => (
             <div key={rowIndex} className={cn("grid border-b border-border-silver last:border-b-0", gridClass)}>
               {columns.map((column) => (
-                <div key={column.key} className="px-3 py-4 text-[13px] font-bold text-black break-all">
+                <div key={column.key} className="break-all px-3 py-4 text-[13px] font-medium text-midnight-graphite">
                   {String(row[column.key] || '-')}
                 </div>
               ))}
@@ -518,19 +518,19 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
     return (
       <div className="space-y-5">
         <div className="rounded-2xl border border-border-silver bg-white p-4">
-          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">营业执照</p>
+          <p className="mb-3 text-[12px] font-medium text-medium-gray">营业执照</p>
           {renderAttachmentList(data.businessLicense)}
         </div>
         <div>
-          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">银行账户</p>
+          <p className="mb-3 text-[12px] font-medium text-medium-gray">银行账户</p>
           {renderCustomerTable(data.bankAccounts, customerBankAccountColumns)}
         </div>
         <div className="rounded-2xl border border-border-silver bg-white p-4">
-          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">银行凭证</p>
+          <p className="mb-3 text-[12px] font-medium text-medium-gray">银行凭证</p>
           {renderAttachmentList(data.bankVoucher)}
         </div>
         <div>
-          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">开票信息</p>
+          <p className="mb-3 text-[12px] font-medium text-medium-gray">开票信息</p>
           {renderCustomerTable(data.invoiceInfos, customerInvoiceInfoColumns)}
         </div>
       </div>
@@ -543,15 +543,15 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
     return (
       <div className="space-y-5">
         <div>
-          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">角色与服务</p>
+          <p className="mb-3 text-[12px] font-medium text-medium-gray">角色与服务</p>
           {renderCustomerTable(data.roleServices, supplierRoleServiceColumns)}
         </div>
         <div>
-          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">银行账户</p>
+          <p className="mb-3 text-[12px] font-medium text-medium-gray">银行账户</p>
           {renderCustomerTable(data.bankAccounts, customerBankAccountColumns)}
         </div>
         <div>
-          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">开票信息</p>
+          <p className="mb-3 text-[12px] font-medium text-medium-gray">开票信息</p>
           {renderCustomerTable(data.invoiceInfos, customerInvoiceInfoColumns)}
         </div>
       </div>
@@ -567,7 +567,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
           <div className="min-w-[1320px] overflow-hidden rounded-2xl border border-border-silver bg-white">
             <div className="grid grid-cols-[1fr_1fr_1fr_0.8fr_0.8fr_0.8fr_1fr_1.1fr_0.8fr_1.1fr_1fr] border-b border-border-silver bg-canvas-white">
               {supplierQuotationColumns.map((column) => (
-                <div key={column.key} className="px-3 py-3 text-[11px] font-black text-medium-gray">
+                <div key={column.key} className="px-3 py-3 text-[11px] font-semibold text-medium-gray">
                   {column.label}
                 </div>
               ))}
@@ -575,7 +575,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
             {data.quotationRows.map((row, rowIndex) => (
               <div key={rowIndex} className="grid grid-cols-[1fr_1fr_1fr_0.8fr_0.8fr_0.8fr_1fr_1.1fr_0.8fr_1.1fr_1fr] border-b border-border-silver last:border-b-0">
                 {supplierQuotationColumns.map((column) => (
-                  <div key={column.key} className="px-3 py-4 text-[13px] font-bold text-black break-all">
+                  <div key={column.key} className="break-all px-3 py-4 text-[13px] font-medium text-midnight-graphite">
                     {String(row[column.key] || '-')}
                   </div>
                 ))}
@@ -585,7 +585,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
         </div>
 
         <div className="rounded-2xl border border-border-silver bg-white p-4">
-          <p className="text-[12px] font-black text-medium-gray uppercase tracking-[0.16em] mb-3">报价附件</p>
+          <p className="mb-3 text-[12px] font-medium text-medium-gray">报价附件</p>
           {renderAttachmentList(data.attachments)}
         </div>
       </div>
@@ -594,75 +594,78 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto p-3 sm:items-center sm:p-4">
+      <div className="fixed inset-0 z-[100] flex items-end justify-center overflow-hidden p-0 sm:items-center sm:p-4">
         <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          className="absolute inset-0 bg-black/40 backdrop-blur-xl"
+          className="absolute inset-0 bg-black/25 backdrop-blur-[2px]"
         />
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 30 }}
+            initial={{ opacity: 0, scale: 0.98, y: 42 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 30 }}
-            className="bg-white rounded-[28px] sm:rounded-[40px] w-full max-w-2xl relative shadow-2xl overflow-hidden border border-black/[0.03] flex flex-col max-h-[calc(100dvh-24px)] sm:max-h-[90dvh]"
+            exit={{ opacity: 0, scale: 0.98, y: 42 }}
+            className="relative flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-[24px] border border-white/70 bg-[#f5f6fa] shadow-[0_-4px_18px_rgba(15,23,42,0.055)] sm:h-auto sm:max-h-[90dvh] sm:rounded-[22px] sm:shadow-[0_10px_30px_rgba(15,23,42,0.10)]"
           >
             {/* Header */}
-            <div className="px-10 py-8 border-b border-black/[0.02] flex items-center justify-between bg-[#fbfbfd] shrink-0">
-              <div className="flex items-center gap-6">
-                <div className="w-12 h-12 bg-black rounded-2xl flex items-center justify-center text-white">
-                  <FileText size={24} strokeWidth={2.5} />
+            <div className="shrink-0 border-b border-black/[0.045] bg-white px-4 pb-3.5 pt-2.5 sm:px-7 sm:py-5">
+              <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-black/[0.12] sm:hidden" />
+              <div className="flex items-center justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-[#eef5ff] text-[#1677ff]">
+                    <FileText size={19} strokeWidth={2.35} />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="truncate text-[17px] font-semibold tracking-tight text-midnight-graphite">卷宗详情</h2>
+                    <p className="mt-0.5 truncate text-[11px] font-medium text-light-gray">流水识别码：{record.id.split('-')[1]}</p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-[22px] font-black tracking-tight text-black uppercase">卷宗详情</h2>
-                  <p className="text-[10px] font-black text-medium-gray tracking-[0.16em] uppercase mt-1">流水识别码: {record.id.split('-')[1]}</p>
-                </div>
+                <button onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-medium-gray transition-colors hover:bg-[#f5f6f8] hover:text-midnight-graphite">
+                  <X size={18} strokeWidth={2.5} />
+                </button>
               </div>
-              <button onClick={onClose} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-black/[0.05] transition-colors text-medium-gray">
-                <X size={20} strokeWidth={3} />
-              </button>
             </div>
 
-            <div ref={contentRef} className="flex-1 overflow-y-auto no-scrollbar p-6 sm:p-12 space-y-10 sm:space-y-16">
+            <div ref={contentRef} className="flex-1 overflow-y-auto no-scrollbar space-y-3.5 p-3.5 pb-4 sm:space-y-5 sm:p-7">
               {/* Context Grid */}
-              <div className="grid grid-cols-2 gap-x-16 gap-y-10">
-                <div className="flex flex-col gap-2">
-                  <p className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em]">功能类型</p>
-                  <p className="text-[17px] font-black text-black tracking-tight leading-none">{record.approvalTypeName}</p>
+              <div className="grid grid-cols-2 overflow-hidden rounded-[16px] border border-black/[0.03] bg-white shadow-[0_1px_1px_rgba(15,23,42,0.018)]">
+                <div className="flex min-w-0 flex-col gap-1 border-b border-r border-black/[0.04] p-3">
+                  <p className="text-[11px] font-medium text-light-gray">功能类型</p>
+                  <p className="truncate text-[15px] font-semibold leading-5 text-midnight-graphite">{record.approvalTypeName}</p>
                 </div>
-                <div className="flex flex-col gap-2">
-                  <p className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em]">业务模块</p>
-                  <p className="text-[17px] font-black text-black tracking-tight leading-none">{record.moduleName}</p>
+                <div className="flex min-w-0 flex-col gap-1 border-b border-black/[0.04] p-3">
+                  <p className="text-[11px] font-medium text-light-gray">业务模块</p>
+                  <p className="truncate text-[15px] font-semibold leading-5 text-midnight-graphite">{record.moduleName}</p>
                 </div>
-                <div className="flex flex-col gap-2">
-                  <p className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em]">发起主体</p>
-                  <p className="text-[17px] font-black text-black tracking-tight leading-none">{record.applicant}</p>
+                <div className="flex min-w-0 flex-col gap-1 border-r border-black/[0.04] p-3">
+                  <p className="text-[11px] font-medium text-light-gray">发起主体</p>
+                  <p className="truncate text-[15px] font-semibold leading-5 text-midnight-graphite">{record.applicant}</p>
                 </div>
-                <div className="flex flex-col gap-2">
-                  <p className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em]">时间戳</p>
-                  <p className="text-[17px] font-black text-black tracking-tighter leading-none font-mono uppercase">{formatLocalDateTime(record.createdAt)}</p>
+                <div className="flex min-w-0 flex-col gap-1 p-3">
+                  <p className="text-[11px] font-medium text-light-gray">时间戳</p>
+                  <p className="truncate font-mono text-[14px] font-semibold leading-5 text-midnight-graphite">{formatLocalDateTime(record.createdAt)}</p>
                 </div>
               </div>
 
               {showAiSuggestion && (
                 <div className={cn(
-                  "p-7 rounded-[24px] border relative overflow-hidden",
+                  "relative overflow-hidden rounded-[18px] border p-3.5 sm:rounded-[22px] sm:p-7",
                   aiSuggestion.tone === 'danger' && "bg-[#fff1f0]/60 border-rose-100",
                   aiSuggestion.tone === 'warning' && "bg-[#fff7e6]/70 border-[#f5d7a1]",
                   aiSuggestion.tone === 'success' && "bg-[#e8f5e9]/80 border-[#b9dfbd]",
                   aiSuggestion.tone === 'neutral' && "bg-[#fbfbfd] border-black/[0.04]",
                 )}>
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-2xl bg-black text-white flex items-center justify-center shrink-0">
-                      <Sparkles size={18} strokeWidth={2.5} />
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[11px] bg-white text-midnight-graphite ring-1 ring-black/[0.06]">
+                      <Sparkles size={16} strokeWidth={2.35} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-4 mb-2">
-                        <p className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em]">AI审批建议</p>
-                        <span className="text-[10px] font-black text-medium-gray uppercase tracking-[0.16em] whitespace-nowrap">仅供参考</span>
+                        <p className="text-[12px] font-semibold text-medium-gray">AI审批建议</p>
+                        <span className="whitespace-nowrap text-[11px] font-medium text-light-gray">仅供参考</span>
                       </div>
-                      <p className="text-[16px] font-black text-black leading-snug tracking-tight">
+                      <p className="text-[15px] font-semibold leading-snug tracking-tight text-midnight-graphite">
                         {aiSuggestion.text}
                       </p>
                     </div>
@@ -673,34 +676,34 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
               {/* Approval Result if processed */}
               {hasResultPanel && (
                 <div className={cn(
-                  "p-8 rounded-[32px] border relative overflow-hidden",
-                  isPositiveResult ? "bg-black text-white border-black" : "bg-[#fff1f0]/20 border-rose-100"
+                  "relative overflow-hidden rounded-[18px] border p-4 sm:rounded-[22px] sm:p-6",
+                  isPositiveResult ? "border-[#dcefe1] bg-[#f1f8f4] text-[#1b5e20]" : "border-rose-100 bg-[#fff1f0]/55"
                 )}>
                   {isPositiveResult && (
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 blur-2xl" />
+                    <div className="absolute right-0 top-0 h-32 w-32 -translate-y-16 translate-x-16 rounded-full bg-white/60 blur-2xl" />
                   )}
                   <div className="flex items-center justify-between relative">
-                    <div className="flex items-center gap-5">
+                    <div className="flex items-center gap-3.5">
                       <div className={cn(
-                        "w-10 h-10 rounded-2xl flex items-center justify-center",
-                        isPositiveResult ? "bg-white text-black" : "bg-rose-500 text-white"
+                        "flex h-9 w-9 items-center justify-center rounded-full",
+                        isPositiveResult ? "bg-[#22a06b] text-white" : "bg-rose-500 text-white"
                       )}>
                         {isPositiveResult ? <ShieldCheck size={20} strokeWidth={2.5} /> : <AlertCircle size={20} strokeWidth={2.5} />}
                       </div>
                       <div>
-                        <p className={cn("text-[16px] font-black uppercase tracking-tight", isPositiveResult ? "text-white" : "text-black")}>
+                        <p className={cn("text-[16px] font-semibold tracking-tight", isPositiveResult ? "text-[#1b5e20]" : "text-midnight-graphite")}>
                           {resultTitle}
                         </p>
-                        <p className={cn("text-[10px] font-black uppercase tracking-[0.16em]", isPositiveResult ? "text-white/70" : "text-medium-gray")}>{resultSubtitle}</p>
+                        <p className="text-[11px] font-medium text-medium-gray">{resultSubtitle}</p>
                       </div>
                     </div>
-                    <span className={cn("text-[10px] font-black font-mono uppercase tracking-widest", isPositiveResult ? "text-white/70" : "text-medium-gray")}>
+                    <span className="font-mono text-[10.5px] font-medium text-medium-gray">
                       {formatLocalDateTime(record.processedAt || record.approvedAt || record.rejectedAt, 'time-seconds')}
                     </span>
                   </div>
                   {record.rejectReason && (
                     <div className="mt-6 pt-6 border-t border-black/5">
-                      <p className="text-[10px] font-black text-medium-gray uppercase tracking-widest mb-2">异常日志追踪</p>
+                      <p className="mb-2 text-[11px] font-medium text-medium-gray">异常日志追踪</p>
                       <p className="text-[15px] font-bold text-rose-600 leading-tight italic">"{record.rejectReason}"</p>
                     </div>
                   )}
@@ -708,24 +711,22 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
               )}
 
               {/* Business Data */}
-              <div className="space-y-8">
-                <div className="flex items-center gap-4">
-                  <div className="h-px bg-black/[0.05] flex-1" />
-                  <h3 className="text-[10px] font-black text-medium-gray uppercase tracking-[0.22em] whitespace-nowrap">业务数据资产</h3>
-                  <div className="h-px bg-black/[0.05] flex-1" />
+              <div className="space-y-3">
+                <div className="px-1">
+                  <h3 className="text-[17px] font-semibold tracking-tight text-midnight-graphite">业务信息</h3>
                 </div>
-                <div className="grid grid-cols-1 gap-2">
+                <div className="grid grid-cols-1 gap-2.5">
                   {Object.entries(record.businessData).map(([key, value]) => (
                     <div
                       key={key}
                       className={cn(
-                        "gap-6 p-7 bg-[#fbfbfd] rounded-[24px] group border border-transparent hover:border-black/[0.02] hover:bg-white transition-all",
+                        "gap-4 rounded-[16px] border border-black/[0.035] bg-white p-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.02)] transition-all sm:gap-6 sm:p-5 sm:rounded-[20px]",
                         isCustomerInfoChangeValue(value) || isSupplierInfoChangeValue(value) || isSupplierQuotationInfoValue(value) || isFileFieldDisplayValue(value) || getStructuredDetailColumns(value).length > 0
                           ? "flex flex-col items-stretch"
                           : "flex items-center justify-between",
                       )}
                     >
-                      <span className="text-[11px] font-black text-medium-gray uppercase tracking-[0.16em]">{key}</span>
+                      <span className="text-[12px] font-medium text-medium-gray">{key}</span>
                       {isCustomerInfoChangeValue(value) ? (
                         renderCustomerInfoChange(value)
                       ) : isSupplierInfoChangeValue(value) ? (
@@ -745,7 +746,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                               style={getDetailTableGridStyle(getStructuredDetailColumns(value).length)}
                             >
                               {getStructuredDetailColumns(value).map((column) => (
-                                <div key={column.key} className="px-3 py-3 text-[11px] font-black text-medium-gray">
+                                <div key={column.key} className="px-3 py-3 text-[11px] font-semibold text-medium-gray">
                                   {column.label}
                                 </div>
                               ))}
@@ -757,7 +758,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                                 style={getDetailTableGridStyle(getStructuredDetailColumns(value).length)}
                               >
                                 {getStructuredDetailColumns(value).map((column) => (
-                                  <div key={column.key} className="px-3 py-4 text-[13px] font-bold text-black break-all">
+                                  <div key={column.key} className="break-all px-3 py-4 text-[13px] font-medium text-midnight-graphite">
                                     {String((row as Record<string, unknown>)[column.key] || '-')}
                                   </div>
                                 ))}
@@ -789,19 +790,19 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                           ))}
                         </div>
                       ) : isMoneyDisplayObject(value) ? (
-                        <span className="text-[17px] font-black text-black tracking-tight text-right break-all">
+                        <span className="break-all text-right text-[16px] font-semibold tracking-tight text-midnight-graphite">
                           {formatMoneyDisplay(value) || '-'}
                         </span>
                       ) : isPlainDisplayObject(value) ? (
                         <div className="min-w-0 flex flex-col items-end gap-2">
                           {Object.entries(value).map(([itemKey, itemValue]) => (
-                            <span key={itemKey} className="text-[15px] font-black text-black tracking-tight text-right break-all">
+                            <span key={itemKey} className="break-all text-right text-[14px] font-semibold tracking-tight text-midnight-graphite">
                               {itemKey}：{String(itemValue || '-')}
                             </span>
                           ))}
                         </div>
                       ) : (
-                        <span className="text-[17px] font-black text-black tracking-tight text-right break-all">{String(value)}</span>
+                        <span className="break-all text-right text-[16px] font-semibold tracking-tight text-midnight-graphite">{String(value)}</span>
                       )}
                     </div>
                   ))}
@@ -809,46 +810,46 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
               </div>
 
               {/* Audit Log */}
-              <div className="overflow-hidden rounded-[40px] bg-white border border-black/[0.03] shadow-xl shadow-black/[0.04]">
-                <div className="px-10 py-8 border-b border-black/[0.02] flex items-center justify-between bg-[#fbfbfd]">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-black rounded-2xl flex items-center justify-center">
-                      <CheckCircle2 className="text-white w-5 h-5" strokeWidth={3} />
+              <div className="overflow-hidden rounded-[16px] border border-black/[0.03] bg-white shadow-[0_1px_1px_rgba(15,23,42,0.018)]">
+                <div className="flex items-center justify-between border-b border-black/[0.045] bg-white px-4 py-3.5 sm:px-6">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-[11px] bg-[#eef5ff] text-[#1677ff]">
+                      <CheckCircle2 className="h-[18px] w-[18px]" strokeWidth={2.5} />
                     </div>
-                    <h3 className="text-[20px] font-black text-black tracking-tight uppercase">审批流进度汇总</h3>
+                    <h3 className="text-[16px] font-semibold tracking-tight text-midnight-graphite">审批流进度汇总</h3>
                   </div>
                 </div>
-                <div className="p-12">
-                  <div className="space-y-0 relative">
+                <div className="p-4 sm:p-7">
+                  <div className="relative space-y-0">
                     {approvalTimeline.map((step, idx) => (
-                      <div key={idx} className="relative flex gap-8 pb-16 last:pb-0">
+                      <div key={idx} className="relative flex gap-3.5 pb-8 last:pb-0">
                         {idx !== approvalTimeline.length - 1 && (
                           <div className={cn(
-                            "absolute top-10 left-5 w-[1.5px] h-full transition-all duration-700",
-                            step.state === 'done' ? "bg-black" : "bg-slate-100"
+                            "absolute left-4 top-8 h-full w-px transition-all duration-700",
+                            step.state === 'done' ? "bg-[#1677ff]/24" : "bg-slate-100"
                           )} />
                         )}
 
-                        <div className="shrink-0 z-10">
+                        <div className="z-10 shrink-0">
                           <div className={cn(
-                            "w-10 h-10 rounded-2xl flex items-center justify-center border-2 transition-all duration-500",
-                            step.state === 'done' ? "bg-black border-black text-white" :
-                            (step.state === 'active' ? "bg-white border-black text-black shadow-xl shadow-black/10" :
+                            "flex h-8 w-8 items-center justify-center rounded-full border transition-all duration-500",
+                            step.state === 'done' ? "bg-[#1677ff] border-[#1677ff] text-white" :
+                            (step.state === 'active' ? "bg-white border-[#1677ff] text-[#1677ff] shadow-[0_6px_16px_rgba(22,119,255,0.10)]" :
                             (step.state === 'failed' ? "bg-rose-500 border-rose-500 text-white" : "bg-white border-border-silver text-light-gray"))
                           )}>
-                            {step.state === 'done' && <Check size={18} strokeWidth={3} />}
-                            {step.state === 'active' && <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 4, ease: 'linear' }}><Clock size={18} strokeWidth={3} /></motion.div>}
-                            {step.state === 'failed' && <X size={18} strokeWidth={3} />}
-                            {step.state === 'pending' && <div className="w-2 h-2 rounded-full bg-slate-100" />}
+                            {step.state === 'done' && <Check size={16} strokeWidth={2.7} />}
+                            {step.state === 'active' && <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 4, ease: 'linear' }}><Clock size={16} strokeWidth={2.7} /></motion.div>}
+                            {step.state === 'failed' && <X size={16} strokeWidth={2.7} />}
+                            {step.state === 'pending' && <div className="h-1.5 w-1.5 rounded-full bg-slate-200" />}
                           </div>
                         </div>
 
-                        <div className="flex flex-col gap-1.5 pt-1.5">
+                        <div className="min-w-0 flex flex-col gap-1 pt-1">
                           <h4 className={cn(
-                            "text-[15px] font-black uppercase tracking-tight",
-                            step.state === 'pending' ? "text-medium-gray" : "text-black"
+                            "text-[15px] font-semibold tracking-tight",
+                            step.state === 'pending' ? "text-medium-gray" : "text-midnight-graphite"
                           )}>{step.title}</h4>
-                          <p className="text-[12px] font-bold text-medium-gray">{step.desc}</p>
+                          <p className="text-[12.5px] font-medium leading-5 text-medium-gray">{step.desc}</p>
                           {Array.isArray((step as { approvers?: unknown }).approvers) && (
                             <ApprovalParallelApprovers
                               approvers={(step as unknown as { approvers: NonNullable<ApprovalRecord['workflowInstance']>['steps'][number]['approvers'] }).approvers}
@@ -858,7 +859,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                             />
                           )}
                           {step.time && (
-                            <p className="text-[10px] font-black text-light-gray font-mono mt-2 uppercase tracking-widest">
+                            <p className="mt-1.5 font-mono text-[10.5px] font-medium text-light-gray">
                               {formatLocalDateTime(step.time, 'date-time-seconds')}
                             </p>
                           )}
@@ -871,26 +872,26 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
             </div>
 
             {/* Footer */}
-            <div className="px-10 py-8 bg-[#fbfbfd] border-t border-black/[0.02] shrink-0">
+            <div className="shrink-0 border-t border-black/[0.045] bg-white/95 px-4 py-3 backdrop-blur sm:px-7 sm:py-5">
               {canReview ? (
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3">
                   <button
                     onClick={() => onApprove?.(record)}
-                    className="h-14 bg-[#2e7d32] text-white text-[13px] font-black rounded-2xl hover:bg-[#256629] transition-all shadow-xl shadow-[#2e7d32]/10 flex items-center justify-center gap-2"
+                    className="flex h-11 items-center justify-center gap-2 rounded-full bg-[#22a06b] text-[14px] font-semibold text-white shadow-[0_6px_14px_rgba(34,160,107,0.14)] transition-colors hover:bg-[#1d8f5f] sm:h-12"
                   >
                     <CheckCircle2 size={18} strokeWidth={2.5} />
                     通过审批
                   </button>
                   <button
                     onClick={() => onReject?.(record)}
-                    className="h-14 bg-[#c62828] text-white text-[13px] font-black rounded-2xl hover:bg-[#a52121] transition-all shadow-xl shadow-[#c62828]/10 flex items-center justify-center gap-2"
+                    className="flex h-11 items-center justify-center gap-2 rounded-full bg-[#ffebe9] text-[14px] font-semibold text-[#d93025] transition-colors hover:bg-[#ffe0dd] sm:h-12"
                   >
                     <XCircle size={18} strokeWidth={2.5} />
                     驳回申请
                   </button>
                   <button
                     onClick={onClose}
-                    className="h-14 px-6 bg-white border border-black/[0.06] text-medium-gray text-[13px] font-black rounded-2xl hover:text-black hover:border-black/[0.12] transition-all"
+                    className="h-11 rounded-full border border-black/[0.06] bg-white px-6 text-[14px] font-semibold text-medium-gray transition-colors hover:border-black/[0.12] hover:text-midnight-graphite sm:h-12"
                   >
                     关闭
                   </button>
@@ -899,14 +900,14 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3">
                   <button
                     onClick={() => onCompleteProcess?.(record)}
-                    className="h-14 bg-black text-white text-[13px] font-black rounded-2xl hover:bg-black/90 transition-all shadow-xl shadow-black/10 flex items-center justify-center gap-2"
+                    className="flex h-12 items-center justify-center gap-2 rounded-full bg-[#1677ff] text-[14px] font-semibold text-white shadow-[0_5px_12px_rgba(22,119,255,0.12)] transition-colors hover:bg-[#0f6fe8] sm:h-12"
                   >
                     <UserCheck size={18} strokeWidth={2.5} />
                     完成办理
                   </button>
                   <button
                     onClick={onClose}
-                    className="h-14 px-6 bg-white border border-black/[0.06] text-medium-gray text-[13px] font-black rounded-2xl hover:text-black hover:border-black/[0.12] transition-all"
+                    className="h-12 rounded-full border border-black/[0.06] bg-white px-6 text-[14px] font-semibold text-medium-gray transition-colors hover:border-black/[0.12] hover:text-midnight-graphite sm:h-12"
                   >
                     关闭
                   </button>
@@ -914,7 +915,7 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
               ) : (
                 <button 
                   onClick={onClose} 
-                  className="w-full h-14 bg-black text-white text-[12px] font-black uppercase tracking-[0.3em] rounded-2xl hover:bg-black/90 transition-all shadow-2xl shadow-black/20"
+                  className="flex h-12 w-full items-center justify-center rounded-full bg-[#1677ff] text-[14px] font-semibold text-white shadow-[0_5px_12px_rgba(22,119,255,0.12)] transition-colors hover:bg-action-blue"
                 >
                   确认并退出
                 </button>
@@ -930,21 +931,21 @@ export default function ApprovalDetailModal({ record, onClose, onApprove, onReje
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 onClick={closePreview}
-                className="absolute inset-0 bg-black/60 backdrop-blur-xl"
+                className="absolute inset-0 bg-black/40 backdrop-blur-sm"
               />
               <motion.div
                 initial={{ opacity: 0, scale: 0.96, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.96, y: 20 }}
-                className="relative w-full max-w-5xl h-[86vh] bg-white rounded-[32px] shadow-2xl overflow-hidden flex flex-col"
+                className="relative flex h-[86vh] w-full max-w-5xl flex-col overflow-hidden rounded-[22px] bg-white shadow-[0_14px_40px_rgba(15,23,42,0.15)]"
               >
                 <div className="h-16 px-6 border-b border-black/[0.06] flex items-center justify-between shrink-0">
                   <div className="min-w-0 flex flex-col">
-                    <span className="text-[14px] font-black text-black truncate">{preview?.attachment.name || '附件预览'}</span>
-                    <span className="text-[10px] font-black text-medium-gray uppercase tracking-widest">附件预览</span>
+                    <span className="truncate text-[14px] font-semibold text-midnight-graphite">{preview?.attachment.name || '附件预览'}</span>
+                    <span className="text-[11px] font-medium text-light-gray">附件预览</span>
                   </div>
-                  <button onClick={closePreview} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-black/[0.05] text-medium-gray hover:text-black transition-colors">
-                    <X size={20} strokeWidth={3} />
+                  <button onClick={closePreview} className="flex h-9 w-9 items-center justify-center rounded-full text-medium-gray transition-colors hover:bg-[#f5f6f8] hover:text-midnight-graphite">
+                    <X size={20} strokeWidth={2.5} />
                   </button>
                 </div>
 

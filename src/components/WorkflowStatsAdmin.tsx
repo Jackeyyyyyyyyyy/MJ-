@@ -1,7 +1,7 @@
 import React from 'react';
-import { BarChart3, CheckCircle2, ChevronDown, RefreshCw, Search } from 'lucide-react';
+import { BarChart3, Building2, CheckCircle2, ChevronDown, RefreshCw, Search, UserRound } from 'lucide-react';
 import { storage } from '../storage';
-import { WorkflowNode, WorkflowTemplate } from '../types';
+import { WorkflowEfficiencyScope, WorkflowNode, WorkflowTemplate } from '../types';
 import WorkflowEfficiencyOverview from './WorkflowEfficiencyOverview';
 import { cn } from '../lib/utils';
 
@@ -16,6 +16,16 @@ const statusOrder: Record<WorkflowTemplate['status'], number> = {
   draft: 1,
   disabled: 2,
 };
+
+const scopeOptions: Array<{
+  value: WorkflowEfficiencyScope;
+  label: string;
+  description: string;
+  icon: React.ElementType;
+}> = [
+  { value: 'enterprise', label: '企业', description: '查看全公司流程效率', icon: Building2 },
+  { value: 'personal', label: '个人', description: '只看我参与的审批效率', icon: UserRound },
+];
 
 function getWorkflowTitle(moduleName?: string, approvalTypeName?: string) {
   return approvalTypeName || moduleName || '未设置业务';
@@ -220,16 +230,33 @@ function WorkflowTemplateSearchSelect({
   );
 }
 
-export default function WorkflowStatsAdmin() {
+interface WorkflowStatsAdminProps {
+  title?: string;
+  eyebrow?: string;
+  subtitle?: string;
+  skipImpersonation?: boolean;
+  defaultScope?: WorkflowEfficiencyScope;
+  compact?: boolean;
+}
+
+export default function WorkflowStatsAdmin({
+  title = '统计',
+  eyebrow = '审批效率',
+  subtitle = '流程耗时、单量与使用人数',
+  skipImpersonation = true,
+  defaultScope = 'enterprise',
+  compact = false,
+}: WorkflowStatsAdminProps) {
   const [templates, setTemplates] = React.useState<WorkflowTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState('');
+  const [scope, setScope] = React.useState<WorkflowEfficiencyScope>(defaultScope);
 
   const loadTemplates = React.useCallback(() => {
     setIsLoading(true);
     setError('');
-    storage.getWorkflowTemplates()
+    storage.getWorkflowTemplates({ skipImpersonation })
       .then((nextTemplates) => {
         setTemplates(nextTemplates);
       })
@@ -240,7 +267,7 @@ export default function WorkflowStatsAdmin() {
       .finally(() => {
         setIsLoading(false);
       });
-  }, []);
+  }, [skipImpersonation]);
 
   React.useEffect(() => {
     loadTemplates();
@@ -262,20 +289,53 @@ export default function WorkflowStatsAdmin() {
   const selectedTemplate = sortedTemplates.find((template) => template.id === selectedTemplateId) || null;
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-xl border border-border-silver bg-white p-5 shadow-sm">
+    <div className={cn("space-y-4 lg:space-y-6", compact && "pb-32 lg:pb-40")}>
+      <section className={cn(
+        "rounded-xl border border-border-silver bg-white p-5 shadow-sm",
+        compact && "mj-mobile-card-soft border-white/70 p-4 shadow-none lg:border-border-silver lg:p-5 lg:shadow-sm",
+      )}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-black text-white">
               <BarChart3 size={20} strokeWidth={2.6} />
             </span>
             <div>
-              <p className="text-[12px] font-black uppercase tracking-[0.18em] text-medium-gray">审批效率</p>
-              <h1 className="text-[26px] font-black tracking-tight text-midnight-graphite">统计</h1>
+              <p className="text-[12px] font-black uppercase tracking-[0.18em] text-medium-gray">{eyebrow}</p>
+              <h1 className={cn(
+                "font-black tracking-tight text-midnight-graphite",
+                compact ? "text-[22px] lg:text-[26px]" : "text-[26px]",
+              )}>{title}</h1>
+              {subtitle && (
+                <p className="mt-1 text-[12px] font-semibold text-medium-gray">{subtitle}</p>
+              )}
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-3 lg:items-end">
+            <div className="grid grid-cols-2 gap-1 rounded-full bg-lightest-gray-background p-1">
+              {scopeOptions.map((option) => {
+                const Icon = option.icon;
+                const active = scope === option.value;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setScope(option.value)}
+                    className={cn(
+                      "flex h-9 items-center justify-center gap-1.5 rounded-full px-4 text-[12px] font-black transition-all",
+                      active ? "bg-white text-midnight-graphite shadow-sm" : "text-medium-gray hover:text-midnight-graphite",
+                    )}
+                    title={option.description}
+                  >
+                    <Icon size={14} strokeWidth={2.6} />
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="flex min-w-0 items-center gap-2">
               <span className="shrink-0 text-[13px] font-black text-medium-gray">审批流</span>
               <WorkflowTemplateSearchSelect
@@ -298,6 +358,7 @@ export default function WorkflowStatsAdmin() {
               <RefreshCw className={cn(isLoading && "animate-spin")} size={15} strokeWidth={2.6} />
               刷新
             </button>
+            </div>
           </div>
         </div>
       </section>
@@ -309,7 +370,11 @@ export default function WorkflowStatsAdmin() {
       )}
 
       {selectedTemplate ? (
-        <WorkflowEfficiencyOverview template={selectedTemplate} />
+        <WorkflowEfficiencyOverview
+          template={selectedTemplate}
+          scope={scope}
+          skipImpersonation={skipImpersonation}
+        />
       ) : (
         <div className="flex min-h-[280px] items-center justify-center rounded-xl border border-dashed border-border-silver bg-white text-[13px] font-bold text-medium-gray">
           {isLoading ? '正在读取审批流...' : '暂无可统计审批流'}

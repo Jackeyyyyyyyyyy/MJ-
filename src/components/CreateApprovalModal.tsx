@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, ChevronRight, Upload, Calendar, Clock3, Calculator, DollarSign, FileText, Plus, AlignLeft, Building2, ListChecks, Table2, UserRound, Sparkles, ImagePlus, ChevronUp, ChevronDown, Loader2 } from 'lucide-react';
+import { X, ChevronRight, Upload, Calendar, Clock3, Calculator, DollarSign, FileText, Plus, AlignLeft, Building2, ListChecks, Table2, UserRound, Sparkles, ImagePlus, ChevronUp, ChevronDown, Loader2, BriefcaseBusiness, ClipboardList, Plane, Stamp, WalletCards } from 'lucide-react';
 import { getVisibleApprovalModules } from '../approvalSchema';
 import { storage } from '../storage';
 import { auth } from '../auth';
@@ -103,6 +103,8 @@ interface CreateApprovalModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void | Promise<void>;
+  initialModuleName?: string;
+  initialTypeName?: string;
 }
 
 type AiFillMode = 'text' | 'image';
@@ -340,6 +342,83 @@ function isConfiguredDateField(type: ApprovalType | null, field: string) {
 
 function isConfiguredDateTimeField(type: ApprovalType | null, field: string) {
   return Array.isArray(type?.dateTimeFields) && type.dateTimeFields.includes(field);
+}
+
+function formatPickerDisplay(value: unknown, includeTime: boolean) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  if (includeTime) {
+    const [datePart, timePart = ''] = raw.split('T');
+    const dateText = datePart ? datePart.replaceAll('-', '/') : '';
+    const timeText = timePart.slice(0, 5);
+    return [dateText, timeText].filter(Boolean).join(' ');
+  }
+
+  return raw.replaceAll('-', '/');
+}
+
+const moduleVisualTones = [
+  'bg-[#eef6ff] text-[#1677ff]',
+  'bg-[#f2f8f4] text-[#2d8a58]',
+  'bg-[#fff6e6] text-[#b77912]',
+  'bg-[#f5f2ff] text-[#7254b6]',
+  'bg-[#f0f8f7] text-[#23877b]',
+];
+
+function getModuleVisual(moduleName: string, index: number): { Icon: React.ElementType; tone: string } {
+  if (/出勤|休假|加班|考勤|补卡/.test(moduleName)) {
+    return { Icon: Calendar, tone: 'bg-[#ecf8f2] text-[#23885f]' };
+  }
+  if (/资金|财务|费用|报销|税金|融资|贷款|备用金/.test(moduleName)) {
+    return { Icon: WalletCards, tone: 'bg-[#fff5e8] text-[#b86f11]' };
+  }
+  if (/客户|供应商|法人|证照/.test(moduleName)) {
+    return { Icon: BriefcaseBusiness, tone: 'bg-[#eef6ff] text-[#1677ff]' };
+  }
+  if (/订单|任务|提柜/.test(moduleName)) {
+    return { Icon: ClipboardList, tone: 'bg-[#f0f8f7] text-[#23877b]' };
+  }
+  if (/班列|出差|外出|运输/.test(moduleName)) {
+    return { Icon: Plane, tone: 'bg-[#eef6ff] text-[#2b73d2]' };
+  }
+  if (/账号|成员|人员|人事/.test(moduleName)) {
+    return { Icon: UserRound, tone: 'bg-[#f5f2ff] text-[#7357bd]' };
+  }
+  if (/盖章|用印|合同/.test(moduleName)) {
+    return { Icon: Stamp, tone: 'bg-[#fff3ef] text-[#c45d3c]' };
+  }
+
+  return { Icon: FileText, tone: moduleVisualTones[index % moduleVisualTones.length] };
+}
+
+function getApprovalTypeVisual(typeName: string, moduleName: string, index: number): { Icon: React.ElementType; tone: string } {
+  if (/请假|考勤/.test(typeName)) {
+    return { Icon: Calendar, tone: 'bg-[#ecf8f2] text-[#23885f]' };
+  }
+  if (/加班|补卡/.test(typeName)) {
+    return { Icon: Clock3, tone: 'bg-[#fff5e8] text-[#b86f11]' };
+  }
+  if (/出差|外出|差旅|班列|运输/.test(typeName)) {
+    return { Icon: Plane, tone: 'bg-[#eef6ff] text-[#2b73d2]' };
+  }
+  if (/备用金|资金|费用|报销|税金|融资|贷款|减免/.test(typeName) || /资金|财务/.test(moduleName)) {
+    return { Icon: WalletCards, tone: 'bg-[#fff5e8] text-[#b86f11]' };
+  }
+  if (/客户|供应商|法人|证照|报价/.test(typeName) || /客户|供应商/.test(moduleName)) {
+    return { Icon: BriefcaseBusiness, tone: 'bg-[#eef6ff] text-[#1677ff]' };
+  }
+  if (/盖章|用印|合同/.test(typeName)) {
+    return { Icon: Stamp, tone: 'bg-[#fff3ef] text-[#c45d3c]' };
+  }
+  if (/账号|成员|人员|子账号/.test(typeName) || /账号/.test(moduleName)) {
+    return { Icon: UserRound, tone: 'bg-[#f5f2ff] text-[#7357bd]' };
+  }
+  if (/订单|任务|提柜|项目/.test(typeName) || /订单|任务|提柜/.test(moduleName)) {
+    return { Icon: ClipboardList, tone: 'bg-[#f0f8f7] text-[#23877b]' };
+  }
+
+  return { Icon: FileText, tone: moduleVisualTones[index % moduleVisualTones.length] };
 }
 
 function isConfiguredOptionalField(type: ApprovalType | null, field: string) {
@@ -714,7 +793,7 @@ function SearchableSingleSelect({
         </span>
       )}
       {isOpen && (
-        <div className="absolute left-0 right-0 top-full z-[120] mt-2 max-h-72 overflow-y-auto rounded-2xl border border-border-silver bg-white py-2 shadow-2xl">
+        <div className="absolute left-0 right-0 top-full z-[120] mt-2 max-h-72 overflow-y-auto rounded-[18px] border border-black/[0.06] bg-white py-1.5 shadow-[0_10px_28px_rgba(20,24,34,0.08)]">
           {visibleOptions.length > 0 ? visibleOptions.map((option) => (
             <button
               key={option.key}
@@ -753,15 +832,15 @@ function AiFormFillPanel({
   onSubmit,
 }: AiFormFillPanelProps) {
   return (
-    <div className="rounded-[24px] border border-[#dfe7ff] bg-gradient-to-r from-[#fbf2ff] via-[#f4f7ff] to-[#eff8ff] p-4 shadow-sm sm:p-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="inline-flex w-fit rounded-xl bg-white/70 p-1 shadow-sm">
+    <div className="mj-mobile-card overflow-hidden px-3.5 py-3 sm:rounded-[18px] sm:border sm:border-black/[0.035] sm:bg-[#f7f8fb] sm:p-5 sm:shadow-none">
+      <div className="flex items-center justify-between gap-2.5">
+        <div className="inline-flex min-w-0 rounded-full bg-[#f1f2f5] p-0.5">
           <button
             type="button"
             onClick={() => onModeChange('text')}
             className={cn(
-              "h-10 rounded-lg px-4 text-[14px] font-bold transition-all",
-              mode === 'text' ? "bg-white text-midnight-graphite shadow-sm" : "text-medium-gray hover:text-midnight-graphite",
+              "h-8 rounded-full px-3 text-[12px] font-semibold transition-all",
+              mode === 'text' ? "bg-white text-midnight-graphite shadow-[0_1px_2px_rgba(16,24,40,0.05)]" : "text-medium-gray hover:text-midnight-graphite",
             )}
           >
             文本填单
@@ -770,17 +849,17 @@ function AiFormFillPanel({
             type="button"
             disabled
             title="图片 AI 识别开发中"
-            className="inline-flex h-10 cursor-not-allowed items-center gap-1.5 rounded-lg bg-[#e5e5e8] px-4 text-[14px] font-bold text-light-silver opacity-80"
+            className="inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-full px-3 text-[12px] font-semibold text-light-silver opacity-70"
           >
             图片填单
-            <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-black text-light-silver">开发中</span>
+            <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] font-semibold text-light-silver">开发中</span>
           </button>
         </div>
 
         <button
           type="button"
           onClick={onToggle}
-          className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full px-3 text-[13px] font-bold text-medium-gray transition-colors hover:bg-white/70 hover:text-midnight-graphite"
+          className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-full px-2.5 text-[12px] font-semibold text-light-gray transition-colors hover:bg-[#f1f2f5] hover:text-midnight-graphite"
         >
           {isOpen ? <ChevronUp size={16} strokeWidth={2.6} /> : <ChevronDown size={16} strokeWidth={2.6} />}
           {isOpen ? '收起' : '展开'}
@@ -788,7 +867,7 @@ function AiFormFillPanel({
       </div>
 
       {isOpen && (
-        <div className="mt-4 rounded-2xl border border-white/70 bg-white p-4 shadow-sm">
+        <div className="mt-3 rounded-[16px] border border-black/[0.035] bg-[#f7f8fb] p-2.5 sm:bg-white sm:p-3.5">
           {mode === 'text' ? (
             <textarea
               value={text}
@@ -799,7 +878,7 @@ function AiFormFillPanel({
                   onSubmit();
                 }
               }}
-              className="min-h-[118px] w-full resize-y rounded-xl border border-transparent bg-canvas-white px-4 py-3 text-[15px] font-semibold leading-7 text-midnight-graphite outline-none transition-colors placeholder:text-light-gray focus:border-interactive-blue"
+              className="min-h-[96px] w-full resize-y rounded-[14px] border border-transparent bg-white px-3.5 py-3 text-[14px] font-medium leading-6 text-midnight-graphite outline-none transition-colors placeholder:text-[#9ca0aa] focus:border-interactive-blue sm:bg-[#f6f6f8]"
               placeholder="粘贴或输入内容到此处，AI将自动识别信息并填入表单"
             />
           ) : (
@@ -849,7 +928,7 @@ function AiFormFillPanel({
               type="button"
               disabled={isLoading}
               onClick={onSubmit}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#c68bff] to-[#72a8ff] px-5 text-[14px] font-bold text-white shadow-sm transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#1677ff] px-4 text-[13px] font-semibold text-white shadow-[0_6px_14px_rgba(22,119,255,0.16)] transition-all hover:bg-action-blue disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isLoading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} strokeWidth={2.5} />}
               {isLoading ? '识别中' : 'AI识别填写'}
@@ -996,7 +1075,7 @@ function isBlankOptionalValue(value: unknown): boolean {
   return false;
 }
 
-export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: CreateApprovalModalProps) {
+export default function CreateApprovalModal({ isOpen, onClose, onSuccess, initialModuleName, initialTypeName }: CreateApprovalModalProps) {
   const [step, setStep] = useState(1);
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
   const [selectedType, setSelectedType] = useState<ApprovalType | null>(null);
@@ -1005,7 +1084,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const [uploadingFields, setUploadingFields] = useState<Record<string, boolean>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [organizationOptions, setOrganizationOptions] = useState<OrganizationSelectOptions>(emptyOrganizationOptions);
-  const [aiPanelOpen, setAiPanelOpen] = useState(true);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiFillMode, setAiFillMode] = useState<AiFillMode>('text');
   const [aiFillText, setAiFillText] = useState('');
   const [aiImageFile, setAiImageFile] = useState<File | null>(null);
@@ -1016,10 +1095,10 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const isSubmittingRef = React.useRef(false);
 
   const user = auth.getCurrentUser();
-  const visibleModules = getVisibleApprovalModules();
+  const visibleModules = React.useMemo(() => getVisibleApprovalModules(), []);
 
   const resetAiFillState = () => {
-    setAiPanelOpen(true);
+    setAiPanelOpen(false);
     setAiFillMode('text');
     setAiFillText('');
     setAiImageFile(null);
@@ -1063,21 +1142,21 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     setStep(2);
   };
 
-  const handleTypeSelect = (type: ApprovalType) => {
+  const handleTypeSelect = (type: ApprovalType, moduleOverride: Module | null = selectedModule) => {
     setSelectedType(type);
     const initialData: Record<string, any> = {};
     type.businessFields.forEach(field => {
-      if (selectedModule?.name === '资金' && type.name === '批量修改' && field === '明细') {
+      if (moduleOverride?.name === '资金' && type.name === '批量修改' && field === '明细') {
         initialData[field] = [createEmptyBatchModifyDetail()];
-      } else if (selectedModule?.name === '资金' && type.name === '资金减免' && field === '明细') {
+      } else if (moduleOverride?.name === '资金' && type.name === '资金减免' && field === '明细') {
         initialData[field] = [createEmptyFundsReductionDetail()];
-      } else if (selectedModule?.name === '客户' && type.name === '客户信息' && field === '修改后内容') {
+      } else if (moduleOverride?.name === '客户' && type.name === '客户信息' && field === '修改后内容') {
         initialData[field] = createEmptyCustomerInfoChange();
-      } else if (selectedModule?.name === '供应商' && type.name === '供应商信息' && field === '内容') {
+      } else if (moduleOverride?.name === '供应商' && type.name === '供应商信息' && field === '内容') {
         initialData[field] = createEmptySupplierInfoChange();
-      } else if (selectedModule?.name === '订单' && type.name === '项目货变更' && field === '变更为') {
+      } else if (moduleOverride?.name === '订单' && type.name === '项目货变更' && field === '变更为') {
         initialData[field] = createEmptyProjectCargoChange();
-      } else if (selectedModule?.name === '供应商' && type.name === '报价' && field === '报价信息') {
+      } else if (moduleOverride?.name === '供应商' && type.name === '报价' && field === '报价信息') {
         initialData[field] = createEmptySupplierQuotationInfo();
       } else if (getConfiguredDetailColumns(type, field).length > 0) {
         initialData[field] = [createEmptyDetailRow(getConfiguredDetailColumns(type, field))];
@@ -1093,6 +1172,17 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     resetAiFillState();
     setStep(3);
   };
+
+  React.useEffect(() => {
+    if (!isOpen || !initialModuleName || !initialTypeName) return;
+
+    const matchedModule = visibleModules.find((module) => module.name === initialModuleName);
+    const matchedType = matchedModule?.approvalTypes.find((type) => type.name === initialTypeName);
+    if (!matchedModule || !matchedType) return;
+
+    setSelectedModule(matchedModule);
+    handleTypeSelect(matchedType, matchedModule);
+  }, [isOpen, initialModuleName, initialTypeName]);
 
   const handleInputChange = (
     field: string,
@@ -1568,7 +1658,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     const isUploading = !!uploadingFields[uploadKey];
 
     return (
-      <div className="rounded-2xl border border-border-silver bg-white p-4">
+      <div className="rounded-[16px] border border-black/[0.045] bg-white p-3.5 sm:p-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <p className="text-[14px] font-bold text-midnight-graphite">{label}</p>
@@ -1577,7 +1667,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
             </p>
           </div>
           <label className={cn(
-            "h-10 px-4 rounded-lg bg-black text-white text-[13px] font-bold cursor-pointer hover:bg-zinc-800 transition-all flex items-center justify-center gap-2",
+            "flex h-9 cursor-pointer items-center justify-center gap-2 rounded-full bg-[#1677ff] px-4 text-[13px] font-semibold text-white transition-all hover:bg-action-blue",
             isUploading && "pointer-events-none opacity-60",
           )}>
             <Upload size={14} />
@@ -1666,7 +1756,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const renderCustomerInfoChangeInput = (field: string) => {
     return (
       <div className={cn(
-        "space-y-4 rounded-[24px] border border-border-silver bg-canvas-white p-4",
+        "space-y-3 rounded-[16px] border border-black/[0.05] bg-white p-3",
         errors[field] && "border-rose-500",
       )}>
         {renderCustomerAttachmentInput(field, 'businessLicense', '营业执照')}
@@ -1747,7 +1837,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   const renderSupplierInfoChangeInput = (field: string) => {
     return (
       <div className={cn(
-        "space-y-4 rounded-[24px] border border-border-silver bg-canvas-white p-4",
+        "space-y-3 rounded-[16px] border border-black/[0.05] bg-white p-3",
         errors[field] && "border-rose-500",
       )}>
         {renderSupplierEditableTable(field, 'roleServices', '角色与服务', supplierRoleServiceColumns)}
@@ -1806,7 +1896,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
 
     return (
       <div className={cn(
-        "rounded-[24px] border border-border-silver bg-canvas-white overflow-hidden",
+        "rounded-[16px] border border-black/[0.05] bg-white overflow-hidden",
         errors[field] && "border-rose-500",
       )}>
         <div className="overflow-x-auto no-scrollbar">
@@ -1856,7 +1946,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
           添加报价明细
         </button>
 
-        <div className="px-4 py-4 border-t border-border-silver bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex flex-col justify-between gap-3 border-t border-border-silver bg-white px-4 py-4 sm:flex-row sm:items-center">
           <div className="min-w-0">
             <p className="text-[14px] font-bold text-midnight-graphite">报价附件</p>
             <p className="text-[12px] font-semibold text-light-gray mt-1 truncate">
@@ -1864,7 +1954,7 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
             </p>
           </div>
           <label className={cn(
-            "h-10 px-4 rounded-lg bg-black text-white text-[13px] font-bold cursor-pointer hover:bg-zinc-800 transition-all flex items-center justify-center gap-2",
+            "flex h-9 cursor-pointer items-center justify-center gap-2 rounded-full bg-[#1677ff] px-4 text-[13px] font-semibold text-white transition-all hover:bg-action-blue",
             isUploading && "pointer-events-none opacity-60",
           )}>
             <Upload size={14} />
@@ -2416,15 +2506,14 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     if (selectOptions.length > 0) {
+      const selectedValue = String(formData[field] || '');
+
       return (
         <div className="relative">
           <select
-            className={cn(
-              "input-field border-b border-border-silver pr-11 focus:border-interactive-blue transition-colors",
-              !formData[field] && "text-light-gray",
-              errors[field] && "border-rose-500"
-            )}
-            value={formData[field]}
+            className="absolute inset-0 z-10 h-12 w-full cursor-pointer opacity-0"
+            aria-label={field}
+            value={selectedValue}
             onChange={(event) => handleInputChange(field, event.target.value)}
           >
             <option value="">请选择{field}</option>
@@ -2432,7 +2521,20 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
               <option key={option} value={option}>{option}</option>
             ))}
           </select>
-          <ListChecks className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none" />
+          <div
+            className={cn(
+              "flex h-12 items-center justify-between border-b border-border-silver bg-white transition-colors focus-within:border-interactive-blue sm:bg-transparent",
+              errors[field] && "border-rose-500",
+            )}
+          >
+            <span className={cn(
+              "truncate text-[15px] font-medium",
+              selectedValue ? "text-midnight-graphite" : "text-light-gray",
+            )}>
+              {selectedValue || `请选择${field}`}
+            </span>
+            <ListChecks className="ml-3 h-4 w-4 shrink-0 text-light-silver" strokeWidth={2.2} />
+          </div>
         </div>
       );
     }
@@ -2456,15 +2558,14 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     if (isDepartmentField) {
+      const selectedDepartment = String(formData[field] || '');
+
       return (
         <div className="relative">
           <select
-            className={cn(
-              "input-field border-b border-border-silver pr-11 focus:border-interactive-blue transition-colors",
-              !formData[field] && "text-light-gray",
-              errors[field] && "border-rose-500"
-            )}
-            value={formData[field]}
+            className="absolute inset-0 z-10 h-12 w-full cursor-pointer opacity-0"
+            aria-label={field}
+            value={selectedDepartment}
             onChange={(event) => handleInputChange(field, event.target.value)}
           >
             <option value="">{organizationOptions.departments.length > 0 ? `请选择${field}` : '暂无可选部门'}</option>
@@ -2472,7 +2573,20 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
               <option key={department.id} value={department.name}>{department.name}</option>
             ))}
           </select>
-          <Building2 className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none" />
+          <div
+            className={cn(
+              "flex h-12 items-center justify-between border-b border-border-silver bg-white transition-colors focus-within:border-interactive-blue sm:bg-transparent",
+              errors[field] && "border-rose-500",
+            )}
+          >
+            <span className={cn(
+              "truncate text-[15px] font-medium",
+              selectedDepartment ? "text-midnight-graphite" : "text-light-gray",
+            )}>
+              {selectedDepartment || (organizationOptions.departments.length > 0 ? `请选择${field}` : '暂无可选部门')}
+            </span>
+            <Building2 className="ml-3 h-4 w-4 shrink-0 text-light-silver" strokeWidth={2.2} />
+          </div>
         </div>
       );
     }
@@ -2635,15 +2749,14 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     if (selectOptions.length > 0) {
+      const selectedValue = String(formData[field] || '');
+
       return (
         <div className="relative">
           <select
-            className={cn(
-              "input-field border-b border-border-silver focus:border-interactive-blue transition-colors",
-              !formData[field] && "text-light-gray",
-              errors[field] && "border-rose-500"
-            )}
-            value={formData[field] || ''}
+            className="absolute inset-0 z-10 h-12 w-full cursor-pointer opacity-0"
+            aria-label={field}
+            value={selectedValue}
             onChange={(event) => handleInputChange(field, event.target.value)}
           >
             <option value="">请选择{field}</option>
@@ -2651,7 +2764,20 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
               <option key={option} value={option}>{option}</option>
             ))}
           </select>
-          <ListChecks className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none" />
+          <div
+            className={cn(
+              "flex h-12 items-center justify-between border-b border-border-silver bg-white transition-colors focus-within:border-interactive-blue sm:bg-transparent",
+              errors[field] && "border-rose-500",
+            )}
+          >
+            <span className={cn(
+              "truncate text-[15px] font-medium",
+              selectedValue ? "text-midnight-graphite" : "text-light-gray",
+            )}>
+              {selectedValue || `请选择${field}`}
+            </span>
+            <ListChecks className="ml-3 h-4 w-4 shrink-0 text-light-silver" strokeWidth={2.2} />
+          </div>
         </div>
       );
     }
@@ -2675,15 +2801,14 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
     }
 
     if (isDepartmentField) {
+      const selectedDepartment = String(formData[field] || '');
+
       return (
         <div className="relative">
           <select
-            className={cn(
-              "input-field border-b border-border-silver focus:border-interactive-blue transition-colors",
-              !formData[field] && "text-light-gray",
-              errors[field] && "border-rose-500"
-            )}
-            value={formData[field] || ''}
+            className="absolute inset-0 z-10 h-12 w-full cursor-pointer opacity-0"
+            aria-label={field}
+            value={selectedDepartment}
             onChange={(event) => handleInputChange(field, event.target.value)}
           >
             <option value="">{organizationOptions.departments.length > 0 ? `请选择${field}` : '暂无部门可选'}</option>
@@ -2691,7 +2816,20 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
               <option key={department.id} value={department.name}>{department.name}</option>
             ))}
           </select>
-          <Building2 className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none" />
+          <div
+            className={cn(
+              "flex h-12 items-center justify-between border-b border-border-silver bg-white transition-colors focus-within:border-interactive-blue sm:bg-transparent",
+              errors[field] && "border-rose-500",
+            )}
+          >
+            <span className={cn(
+              "truncate text-[15px] font-medium",
+              selectedDepartment ? "text-midnight-graphite" : "text-light-gray",
+            )}>
+              {selectedDepartment || (organizationOptions.departments.length > 0 ? `请选择${field}` : '暂无部门可选')}
+            </span>
+            <Building2 className="ml-3 h-4 w-4 shrink-0 text-light-silver" strokeWidth={2.2} />
+          </div>
         </div>
       );
     }
@@ -2713,6 +2851,38 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
       );
     }
 
+    if (isDate || isDateTime) {
+      const pickerValue = String(formData[field] || '');
+      const displayValue = formatPickerDisplay(pickerValue, isDateTime);
+      const PickerIcon = isDateTime ? Clock3 : Calendar;
+
+      return (
+        <div className="relative">
+          <input
+            type={isDateTime ? 'datetime-local' : 'date'}
+            className="absolute inset-0 z-10 h-12 w-full cursor-pointer opacity-0"
+            aria-label={field}
+            value={pickerValue}
+            onChange={(event) => handleInputChange(field, event.target.value)}
+          />
+          <div
+            className={cn(
+              "flex h-12 items-center justify-between border-b border-border-silver bg-white transition-colors sm:bg-transparent",
+              errors[field] && "border-rose-500",
+            )}
+          >
+            <span className={cn(
+              "truncate text-[15px] font-medium",
+              displayValue ? "text-midnight-graphite" : "text-light-gray",
+            )}>
+              {displayValue || `请选择${field}`}
+            </span>
+            <PickerIcon className="ml-3 h-4 w-4 shrink-0 text-light-silver" strokeWidth={2.2} />
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="relative">
         <input
@@ -2728,8 +2898,8 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
           onChange={(e) => handleInputChange(field, e.target.value)}
         />
         {isNumeric && <DollarSign className="absolute right-4 top-1/2 -translate-y-1/2 text-light-silver w-4 h-4" />}
-        {isDate && <Calendar className="absolute right-4 top-1/2 -translate-y-1/2 text-light-silver w-4 h-4 pointer-events-none" />}
-        {isDateTime && <Clock3 className="absolute right-4 top-1/2 -translate-y-1/2 text-light-silver w-4 h-4 pointer-events-none" />}
+        {isDate && <Calendar className="absolute right-4 top-1/2 hidden h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none sm:block" />}
+        {isDateTime && <Clock3 className="absolute right-4 top-1/2 hidden h-4 w-4 -translate-y-1/2 text-light-silver pointer-events-none sm:block" />}
       </div>
     );
   };
@@ -2737,70 +2907,97 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4">
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={handleClose}
-            className="absolute inset-0 bg-midnight-graphite/40 backdrop-blur-md"
+            className="absolute inset-0 bg-black/25 backdrop-blur-sm sm:bg-midnight-graphite/40 sm:backdrop-blur-md"
           />
           <motion.div
             initial={{ opacity: 0, scale: 0.98, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.98, y: 20 }}
-            className="bg-pure-white w-full max-w-5xl relative flex flex-col max-h-[90vh] shadow-apple-xl overflow-hidden"
+            className="relative flex h-full w-full max-w-5xl flex-col overflow-hidden bg-[#f5f6fa] shadow-none sm:h-auto sm:max-h-[90vh] sm:rounded-[24px] sm:bg-pure-white sm:shadow-[0_16px_42px_rgba(20,24,34,0.14)]"
           >
-            <div className="px-10 py-8 border-b border-border-silver flex items-center justify-between">
-              <div className="flex items-center gap-4 font-display">
-                <Plus className="text-interactive-blue w-6 h-6" strokeWidth={3} />
-                <h2 className="text-[24px] font-bold text-midnight-graphite tracking-tight">申请初始化</h2>
+            <div className="relative flex h-[54px] items-center justify-center border-b border-black/[0.035] bg-white/95 px-12 py-0 text-center backdrop-blur-xl sm:h-auto sm:justify-between sm:border-border-silver sm:bg-pure-white sm:px-10 sm:py-8 sm:text-left">
+              <div className="flex min-w-0 items-center gap-2 font-display sm:gap-3">
+                <div className="hidden h-8 w-8 items-center justify-center rounded-[11px] bg-[#f1f6ff] text-[#1677ff] sm:flex sm:h-auto sm:w-auto sm:bg-transparent sm:text-interactive-blue">
+                  <Plus className="w-4 h-4 sm:h-6 sm:w-6" strokeWidth={2.6} />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="truncate text-[16px] font-semibold text-midnight-graphite tracking-tight sm:text-[24px] sm:font-black">
+                    {step === 3 && selectedType ? selectedType.name : '发起提交'}
+                  </h2>
+                  <p className="mt-0.5 truncate text-[10.5px] font-medium text-[#9a9da6] sm:hidden">
+                    {step === 3 ? '自动保存草稿' : '选择审批表单'}
+                  </p>
+                </div>
               </div>
-              <button onClick={handleClose} className="w-10 h-10 flex items-center justify-center hover:bg-lightest-gray-background rounded-full transition-all text-medium-gray">
-                <X size={20} strokeWidth={2} />
+              <button onClick={handleClose} className="absolute right-3 top-1/2 flex h-8 w-8 shrink-0 -translate-y-1/2 items-center justify-center rounded-full bg-[#f1f2f4] text-medium-gray transition-all hover:bg-lightest-gray-background sm:static sm:translate-y-0 sm:bg-transparent">
+                <X size={17} strokeWidth={2.2} />
               </button>
             </div>
 
-            <div className="px-10 py-6 flex items-center gap-6 border-b border-border-silver bg-canvas-white overflow-x-auto no-scrollbar">
-              <div className={cn("flex items-center gap-2 shrink-0", step >= 1 ? "text-interactive-blue" : "text-light-gray")}>
-                <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold border-2", step >= 1 ? "border-interactive-blue" : "border-light-gray")}>1</span>
-                <span className="text-[13px] font-semibold whitespace-nowrap">模块选择</span>
+            <div className={cn(
+              "relative flex items-center justify-between overflow-hidden border-b border-black/[0.035] bg-white/92 px-8 py-2.5 no-scrollbar sm:gap-6 sm:border-border-silver sm:bg-canvas-white sm:px-10 sm:py-6",
+              step === 3 && "hidden sm:flex",
+            )}>
+              <div className="absolute inset-x-8 bottom-0 h-px bg-black/[0.04] sm:hidden">
+                <span
+                  className={cn(
+                    "block h-full rounded-full bg-midnight-graphite transition-all",
+                    step === 1 && "w-1/3",
+                    step === 2 && "w-2/3",
+                    step >= 3 && "w-full",
+                  )}
+                />
               </div>
-              <div className="w-8 h-px bg-border-silver shrink-0" />
-              <div className={cn("flex items-center gap-2 shrink-0", step >= 2 ? "text-interactive-blue" : "text-light-gray")}>
-                <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold border-2", step >= 2 ? "border-interactive-blue" : "border-light-gray")}>2</span>
-                <span className="text-[13px] font-semibold whitespace-nowrap">业务类型</span>
+              <div className={cn("flex shrink-0 items-center gap-1.5", step >= 1 ? "text-midnight-graphite" : "text-light-gray")}>
+                <span className={cn("hidden h-5 w-5 items-center justify-center rounded-full border text-[10px] font-bold sm:flex", step >= 1 ? "border-midnight-graphite" : "border-light-gray")}>1</span>
+                <span className={cn("text-[12px] font-semibold whitespace-nowrap sm:text-[13px]", step === 1 ? "text-midnight-graphite" : "")}>模块</span>
               </div>
-              <div className="w-8 h-px bg-border-silver shrink-0" />
-              <div className={cn("flex items-center gap-2 shrink-0", step >= 3 ? "text-interactive-blue" : "text-light-gray")}>
-                <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold border-2", step >= 3 ? "border-interactive-blue" : "border-light-gray")}>3</span>
-                <span className="text-[13px] font-semibold whitespace-nowrap">信息录入</span>
+              <div className="hidden h-px flex-1 max-w-7 shrink bg-border-silver sm:block" />
+              <div className={cn("flex shrink-0 items-center gap-1.5", step >= 2 ? "text-midnight-graphite" : "text-light-gray")}>
+                <span className={cn("hidden h-5 w-5 items-center justify-center rounded-full border text-[10px] font-bold sm:flex", step >= 2 ? "border-midnight-graphite" : "border-light-gray")}>2</span>
+                <span className={cn("text-[12px] font-semibold whitespace-nowrap sm:text-[13px]", step === 2 ? "text-midnight-graphite" : "")}>类型</span>
+              </div>
+              <div className="hidden h-px flex-1 max-w-7 shrink bg-border-silver sm:block" />
+              <div className={cn("flex shrink-0 items-center gap-1.5", step >= 3 ? "text-midnight-graphite" : "text-light-gray")}>
+                <span className={cn("hidden h-5 w-5 items-center justify-center rounded-full border text-[10px] font-bold sm:flex", step >= 3 ? "border-midnight-graphite" : "border-light-gray")}>3</span>
+                <span className={cn("text-[12px] font-semibold whitespace-nowrap sm:text-[13px]", step === 3 ? "text-midnight-graphite" : "")}>填写</span>
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-10 py-12 min-h-[400px]">
+            <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto bg-[#f5f6fa] px-4 py-3 sm:min-h-[400px] sm:bg-transparent sm:px-10 sm:py-12">
               {step === 1 && (
-                <div className="space-y-4">
-                  <p className="text-[14px] font-semibold text-medium-gray mb-6">选择目标业务模块</p>
-                  <div className="grid grid-cols-1 gap-3">
-                    {visibleModules.map(module => (
-                      <button
-                        key={module.name}
-                        onClick={() => handleModuleSelect(module)}
-                        className="flex items-center justify-between p-6 bg-canvas-white rounded-apple-img hover:bg-lightest-gray-background transition-all group border border-transparent hover:border-border-silver"
-                      >
-                        <div className="flex items-center gap-6">
-                          <div className="w-12 h-12 rounded-full bg-pure-white flex items-center justify-center shadow-sm text-midnight-graphite">
-                            <FileText size={20} strokeWidth={2} />
+                <div className="space-y-3.5">
+                  <p className="px-0.5 text-[13px] font-semibold text-medium-gray">选择目标业务模块</p>
+                  <div className="overflow-hidden rounded-[18px] border border-black/[0.03] bg-white shadow-[0_1px_1px_rgba(16,24,40,0.018)] sm:grid sm:grid-cols-1 sm:gap-3 sm:overflow-visible sm:rounded-none sm:border-0 sm:bg-transparent sm:shadow-none">
+                    {visibleModules.map((module, index) => {
+                      const moduleVisual = getModuleVisual(module.name, index);
+                      const ModuleIcon = moduleVisual.Icon;
+
+                      return (
+                        <button
+                          key={module.name}
+                          onClick={() => handleModuleSelect(module)}
+                          className="group flex w-full items-center justify-between border-b border-black/[0.045] bg-white px-3.5 py-3.5 text-left transition-all last:border-b-0 hover:bg-lightest-gray-background sm:rounded-apple-img sm:border-transparent sm:bg-canvas-white sm:p-6 sm:shadow-none sm:hover:border-border-silver"
+                        >
+                          <div className="flex min-w-0 items-center gap-3 sm:gap-6">
+                            <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] sm:h-12 sm:w-12 sm:rounded-full sm:shadow-sm", moduleVisual.tone)}>
+                              <ModuleIcon size={17} strokeWidth={2.25} />
+                            </div>
+                            <div className="flex min-w-0 flex-col items-start">
+                              <span className="truncate text-[15px] font-semibold text-midnight-graphite tracking-tight">{module.name}</span>
+                              <span className="text-[11px] font-medium text-light-gray">{module.approvalTypes.length} 个可发起表单</span>
+                            </div>
                           </div>
-                          <div className="flex flex-col items-start">
-                            <span className="text-[18px] font-bold text-midnight-graphite tracking-tight">{module.name}</span>
-                            <span className="text-[13px] font-medium text-light-gray">系统功能分类</span>
-                          </div>
-                        </div>
-                        <ChevronRight size={18} strokeWidth={2} className="text-light-silver group-hover:text-interactive-blue transition-colors" />
-                      </button>
-                    ))}
+                          <ChevronRight size={17} strokeWidth={2.1} className="shrink-0 text-light-silver transition-colors group-hover:text-midnight-graphite" />
+                        </button>
+                      );
+                    })}
                     {visibleModules.length === 0 && (
                       <div className="rounded-2xl border border-border-silver bg-canvas-white p-8 text-center text-[13px] font-bold text-medium-gray">
                         暂无可发起的审批表单
@@ -2811,32 +3008,68 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
               )}
 
               {step === 2 && selectedModule && (
-                <div className="space-y-8 animate-in slide-in-from-right duration-500">
-                  <div className="flex flex-col gap-1">
-                    <p className="text-[14px] font-semibold text-medium-gray underline decoration-interactive-blue/30 underline-offset-4 decoration-2">已选模块：{selectedModule.name}</p>
-                    <h3 className="text-[28px] font-bold text-midnight-graphite tracking-tight">业务类型选择</h3>
+                <div className="space-y-3.5 animate-in slide-in-from-right duration-500">
+                  <div className="flex items-center justify-between gap-3 px-0.5">
+                    <div className="min-w-0">
+                      <p className="text-[12px] font-medium text-medium-gray">已选模块：{selectedModule.name}</p>
+                      <h3 className="mt-0.5 text-[17px] font-semibold text-midnight-graphite tracking-tight">业务类型</h3>
+                    </div>
+                    <button onClick={() => setStep(1)} className="shrink-0 rounded-full bg-white px-3 py-1.5 text-[12px] font-semibold text-action-blue ring-1 ring-black/[0.035]">重选</button>
                   </div>
-                  <div className="grid grid-cols-1 gap-3">
-                    {selectedModule.approvalTypes.map(type => (
-                      <button
-                        key={type.name}
-                        onClick={() => handleTypeSelect(type)}
-                        className="flex items-center justify-between p-6 bg-canvas-white rounded-apple-img hover:bg-lightest-gray-background transition-all group border border-transparent hover:border-border-silver"
-                      >
-                        <span className="text-[18px] font-bold text-midnight-graphite tracking-tight">{type.name}</span>
-                        <ChevronRight size={18} strokeWidth={2} className="text-light-silver group-hover:text-interactive-blue transition-colors" />
-                      </button>
-                    ))}
+                  <div className="overflow-hidden rounded-[18px] border border-black/[0.03] bg-white shadow-[0_1px_1px_rgba(16,24,40,0.018)] sm:overflow-visible sm:rounded-none sm:border-0 sm:bg-transparent sm:shadow-none">
+                    <div className="grid grid-cols-4 gap-x-1 gap-y-3 px-2.5 py-3 sm:hidden">
+                      {selectedModule.approvalTypes.map((type, index) => {
+                        const typeVisual = getApprovalTypeVisual(type.name, selectedModule.name, index);
+                        const TypeIcon = typeVisual.Icon;
+
+                        return (
+                          <button
+                            key={type.name}
+                            onClick={() => handleTypeSelect(type)}
+                            className="flex min-h-[76px] min-w-0 flex-col items-center justify-start gap-1.5 rounded-[14px] px-1 py-2 text-center transition-all active:bg-[#f6f7fb] active:scale-[0.98]"
+                          >
+                            <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-[13px]", typeVisual.tone)}>
+                              <TypeIcon size={19} strokeWidth={2.25} />
+                            </span>
+                            <span className="line-clamp-2 min-h-[28px] text-[11.5px] font-medium leading-[14px] text-midnight-graphite">
+                              {type.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="hidden sm:grid sm:grid-cols-1 sm:gap-3">
+                      {selectedModule.approvalTypes.map((type, index) => {
+                        const typeVisual = getApprovalTypeVisual(type.name, selectedModule.name, index);
+                        const TypeIcon = typeVisual.Icon;
+
+                        return (
+                          <button
+                            key={type.name}
+                            onClick={() => handleTypeSelect(type)}
+                            className="group flex w-full items-center justify-between rounded-apple-img border border-transparent bg-canvas-white p-6 text-left transition-all hover:border-border-silver hover:bg-lightest-gray-background"
+                          >
+                            <span className="flex min-w-0 items-center gap-4">
+                              <span className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px]", typeVisual.tone)}>
+                                <TypeIcon size={20} strokeWidth={2.25} />
+                              </span>
+                              <span className="truncate text-[15px] font-semibold text-midnight-graphite tracking-tight">{type.name}</span>
+                            </span>
+                            <ChevronRight size={17} strokeWidth={2} className="shrink-0 text-light-silver transition-colors group-hover:text-midnight-graphite" />
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <button onClick={() => setStep(1)} className="text-[14px] font-semibold text-action-blue hover:underline mt-8">← 返回修改模块</button>
                 </div>
               )}
 
               {step === 3 && selectedType && (
-                <form onSubmit={handleSubmit} className="space-y-12 animate-in slide-in-from-right duration-500">
-                  <div className="p-8 bg-midnight-graphite rounded-apple-img shadow-apple-xl">
-                    <p className="text-[13px] font-semibold text-light-gray/60 uppercase tracking-widest mb-2">当前路径</p>
-                    <p className="text-[21px] font-bold text-pure-white tracking-tight">
+                <form onSubmit={handleSubmit} className="space-y-3 pb-20 animate-in slide-in-from-right duration-500 sm:space-y-12 sm:pb-0">
+                  <div className="mj-mobile-card-soft px-3.5 py-2.5 sm:rounded-apple-img sm:p-8 sm:shadow-[0_10px_28px_rgba(20,24,34,0.1)] sm:ring-0">
+                    <p className="mb-1 text-[10.5px] font-medium text-light-gray">当前审批</p>
+                    <p className="text-[15px] font-semibold text-midnight-graphite tracking-tight">
                       {selectedModule?.name} / {selectedType.name}
                     </p>
                   </div>
@@ -2866,10 +3099,10 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
                     }}
                   />
 
-                  <div className="grid grid-cols-1 gap-10">
+                  <div className="mj-mobile-card mj-mobile-form-list overflow-hidden px-4 py-0 sm:grid sm:grid-cols-1 sm:gap-10 sm:bg-transparent sm:p-0 sm:shadow-none sm:ring-0">
                     {selectedType.businessFields.map(field => (
-                      <div key={field} className="space-y-3">
-                        <label className="text-[15px] font-semibold text-midnight-graphite ml-1">
+                      <div key={field} className="border-b border-black/[0.04] py-3 last:border-b-0 sm:space-y-3 sm:border-b-0 sm:py-0">
+                        <label className="text-[14.5px] font-semibold text-midnight-graphite sm:text-[14px]">
                           {!isConfiguredOptionalField(selectedType, field) && (
                             <span className="mr-1 align-middle text-rose-500">*</span>
                           )}
@@ -2877,22 +3110,22 @@ export default function CreateApprovalModal({ isOpen, onClose, onSuccess }: Crea
                         </label>
                         {renderFieldInput(field)}
                         {errors[field] && (
-                          <p className="text-[13px] text-rose-500 font-medium ml-1">{errors[field]}</p>
+                          <p className="ml-1 text-[12px] font-medium text-rose-500">{errors[field]}</p>
                         )}
                       </div>
                     ))}
                   </div>
 
-                  <div className="pt-10 flex flex-col gap-4">
+                  <div className="sticky bottom-0 z-20 -mx-4 mt-1 flex flex-col gap-2 border-t border-black/[0.035] bg-white/94 px-4 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-2.5 shadow-[0_-6px_16px_rgba(20,24,34,0.026)] backdrop-blur-xl sm:static sm:mx-0 sm:gap-4 sm:border-t-0 sm:bg-transparent sm:px-0 sm:py-0 sm:pt-10 sm:shadow-none sm:backdrop-blur-none">
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="btn-primary w-full h-[52px] text-[17px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
+                      className="btn-primary h-[46px] w-full text-[15px] font-semibold shadow-[0_5px_12px_rgba(0,113,227,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {isSubmitting && <Loader2 size={18} className="animate-spin" />}
-                      确认初始化流程
+                      提交
                     </button>
-                    <button type="button" onClick={() => setStep(2)} className="h-[52px] w-full text-[15px] font-semibold text-medium-gray hover:text-midnight-graphite">
+                    <button type="button" onClick={() => setStep(2)} className="h-8 w-full text-[12px] font-semibold text-medium-gray hover:text-midnight-graphite sm:h-10 sm:text-[13px]">
                       返回并重选类型
                     </button>
                   </div>

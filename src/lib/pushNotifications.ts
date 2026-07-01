@@ -1,4 +1,5 @@
 import { storage } from '../storage';
+import { type ApprovalNotification } from '../types';
 
 type ApprovalPushStatus =
   | 'unsupported'
@@ -24,22 +25,34 @@ type NavigatorWithBadging = Navigator & {
   clearAppBadge?: () => Promise<void>;
 };
 
+const notificationIconUrl = '/icons/icon-192.png';
+
 function isIosLikeDevice() {
+  if (typeof navigator === 'undefined') return false;
   const navigatorWithTouch = navigator as Navigator & { maxTouchPoints?: number };
   return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && Number(navigatorWithTouch.maxTouchPoints || 0) > 1);
 }
 
 function isStandaloneWebApp() {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
   return window.matchMedia('(display-mode: standalone)').matches ||
     (navigator as NavigatorWithStandalone).standalone === true;
 }
 
 function getEnvironmentIssue(): ApprovalPushState | null {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return {
+      status: 'unsupported',
+      message: '当前浏览器环境不支持电脑/手机系统通知。',
+      canEnable: false,
+    };
+  }
+
   if (!window.isSecureContext) {
     return {
       status: 'unsupported',
-      message: '手机系统通知需要 HTTPS 域名，当前地址不能开启。',
+      message: '电脑/手机系统通知需要 HTTPS 域名，当前地址不能开启。',
       canEnable: false,
     };
   }
@@ -95,6 +108,56 @@ export async function setApprovalAppBadge(unreadCount: number) {
   }
 }
 
+function getNotificationLaunchUrl(notification: ApprovalNotification) {
+  let path = '/work/requests';
+  if (notification.type === 'approval_pending') path = '/work/approvals';
+  if (notification.type === 'approval_processing') path = '/work/processing';
+  if (notification.type === 'approval_cc') path = '/work/cc';
+
+  const params = new URLSearchParams();
+  if (notification.id) params.set('notificationId', notification.id);
+  if (notification.recordId) params.set('recordId', notification.recordId);
+  if (notification.type) params.set('type', notification.type);
+
+  const search = params.toString();
+  return search ? `${path}?${search}` : path;
+}
+
+export function canShowBrowserNotification() {
+  return typeof window !== 'undefined'
+    && 'Notification' in window
+    && Notification.permission === 'granted';
+}
+
+export function showForegroundApprovalNotification(notification: ApprovalNotification) {
+  if (!canShowBrowserNotification()) return false;
+
+  try {
+    const browserNotification = new Notification(notification.title || 'MJ 审批中心', {
+      body: notification.message || '你有新的审批通知',
+      icon: notificationIconUrl,
+      tag: `approval-foreground-${notification.id}`,
+      data: {
+        url: getNotificationLaunchUrl(notification),
+        notificationId: notification.id,
+        recordId: notification.recordId,
+        type: notification.type,
+      },
+    });
+
+    browserNotification.onclick = () => {
+      window.focus();
+      const targetUrl = browserNotification.data?.url || getNotificationLaunchUrl(notification);
+      window.location.assign(targetUrl);
+      browserNotification.close();
+    };
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function getPushConfigState() {
   const config = await storage.getPushConfig();
 
@@ -135,14 +198,14 @@ export async function readApprovalPushState(): Promise<ApprovalPushState> {
       await storage.savePushSubscription(subscription.toJSON());
       return {
         status: 'enabled',
-        message: '手机系统通知已开启。',
+        message: '电脑/手机系统通知已开启。',
         canEnable: false,
       };
     }
 
     return {
       status: 'disabled',
-      message: '开启后，新审批、待办、抄送和审批结果会推送到手机。',
+      message: '开启后，新审批、待办、抄送和审批结果会弹出系统通知。',
       canEnable: true,
     };
   } catch (error) {
@@ -197,13 +260,13 @@ export async function enableApprovalPushNotifications(): Promise<ApprovalPushSta
 
     return {
       status: 'enabled',
-      message: '已开启，之后有新的审批通知会推送到手机。',
+      message: '已开启，之后有新的审批通知会弹出系统通知。',
       canEnable: false,
     };
   } catch (error) {
     return {
       status: 'error',
-      message: error instanceof Error ? error.message : '开启手机通知失败。',
+      message: error instanceof Error ? error.message : '开启系统通知失败。',
       canEnable: true,
     };
   }
@@ -224,13 +287,13 @@ export async function disableApprovalPushNotifications(): Promise<ApprovalPushSt
 
     return {
       status: 'disabled',
-      message: '已关闭这台设备的手机系统通知。',
+      message: '已关闭这台设备的系统通知。',
       canEnable: true,
     };
   } catch (error) {
     return {
       status: 'error',
-      message: error instanceof Error ? error.message : '关闭手机通知失败。',
+      message: error instanceof Error ? error.message : '关闭系统通知失败。',
       canEnable: true,
     };
   }
